@@ -1,6 +1,7 @@
 use std::sync::{Arc, Mutex};
 use std::thread;
-use rs_store::{Store, Reducer, Subscriber};
+
+use rs_store::{Reducer, Store, Subscriber};
 
 #[derive(Debug)]
 enum CalcAction {
@@ -8,16 +9,13 @@ enum CalcAction {
     Subtract(i32),
 }
 
-
 struct CalcReducer {}
-
 
 impl Default for CalcReducer {
     fn default() -> CalcReducer {
         CalcReducer {}
     }
 }
-
 
 #[derive(Debug, Clone)]
 struct CalcState {
@@ -82,15 +80,24 @@ pub fn main() {
     let dispatcher = thread::spawn(move || {
         for action in rx {
             let new_state = dispatch_store.lock().unwrap().do_reduce(&action);
-            dispatch_store.lock().unwrap().do_notify(&new_state, &action);
+            dispatch_store
+                .lock()
+                .unwrap()
+                .do_notify(&new_state, &action);
         }
     });
 
-    tx_store.lock().unwrap().add_subscriber(Box::new(CalcSubscriber::default()));
+    tx_store
+        .lock()
+        .unwrap()
+        .add_subscriber(Box::new(CalcSubscriber::default()));
     tx_store.lock().unwrap().dispatch(CalcAction::Add(1));
 
     thread::sleep(std::time::Duration::from_secs(1));
-    tx_store.lock().unwrap().add_subscriber(Box::new(CalcSubscriber::default()));
+    tx_store
+        .lock()
+        .unwrap()
+        .add_subscriber(Box::new(CalcSubscriber::default()));
     tx_store.lock().unwrap().dispatch(CalcAction::Subtract(1));
     tx_store.lock().unwrap().close();
 

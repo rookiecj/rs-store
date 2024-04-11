@@ -17,6 +17,8 @@ example-calc:	## example calc
 example-calc_fn:	## example calc_fn
 	cargo run --bin calc_fn
 
+example:	## example
+	cargo run --bin calc_fn_basic
 
 publish: build	## publish
 	#cargo login
