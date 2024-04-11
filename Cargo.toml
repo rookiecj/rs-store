@@ -11,5 +11,9 @@ once_cell = "1.19.0"
 
 
 [[bin]]
-name = "example"
+name = "calc"
 path = "src/example/calc.rs"
+
+[[bin]]
+name = "calc_fn"
+path = "src/example/calc_fn.rs"

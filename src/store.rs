@@ -17,15 +17,6 @@ pub trait Reducer<State, Action>
         Action: Send + Sync,
 {
     fn reduce(&self, state: &State, action: &Action) -> State;
-
-    /// <https://doc.rust-lang.org/book/ch10-02-traits.html>
-    #[allow(clippy::all)]
-    fn new() -> Box<dyn Reducer<State, Action> + Send + Sync>
-        where
-            Self: Default + Sized + Sync + Send + 'static,
-    {
-        Box::new(Self::default())
-    }
 }
 
 pub trait Subscriber<State, Action>
@@ -34,15 +25,6 @@ pub trait Subscriber<State, Action>
         Action: Send + Sync,
 {
     fn notify(&self, state: &State, action: &Action);
-
-    /// <https://doc.rust-lang.org/book/ch10-02-traits.html>
-    #[allow(clippy::all)]
-    fn new() -> Box<dyn Subscriber<State, Action> + Send + Sync>
-        where
-            Self: Default + Sized + Sync + Send + 'static,
-    {
-        Box::new(Self::default())
-    }
 }
 
 pub struct Store<State, Action>
