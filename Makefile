@@ -19,5 +19,5 @@ example-calc_fn:	## example calc_fn
 
 
 publish: build	## publish
-	cargo login
+	#cargo login
 	cargo publish
