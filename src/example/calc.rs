@@ -75,7 +75,6 @@ pub fn main() {
 
     let mut store = Store::<CalcState, CalcAction>::default();
     store.reducers.push(Box::new(CalcReducer::default()));
-    store.subscribers.push(Box::new(CalcSubscriber::default()));
     let (tx, rx) = std::sync::mpsc::channel::<CalcAction>();
     store.tx = Some(tx);
     let dispatch_store = Arc::new(Mutex::new(store));
@@ -87,7 +86,11 @@ pub fn main() {
         }
     });
 
+    tx_store.lock().unwrap().add_subscriber(Box::new(CalcSubscriber::default()));
     tx_store.lock().unwrap().dispatch(CalcAction::Add(1));
+
+    thread::sleep(std::time::Duration::from_secs(1));
+    tx_store.lock().unwrap().add_subscriber(Box::new(CalcSubscriber::default()));
     tx_store.lock().unwrap().dispatch(CalcAction::Subtract(1));
     tx_store.lock().unwrap().close();
 
