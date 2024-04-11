@@ -1,6 +1,6 @@
 use std::sync::{Arc, Mutex};
 use std::thread;
-use store_rs::{Store, Reducer, Subscriber};
+use rs_store::{Store, Reducer, Subscriber};
 
 #[derive(Debug)]
 enum CalcAction {

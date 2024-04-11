@@ -1,3 +1,3 @@
-# store-rs
+# rs-store
 Redux Store for Rust
 

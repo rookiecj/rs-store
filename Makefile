@@ -8,6 +8,9 @@ help:  ## show this help
 build:
 	cargo build --lib
 
+clean:
+	cargo clean
+
 example-calc:	## example calc
 	cargo run --bin calc
 
