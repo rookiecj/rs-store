@@ -70,7 +70,7 @@ impl<State, Action> Store<State, Action>
     pub fn wait_for(store: Arc<Mutex<Store<State, Action>>>) -> Result<(), StoreError> {
         // lock/unlock the store to get the handle
         let handle = store.lock().unwrap().take();
-        // now safely join the handle
+        // now safely join the handle without deadlock
         match handle {
             Some(handle) => handle.join().map_err(|e| StoreError::CloseError {
                 inner: "join error".to_string(),

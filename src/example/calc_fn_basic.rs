@@ -66,7 +66,8 @@ pub fn main() {
 
     // it should be called to close the store
     store.lock().unwrap().close();
-    // wait for the store to close
+    
+    // if you want to wait for the store to close
     Store::wait_for(store.clone()).unwrap_or_else(|e| {
         println!("Error: {:?}", e);
     });
