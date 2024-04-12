@@ -1,0 +1,16 @@
+# https://rust-lang.github.io/rustfmt/
+
+reorder_imports = true
+reorder_modules = true
+
+
+# width
+max_width = 100
+chain_width = 100 # percent of max_width
+fn_call_width = 60  # percent of max_width
+fn_params_layout = "Tall"
+fn_single_line = true
+
+trailing_comma = "Vertical"
+empty_item_single_line = true
+trailing_semicolon = true

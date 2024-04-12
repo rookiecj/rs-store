@@ -8,7 +8,6 @@ enum CalcAction {
     Subtract(i32),
 }
 
-
 #[derive(Debug, Clone)]
 struct CalcState {
     count: i32,
@@ -20,9 +19,7 @@ impl Default for CalcState {
     }
 }
 
-
-fn calc_reducer(state: &CalcState, action: &CalcAction) -> CalcState
-{
+fn calc_reducer(state: &CalcState, action: &CalcAction) -> CalcState {
     match action {
         CalcAction::Add(i) => {
             println!("CalcReducer::reduce: + {}", i);
@@ -38,7 +35,6 @@ fn calc_reducer(state: &CalcState, action: &CalcAction) -> CalcState
         }
     }
 }
-
 
 fn calc_subscriber(state: &CalcState, action: &CalcAction) {
     match action {
@@ -66,7 +62,7 @@ pub fn main() {
 
     // it should be called to close the store
     store.lock().unwrap().close();
-    
+
     // if you want to wait for the store to close
     Store::wait_for(store).unwrap_or_else(|e| {
         println!("Error: {:?}", e);

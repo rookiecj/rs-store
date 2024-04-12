@@ -1,13 +1,12 @@
+use rs_store::{FnReducer, FnSubscriber, Store};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use rs_store::{Store, FnReducer, FnSubscriber};
 
 #[derive(Debug)]
 enum CalcAction {
     Add(i32),
     Subtract(i32),
 }
-
 
 #[derive(Debug, Clone)]
 struct CalcState {
@@ -20,9 +19,7 @@ impl Default for CalcState {
     }
 }
 
-
-fn calc_reducer(state: &CalcState, action: &CalcAction) -> CalcState
-{
+fn calc_reducer(state: &CalcState, action: &CalcAction) -> CalcState {
     match action {
         CalcAction::Add(i) => {
             println!("CalcReducer::reduce: + {}", i);
@@ -38,7 +35,6 @@ fn calc_reducer(state: &CalcState, action: &CalcAction) -> CalcState
         }
     }
 }
-
 
 fn calc_subscriber(state: &CalcState, action: &CalcAction) {
     match action {

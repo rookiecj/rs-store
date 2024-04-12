@@ -63,10 +63,16 @@ impl Subscriber<CalcState, CalcAction> for CalcSubscriber {
         if self.last.count != state.count {
             match action {
                 CalcAction::Add(i) => {
-                    println!("CalcSubscriber::notify: state:{:?} <- last {:?} + action:{}", state, self.last, i);
+                    println!(
+                        "CalcSubscriber::notify: state:{:?} <- last {:?} + action:{}",
+                        state, self.last, i
+                    );
                 }
                 CalcAction::Subtract(i) => {
-                    println!("CalcSubscriber::notify: state:{:?} <- last {:?} - action:{}", state, self.last, i);
+                    println!(
+                        "CalcSubscriber::notify: state:{:?} <- last {:?} - action:{}",
+                        state, self.last, i
+                    );
                 }
             }
         }
@@ -81,17 +87,11 @@ pub fn main() {
     let store = Store::<CalcState, CalcAction>::new();
     store.lock().unwrap().add_reducer(Box::new(CalcReducer::default()));
 
-    store
-        .lock()
-        .unwrap()
-        .add_subscriber(Box::new(CalcSubscriber::default()));
+    store.lock().unwrap().add_subscriber(Box::new(CalcSubscriber::default()));
     store.lock().unwrap().dispatch(CalcAction::Add(1));
 
     thread::sleep(std::time::Duration::from_secs(1));
-    store
-        .lock()
-        .unwrap()
-        .add_subscriber(Box::new(CalcSubscriber::default()));
+    store.lock().unwrap().add_subscriber(Box::new(CalcSubscriber::default()));
     store.lock().unwrap().dispatch(CalcAction::Subtract(1));
 
     // it should be called to close the store\

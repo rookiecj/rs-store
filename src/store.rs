@@ -16,25 +16,25 @@ pub enum StoreError {
 }
 
 pub trait Reducer<State, Action>
-    where
-        State: Default + Send + Sync + Clone,
-        Action: Send + Sync,
+where
+    State: Default + Send + Sync + Clone,
+    Action: Send + Sync,
 {
     fn reduce(&self, state: &State, action: &Action) -> State;
 }
 
 pub trait Subscriber<State, Action>
-    where
-        State: Default + Send + Sync + Clone,
-        Action: Send + Sync,
+where
+    State: Default + Send + Sync + Clone,
+    Action: Send + Sync,
 {
     fn notify(&mut self, state: &State, action: &Action);
 }
 
 pub struct Store<State, Action>
-    where
-        State: Default + Send + Sync + Clone,
-        Action: Send + Sync,
+where
+    State: Default + Send + Sync + Clone,
+    Action: Send + Sync,
 {
     pub state: State,
     pub reducers: Vec<Box<dyn Reducer<State, Action> + Send + Sync>>,
@@ -44,9 +44,9 @@ pub struct Store<State, Action>
 }
 
 impl<State, Action> Default for Store<State, Action>
-    where
-        State: Default + Send + Sync + Clone,
-        Action: Send + Sync,
+where
+    State: Default + Send + Sync + Clone,
+    Action: Send + Sync,
 {
     fn default() -> Store<State, Action> {
         Store {
@@ -60,9 +60,9 @@ impl<State, Action> Default for Store<State, Action>
 }
 
 impl<State, Action> Store<State, Action>
-    where
-        State: Default + Send + Sync + Clone + 'static,
-        Action: Send + Sync + 'static,
+where
+    State: Default + Send + Sync + Clone + 'static,
+    Action: Send + Sync + 'static,
 {
     pub fn new() -> Arc<Mutex<Store<State, Action>>> {
         Self::new_with_state(Default::default())
@@ -112,7 +112,6 @@ impl<State, Action> Store<State, Action>
         tx_store
     }
 
-
     pub fn add_reducer(&mut self, reducer: Box<dyn Reducer<State, Action> + Send + Sync>) {
         self.reducers.push(reducer);
     }
@@ -156,7 +155,6 @@ impl<State, Action> Store<State, Action>
         // deadlock
         return self.dispacher.take();
     }
-
 }
 
 #[cfg(test)]
