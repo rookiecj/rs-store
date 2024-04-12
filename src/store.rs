@@ -73,7 +73,7 @@ impl<State, Action> Store<State, Action>
         let handle = store.lock().unwrap().take();
         // now safely join the handle without deadlock
         match handle {
-            Some(handle) => handle.join().map_err(|e| StoreError::CloseError {
+            Some(handle) => handle.join().map_err(|_| StoreError::CloseError {
                 inner: "join error".to_string(),
             }),
             None => Err(StoreError::CloseError {
@@ -86,7 +86,7 @@ impl<State, Action> Store<State, Action>
         // create a channel
         // and start a thread in which the store will listen for actions
         let (tx, rx) = std::sync::mpsc::channel::<Action>();
-        let mut store = Store {
+        let store = Store {
             state,
             reducers: Vec::default(),
             subscribers: RefCell::new(Vec::default()),

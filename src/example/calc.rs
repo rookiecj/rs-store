@@ -56,7 +56,7 @@ impl Default for CalcSubscriber {
 }
 
 impl Subscriber<CalcState, CalcAction> for CalcSubscriber {
-    fn notify(&self, state: &CalcState, action: &CalcAction) {
+    fn notify(&mut self, state: &CalcState, action: &CalcAction) {
         match action {
             CalcAction::Add(i) => {
                 println!("CalcSubscriber::notify: state:{:?}, action:{}", state, i);

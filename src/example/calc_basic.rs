@@ -1,4 +1,3 @@
-use std::sync::{Arc, Mutex};
 use std::thread;
 
 use rs_store::{Reducer, Store, Subscriber};
@@ -79,7 +78,7 @@ impl Subscriber<CalcState, CalcAction> for CalcSubscriber {
 pub fn main() {
     println!("Hello, Calc!");
 
-    let mut store = Store::<CalcState, CalcAction>::new();
+    let store = Store::<CalcState, CalcAction>::new();
     store.lock().unwrap().add_reducer(Box::new(CalcReducer::default()));
 
     store
@@ -99,7 +98,7 @@ pub fn main() {
     store.lock().unwrap().close();
 
     // if you want to wait for the store to close
-    Store::wait_for(store.clone()).unwrap_or_else(|e| {
+    Store::wait_for(store).unwrap_or_else(|e| {
         println!("Error: {:?}", e);
     });
 }
