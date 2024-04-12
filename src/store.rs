@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -27,7 +28,7 @@ pub trait Subscriber<State, Action>
         State: Default + Send + Sync + Clone,
         Action: Send + Sync,
 {
-    fn notify(&self, state: &State, action: &Action);
+    fn notify(&mut self, state: &State, action: &Action);
 }
 
 pub struct Store<State, Action>
@@ -37,7 +38,7 @@ pub struct Store<State, Action>
 {
     pub state: State,
     pub reducers: Vec<Box<dyn Reducer<State, Action> + Send + Sync>>,
-    pub subscribers: Vec<Box<dyn Subscriber<State, Action> + Send + Sync>>,
+    pub subscribers: RefCell<Vec<Box<dyn Subscriber<State, Action> + Send + Sync>>>,
     pub tx: Option<Sender<Action>>,
     dispacher: Option<thread::JoinHandle<()>>,
 }
@@ -51,7 +52,7 @@ impl<State, Action> Default for Store<State, Action>
         Store {
             state: Default::default(),
             reducers: Vec::default(),
-            subscribers: Vec::default(),
+            subscribers: RefCell::new(Vec::default()),
             tx: None,
             dispacher: None,
         }
@@ -88,7 +89,7 @@ impl<State, Action> Store<State, Action>
         let mut store = Store {
             state,
             reducers: Vec::default(),
-            subscribers: Vec::default(),
+            subscribers: RefCell::new(Vec::default()),
             tx: Some(tx),
             dispacher: None,
         };
@@ -117,7 +118,7 @@ impl<State, Action> Store<State, Action>
     }
 
     pub fn add_subscriber(&mut self, subscriber: Box<dyn Subscriber<State, Action> + Send + Sync>) {
-        self.subscribers.push(subscriber);
+        self.subscribers.get_mut().push(subscriber);
     }
 
     pub fn do_reduce(&mut self, action: &Action) -> State {
@@ -128,7 +129,7 @@ impl<State, Action> Store<State, Action>
     }
 
     pub fn do_notify(&mut self, state: &State, action: &Action) {
-        for subscriber in &self.subscribers {
+        for subscriber in self.subscribers.get_mut() {
             subscriber.notify(state, action);
         }
     }

@@ -22,6 +22,10 @@ name = "calc"
 path = "src/example/calc.rs"
 
 [[bin]]
+name = "calc_basic"
+path = "src/example/calc_basic.rs"
+
+[[bin]]
 name = "calc_fn"
 path = "src/example/calc_fn.rs"
 

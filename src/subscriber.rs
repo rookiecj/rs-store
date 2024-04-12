@@ -16,7 +16,7 @@ impl<F, State, Action> Subscriber<State, Action> for FnSubscriber<F, State, Acti
         State: Default + Send + Sync + Clone,
         Action: Send + Sync,
 {
-    fn notify(&self, state: &State, action: &Action) {
+    fn notify(&mut self, state: &State, action: &Action) {
         (self.func)(state, action)
     }
 }
