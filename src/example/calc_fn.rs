@@ -1,3 +1,4 @@
+use rs_store::Dispatcher;
 use rs_store::{FnReducer, FnSubscriber, Store};
 use std::sync::{Arc, Mutex};
 use std::thread;

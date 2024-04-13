@@ -31,6 +31,10 @@ where
     fn notify(&mut self, state: &State, action: &Action);
 }
 
+pub trait Dispatcher<Action: Send + Sync> {
+    fn dispatch(&self, action: Action);
+}
+
 pub struct Store<State, Action>
 where
     State: Default + Send + Sync + Clone,
@@ -40,7 +44,7 @@ where
     pub reducers: Vec<Box<dyn Reducer<State, Action> + Send + Sync>>,
     pub subscribers: RefCell<Vec<Box<dyn Subscriber<State, Action> + Send + Sync>>>,
     pub tx: Option<Sender<Action>>,
-    dispacher: Option<thread::JoinHandle<()>>,
+    dispatcher: Option<thread::JoinHandle<()>>,
 }
 
 impl<State, Action> Default for Store<State, Action>
@@ -54,7 +58,7 @@ where
             reducers: Vec::default(),
             subscribers: RefCell::new(Vec::default()),
             tx: None,
-            dispacher: None,
+            dispatcher: None,
         }
     }
 }
@@ -64,34 +68,25 @@ where
     State: Default + Send + Sync + Clone + 'static,
     Action: Send + Sync + 'static,
 {
-    pub fn new() -> Arc<Mutex<Store<State, Action>>> {
-        Self::new_with_state(Default::default())
+    pub fn new(
+        reducer: Box<dyn Reducer<State, Action> + Send + Sync>,
+    ) -> Arc<Mutex<Store<State, Action>>> {
+        Self::new_with_state(reducer, Default::default())
     }
 
-    pub fn wait_for(store: Arc<Mutex<Store<State, Action>>>) -> Result<(), StoreError> {
-        // lock/unlock the store to get the handle
-        let handle = store.lock().unwrap().take();
-        // now safely join the handle without deadlock
-        match handle {
-            Some(handle) => handle.join().map_err(|_| StoreError::CloseError {
-                inner: "join error".to_string(),
-            }),
-            None => Err(StoreError::CloseError {
-                inner: "no handle".to_string(),
-            }),
-        }
-    }
-
-    pub fn new_with_state(state: State) -> Arc<Mutex<Store<State, Action>>> {
+    pub fn new_with_state(
+        reducer: Box<dyn Reducer<State, Action> + Send + Sync>,
+        state: State,
+    ) -> Arc<Mutex<Store<State, Action>>> {
         // create a channel
         // and start a thread in which the store will listen for actions
         let (tx, rx) = std::sync::mpsc::channel::<Action>();
         let store = Store {
             state,
-            reducers: Vec::default(),
+            reducers: vec![reducer],
             subscribers: RefCell::new(Vec::default()),
             tx: Some(tx),
-            dispacher: None,
+            dispatcher: None,
         };
 
         // start a thread in which the store will listen for actions,
@@ -108,8 +103,22 @@ where
             }
         });
 
-        tx_store.lock().unwrap().dispacher = Some(handle);
+        tx_store.lock().unwrap().dispatcher = Some(handle);
         tx_store
+    }
+
+    pub fn wait_for(store: Arc<Mutex<Store<State, Action>>>) -> Result<(), StoreError> {
+        // lock/unlock the store to get the handle
+        let handle = store.lock().unwrap().take();
+        // now safely join the handle without deadlock
+        match handle {
+            Some(handle) => handle.join().map_err(|_| StoreError::CloseError {
+                inner: "join error".to_string(),
+            }),
+            None => Err(StoreError::CloseError {
+                inner: "no handle".to_string(),
+            }),
+        }
     }
 
     pub fn add_reducer(&mut self, reducer: Box<dyn Reducer<State, Action> + Send + Sync>) {
@@ -133,11 +142,11 @@ where
         }
     }
 
-    pub fn dispatch(&self, action: Action) {
-        if let Some(tx) = &self.tx {
-            tx.send(action).unwrap_or(());
-        }
-    }
+    // pub fn dispatch(&self, action: Action) {
+    //     if let Some(tx) = &self.tx {
+    //         tx.send(action).unwrap_or(());
+    //     }
+    // }
 
     pub fn close(&mut self) {
         match self.tx.take() {
@@ -153,7 +162,19 @@ where
 
     pub fn take(&mut self) -> Option<thread::JoinHandle<()>> {
         // deadlock
-        return self.dispacher.take();
+        return self.dispatcher.take();
+    }
+}
+
+impl<State, Action> Dispatcher<Action> for Store<State, Action>
+where
+    State: Default + Send + Sync + Clone + 'static,
+    Action: Send + Sync + 'static,
+{
+    fn dispatch(&self, action: Action) {
+        if let Some(tx) = &self.tx {
+            tx.send(action).unwrap_or(());
+        }
     }
 }
 

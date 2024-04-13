@@ -1,5 +1,6 @@
 use std::thread;
 
+use rs_store::Dispatcher;
 use rs_store::{Reducer, Store, Subscriber};
 
 #[derive(Debug)]
@@ -84,8 +85,7 @@ impl Subscriber<CalcState, CalcAction> for CalcSubscriber {
 pub fn main() {
     println!("Hello, Calc!");
 
-    let store = Store::<CalcState, CalcAction>::new();
-    store.lock().unwrap().add_reducer(Box::new(CalcReducer::default()));
+    let store = Store::<CalcState, CalcAction>::new(Box::new(CalcReducer::default()));
 
     store.lock().unwrap().add_subscriber(Box::new(CalcSubscriber::default()));
     store.lock().unwrap().dispatch(CalcAction::Add(1));

@@ -1,5 +1,6 @@
 use std::thread;
 
+use rs_store::Dispatcher;
 use rs_store::{FnReducer, FnSubscriber, Store};
 
 #[derive(Debug)]
@@ -50,8 +51,7 @@ fn calc_subscriber(state: &CalcState, action: &CalcAction) {
 pub fn main() {
     println!("Hello, reduce function !");
 
-    let store = Store::<CalcState, CalcAction>::new();
-    store.lock().unwrap().add_reducer(Box::new(FnReducer::from(calc_reducer)));
+    let store = Store::<CalcState, CalcAction>::new(Box::new(FnReducer::from(calc_reducer)));
 
     store.lock().unwrap().add_subscriber(Box::new(FnSubscriber::from(calc_subscriber)));
     store.lock().unwrap().dispatch(CalcAction::Add(1));
