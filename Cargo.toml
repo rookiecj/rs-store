@@ -23,3 +23,7 @@ path = "src/example/calc_basic.rs"
 [[bin]]
 name = "calc_fn_basic"
 path = "src/example/calc_fn_basic.rs"
+
+[[bin]]
+name = "calc_concurrent"
+path = "src/example/calc_concurrent.rs"
