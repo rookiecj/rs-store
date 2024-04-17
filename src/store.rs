@@ -111,13 +111,13 @@ where
         self.subscribers.lock().unwrap().push(subscriber);
     }
 
-    pub fn do_reduce(&self, state: &mut State, action: &Action) {
+    pub(crate) fn do_reduce(&self, state: &mut State, action: &Action) {
         for reducer in self.reducers.lock().unwrap().iter() {
             *state = reducer.reduce(&state, action);
         }
     }
 
-    pub fn do_notify(&self, state: &State, action: &Action) {
+    pub(crate) fn do_notify(&self, state: &State, action: &Action) {
         for subscriber in self.subscribers.lock().unwrap().iter_mut() {
             subscriber.notify(state, action);
         }
