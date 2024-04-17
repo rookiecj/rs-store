@@ -1,9 +1,9 @@
 [package]
 name = "rs-store"
-version = "0.3.1"
+version = "0.4.0"
 edition = "2021"
 authors = ["Changju Lee", "Changju Lee<rookiecj@gmail.com>"]
-description="Redux Store for Rust"
+description = "Redux Store for Rust"
 license-file = "LICENSE"
 #homepage="https://github.com/rookiecj/rs-store"
 #documentation="https://docs.rs/rs-store"
