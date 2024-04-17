@@ -55,23 +55,24 @@ pub fn main() {
     store.add_reducer(Box::new(FnReducer::from(calc_reducer)));
 
     let (tx, rx) = std::sync::mpsc::channel::<CalcAction>();
-    store.tx = Some(tx);
-    let dispatch_store = Arc::new(Mutex::new(store));
+    store.tx.lock().unwrap().replace(tx);
+    let dispatch_store = Arc::new(store);
     let tx_store = dispatch_store.clone();
 
     let dispatcher = thread::spawn(move || {
+        let mut state = CalcState::default();
         for action in rx {
-            let new_state = dispatch_store.lock().unwrap().do_reduce(&action);
-            dispatch_store.lock().unwrap().do_notify(&new_state, &action);
+            dispatch_store.do_reduce(&mut state, &action);
+            dispatch_store.do_notify(&state, &action);
         }
     });
 
-    tx_store.lock().unwrap().add_subscriber(Box::new(FnSubscriber::from(calc_subscriber)));
-    tx_store.lock().unwrap().dispatch(CalcAction::Add(1));
+    tx_store.add_subscriber(Box::new(FnSubscriber::from(calc_subscriber)));
+    tx_store.dispatch(CalcAction::Add(1));
 
     thread::sleep(std::time::Duration::from_secs(1));
-    tx_store.lock().unwrap().dispatch(CalcAction::Subtract(1));
-    tx_store.lock().unwrap().close();
+    tx_store.dispatch(CalcAction::Subtract(1));
+    tx_store.close();
 
     dispatcher.join().unwrap();
 }

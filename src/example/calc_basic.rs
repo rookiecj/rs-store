@@ -87,18 +87,12 @@ pub fn main() {
 
     let store = Store::<CalcState, CalcAction>::new(Box::new(CalcReducer::default()));
 
-    store.lock().unwrap().add_subscriber(Box::new(CalcSubscriber::default()));
-    store.lock().unwrap().dispatch(CalcAction::Add(1));
+    store.add_subscriber(Box::new(CalcSubscriber::default()));
+    store.dispatch(CalcAction::Add(1));
 
     thread::sleep(std::time::Duration::from_secs(1));
-    store.lock().unwrap().add_subscriber(Box::new(CalcSubscriber::default()));
-    store.lock().unwrap().dispatch(CalcAction::Subtract(1));
+    store.add_subscriber(Box::new(CalcSubscriber::default()));
+    store.dispatch(CalcAction::Subtract(1));
 
-    // it should be called to close the store\
-    store.lock().unwrap().close();
-
-    // if you want to wait for the store to close
-    Store::wait_for(store).unwrap_or_else(|e| {
-        println!("Error: {:?}", e);
-    });
+    store.stop();
 }

@@ -1,4 +1,3 @@
-use std::cell::RefCell;
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -40,11 +39,11 @@ where
     State: Default + Send + Sync + Clone,
     Action: Send + Sync,
 {
-    pub state: State,
-    pub reducers: Vec<Box<dyn Reducer<State, Action> + Send + Sync>>,
-    pub subscribers: RefCell<Vec<Box<dyn Subscriber<State, Action> + Send + Sync>>>,
-    pub tx: Option<Sender<Action>>,
-    dispatcher: Option<thread::JoinHandle<()>>,
+    //pub state: Mutex<State>,
+    pub reducers: Mutex<Vec<Box<dyn Reducer<State, Action> + Send + Sync>>>,
+    pub subscribers: Mutex<Vec<Box<dyn Subscriber<State, Action> + Send + Sync>>>,
+    pub tx: Mutex<Option<Sender<Action>>>,
+    dispatcher: Mutex<Option<thread::JoinHandle<()>>>,
 }
 
 impl<State, Action> Default for Store<State, Action>
@@ -54,11 +53,11 @@ where
 {
     fn default() -> Store<State, Action> {
         Store {
-            state: Default::default(),
-            reducers: Vec::default(),
-            subscribers: RefCell::new(Vec::default()),
-            tx: None,
-            dispatcher: None,
+            //state: Default::default(),
+            reducers: Mutex::new(Vec::default()),
+            subscribers: Mutex::new(Vec::default()),
+            tx: Mutex::new(None),
+            dispatcher: Mutex::new(None),
         }
     }
 }
@@ -70,99 +69,80 @@ where
 {
     pub fn new(
         reducer: Box<dyn Reducer<State, Action> + Send + Sync>,
-    ) -> Arc<Mutex<Store<State, Action>>> {
+    ) -> Arc<Store<State, Action>> {
         Self::new_with_state(reducer, Default::default())
     }
 
     pub fn new_with_state(
         reducer: Box<dyn Reducer<State, Action> + Send + Sync>,
-        state: State,
-    ) -> Arc<Mutex<Store<State, Action>>> {
+        mut state: State,
+    ) -> Arc<Store<State, Action>> {
         // create a channel
         // and start a thread in which the store will listen for actions
         let (tx, rx) = std::sync::mpsc::channel::<Action>();
         let store = Store {
-            state,
-            reducers: vec![reducer],
-            subscribers: RefCell::new(Vec::default()),
-            tx: Some(tx),
-            dispatcher: None,
+            //state: Mutex::new(state),
+            reducers: Mutex::new(vec![reducer]),
+            subscribers: Mutex::new(Vec::default()),
+            tx: Mutex::new(Some(tx)),
+            dispatcher: Mutex::new(None),
         };
 
         // start a thread in which the store will listen for actions,
-        // the shore referenced by Arc<Mutex<Store>> will be passed to the thread
-        let rx_store = Arc::new(Mutex::new(store));
+        // the shore referenced by Arc<Store> will be passed to the thread
+        let rx_store = Arc::new(store);
         let tx_store = rx_store.clone();
         let handle = thread::spawn(move || {
             for action in rx {
-                {
-                    let mut store = rx_store.lock().unwrap();
-                    let state = store.do_reduce(&action);
-                    store.do_notify(&state, &action);
-                }
+                rx_store.do_reduce(&mut state, &action);
+                rx_store.do_notify(&state, &action);
             }
         });
 
-        tx_store.lock().unwrap().dispatcher = Some(handle);
+        tx_store.dispatcher.lock().unwrap().replace(handle);
         tx_store
     }
 
-    pub fn wait_for(store: Arc<Mutex<Store<State, Action>>>) -> Result<(), StoreError> {
-        // lock/unlock the store to get the handle
-        let handle = store.lock().unwrap().take();
-        // now safely join the handle without deadlock
-        match handle {
-            Some(handle) => handle.join().map_err(|_| StoreError::CloseError {
-                inner: "join error".to_string(),
-            }),
-            None => Err(StoreError::CloseError {
-                inner: "no handle".to_string(),
-            }),
+    pub fn add_reducer(&self, reducer: Box<dyn Reducer<State, Action> + Send + Sync>) {
+        self.reducers.lock().unwrap().push(reducer);
+    }
+
+    pub fn add_subscriber(&self, subscriber: Box<dyn Subscriber<State, Action> + Send + Sync>) {
+        self.subscribers.lock().unwrap().push(subscriber);
+    }
+
+    pub fn do_reduce(&self, state: &mut State, action: &Action) {
+        for reducer in self.reducers.lock().unwrap().iter() {
+            *state = reducer.reduce(&state, action);
         }
     }
 
-    pub fn add_reducer(&mut self, reducer: Box<dyn Reducer<State, Action> + Send + Sync>) {
-        self.reducers.push(reducer);
-    }
-
-    pub fn add_subscriber(&mut self, subscriber: Box<dyn Subscriber<State, Action> + Send + Sync>) {
-        self.subscribers.get_mut().push(subscriber);
-    }
-
-    pub fn do_reduce(&mut self, action: &Action) -> State {
-        for reducer in &self.reducers {
-            self.state = reducer.reduce(&self.state, action);
-        }
-        self.state.clone()
-    }
-
-    pub fn do_notify(&mut self, state: &State, action: &Action) {
-        for subscriber in self.subscribers.get_mut() {
+    pub fn do_notify(&self, state: &State, action: &Action) {
+        for subscriber in self.subscribers.lock().unwrap().iter_mut() {
             subscriber.notify(state, action);
         }
     }
 
-    // pub fn dispatch(&self, action: Action) {
-    //     if let Some(tx) = &self.tx {
-    //         tx.send(action).unwrap_or(());
-    //     }
-    // }
-
-    pub fn close(&mut self) {
-        match self.tx.take() {
-            Some(tx) => drop(tx),
-            None => (),
+    /// close the store
+    pub fn close(&self) {
+        if let Some(tx) = self.tx.lock().unwrap().take() {
+            drop(tx);
         }
-        // deadlock
-        // match self.dispacher.take() {
-        //     Some(handle) => handle.join().unwrap_or(()),
-        //     None => (),
-        // }
     }
 
-    pub fn take(&mut self) -> Option<thread::JoinHandle<()>> {
-        // deadlock
-        return self.dispatcher.take();
+    /// close the store and wait for the dispatcher to finish
+    pub fn stop(&self) {
+        self.close();
+
+        let handle = self.detach();
+        if let Some(handle) = handle {
+            handle.join().unwrap_or(());
+        }
+    }
+
+    /// detach the dispatcher thread from the store
+    pub fn detach(&self) -> Option<thread::JoinHandle<()>> {
+        self.dispatcher.lock().unwrap().take()
     }
 }
 
@@ -172,7 +152,8 @@ where
     Action: Send + Sync + 'static,
 {
     fn dispatch(&self, action: Action) {
-        if let Some(tx) = &self.tx {
+        let sender = self.tx.lock().unwrap();
+        if let Some(tx) = sender.as_ref() {
             tx.send(action).unwrap_or(());
         }
     }
