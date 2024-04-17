@@ -1,6 +1,6 @@
 [package]
 name = "rs-store"
-version = "0.4.0"
+version = "0.4.1"
 edition = "2021"
 authors = ["Changju Lee", "Changju Lee<rookiecj@gmail.com>"]
 description = "Redux Store for Rust"
@@ -16,18 +16,9 @@ keywords = ["redux", "store", "rust", "state", "management"]
 thiserror = "1.0.58"
 once_cell = "1.19.0"
 
-
-[[bin]]
-name = "calc"
-path = "src/example/calc.rs"
-
 [[bin]]
 name = "calc_basic"
 path = "src/example/calc_basic.rs"
-
-[[bin]]
-name = "calc_fn"
-path = "src/example/calc_fn.rs"
 
 [[bin]]
 name = "calc_fn_basic"
