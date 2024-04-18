@@ -30,14 +30,16 @@ where
     fn notify(&mut self, state: &State, action: &Action);
 }
 
+/// Dispatcher dispatches actions to the store
 pub trait Dispatcher<Action: Send + Sync> {
     fn dispatch(&self, action: Action);
 }
 
+/// Store is a simple implementation of a Redux store
 pub struct Store<State, Action>
 where
-    State: Default + Send + Sync + Clone,
-    Action: Send + Sync,
+    State: Default + Send + Sync + Clone + 'static,
+    Action: Send + Sync + 'static,
 {
     //pub state: Mutex<State>,
     pub reducers: Mutex<Vec<Box<dyn Reducer<State, Action> + Send + Sync>>>,
@@ -48,8 +50,8 @@ where
 
 impl<State, Action> Default for Store<State, Action>
 where
-    State: Default + Send + Sync + Clone,
-    Action: Send + Sync,
+    State: Default + Send + Sync + Clone + 'static,
+    Action: Send + Sync + 'static,
 {
     fn default() -> Store<State, Action> {
         Store {
@@ -67,12 +69,14 @@ where
     State: Default + Send + Sync + Clone + 'static,
     Action: Send + Sync + 'static,
 {
+    /// create a new store with a reducer
     pub fn new(
         reducer: Box<dyn Reducer<State, Action> + Send + Sync>,
     ) -> Arc<Store<State, Action>> {
         Self::new_with_state(reducer, Default::default())
     }
 
+    /// create a new store with a reducer and an initial state
     pub fn new_with_state(
         reducer: Box<dyn Reducer<State, Action> + Send + Sync>,
         mut state: State,
@@ -103,10 +107,12 @@ where
         tx_store
     }
 
+    /// add a reducer to the store
     pub fn add_reducer(&self, reducer: Box<dyn Reducer<State, Action> + Send + Sync>) {
         self.reducers.lock().unwrap().push(reducer);
     }
 
+    /// add a subscriber to the store
     pub fn add_subscriber(&self, subscriber: Box<dyn Subscriber<State, Action> + Send + Sync>) {
         self.subscribers.lock().unwrap().push(subscriber);
     }
@@ -134,8 +140,8 @@ where
     pub fn stop(&self) {
         self.close();
 
-        let handle = self.detach();
-        if let Some(handle) = handle {
+        // let handle = self.detach();
+        if let Some(handle) = self.detach() {
             handle.join().unwrap_or(());
         }
     }
@@ -143,6 +149,19 @@ where
     /// detach the dispatcher thread from the store
     pub fn detach(&self) -> Option<thread::JoinHandle<()>> {
         self.dispatcher.lock().unwrap().take()
+    }
+}
+
+/// close tx channel when the store is dropped, but not the dispatcher
+/// if you want to stop the dispatcher, call the stop method
+impl<State, Action> Drop for Store<State, Action>
+where
+    State: Default + Send + Sync + Clone + 'static,
+    Action: Send + Sync + 'static,
+{
+    fn drop(&mut self) {
+        //self.stop();
+        self.close();
     }
 }
 

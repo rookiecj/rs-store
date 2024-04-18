@@ -111,5 +111,5 @@ pub fn main() {
     .join()
     .unwrap();
 
-    store.stop();
+    //store.stop();
 }
