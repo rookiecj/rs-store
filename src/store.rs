@@ -27,7 +27,7 @@ where
     State: Default + Send + Sync + Clone,
     Action: Send + Sync,
 {
-    fn notify(&mut self, state: &State, action: &Action);
+    fn notify(&self, state: &State, action: &Action);
 }
 
 /// Dispatcher dispatches actions to the store
@@ -43,7 +43,7 @@ where
 {
     //pub state: Mutex<State>,
     pub reducers: Mutex<Vec<Box<dyn Reducer<State, Action> + Send + Sync>>>,
-    pub subscribers: Mutex<Vec<Box<dyn Subscriber<State, Action> + Send + Sync>>>,
+    pub subscribers: Mutex<Vec<Arc<dyn Subscriber<State, Action> + Send + Sync>>>,
     pub tx: Mutex<Option<Sender<Action>>>,
     dispatcher: Mutex<Option<thread::JoinHandle<()>>>,
 }
@@ -113,7 +113,7 @@ where
     }
 
     /// add a subscriber to the store
-    pub fn add_subscriber(&self, subscriber: Box<dyn Subscriber<State, Action> + Send + Sync>) {
+    pub fn add_subscriber(&self, subscriber: Arc<dyn Subscriber<State, Action> + Send + Sync>) {
         self.subscribers.lock().unwrap().push(subscriber);
     }
 
@@ -124,8 +124,11 @@ where
     }
 
     pub(crate) fn do_notify(&self, state: &State, action: &Action) {
-        for subscriber in self.subscribers.lock().unwrap().iter_mut() {
-            subscriber.notify(state, action);
+        // TODO thread pool
+        if let cloned = self.subscribers.lock().unwrap().clone() {
+            for subscriber in cloned.iter() {
+                subscriber.notify(state, action);
+            }
         }
     }
 

@@ -1,3 +1,4 @@
+use std::sync::{Arc, Mutex};
 use std::thread;
 
 use rs_store::Dispatcher;
@@ -49,14 +50,14 @@ impl Reducer<CalcState, CalcAction> for CalcReducer {
 
 struct CalcSubscriber {
     id: i32,
-    last: CalcState,
+    last: Mutex<CalcState>,
 }
 
 impl Default for CalcSubscriber {
     fn default() -> CalcSubscriber {
         CalcSubscriber {
             id: 0,
-            last: CalcState::default(),
+            last: Mutex::new(CalcState::default()),
         }
     }
 }
@@ -65,13 +66,13 @@ impl CalcSubscriber {
     fn new(id: i32) -> CalcSubscriber {
         CalcSubscriber {
             id,
-            last: CalcState::default(),
+            last: Mutex::new(CalcState::default()),
         }
     }
 }
 
 impl Subscriber<CalcState, CalcAction> for CalcSubscriber {
-    fn notify(&mut self, state: &CalcState, action: &CalcAction) {
+    fn notify(&self, state: &CalcState, action: &CalcAction) {
         println!("CalcSubscriber::notify: {}, action: {:?}", self.id, action);
 
         match action {
@@ -89,7 +90,7 @@ impl Subscriber<CalcState, CalcAction> for CalcSubscriber {
             }
         }
 
-        self.last = state.clone();
+        *self.last.lock().unwrap() = state.clone();
     }
 }
 
@@ -98,14 +99,14 @@ pub fn main() {
 
     let store = Store::<CalcState, CalcAction>::new(Box::new(CalcReducer::default()));
 
-    store.add_subscriber(Box::new(CalcSubscriber::default()));
+    store.add_subscriber(Arc::new(CalcSubscriber::default()));
     store.dispatch(CalcAction::Add(1));
 
     let store_clone = store.clone();
     thread::spawn(move || {
         thread::sleep(std::time::Duration::from_secs(1));
 
-        store_clone.add_subscriber(Box::new(CalcSubscriber::new(1)));
+        store_clone.add_subscriber(Arc::new(CalcSubscriber::new(1)));
         store_clone.dispatch(CalcAction::Subtract(1));
     })
     .join()

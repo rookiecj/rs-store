@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::thread;
 
 use rs_store::Dispatcher;
@@ -53,11 +54,11 @@ pub fn main() {
 
     let store = Store::<CalcState, CalcAction>::new(Box::new(FnReducer::from(calc_reducer)));
 
-    store.add_subscriber(Box::new(FnSubscriber::from(calc_subscriber)));
+    store.add_subscriber(Arc::new(FnSubscriber::from(calc_subscriber)));
     store.dispatch(CalcAction::Add(1));
 
     thread::sleep(std::time::Duration::from_secs(1));
-    store.add_subscriber(Box::new(FnSubscriber::from(calc_subscriber)));
+    store.add_subscriber(Arc::new(FnSubscriber::from(calc_subscriber)));
     store.dispatch(CalcAction::Subtract(1));
 
     store.stop();
