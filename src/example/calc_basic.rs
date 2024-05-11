@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread;
 
 use rs_store::Dispatcher;
@@ -49,20 +49,20 @@ impl Reducer<CalcState, CalcAction> for CalcReducer {
 }
 
 struct CalcSubscriber {
-    last: CalcState,
+    last: Mutex<CalcState>,
 }
 
 impl Default for CalcSubscriber {
     fn default() -> CalcSubscriber {
         CalcSubscriber {
-            last: CalcState::default(),
+            last: Default::default(),
         }
     }
 }
 
 impl Subscriber<CalcState, CalcAction> for CalcSubscriber {
-    fn notify(&mut self, state: &CalcState, action: &CalcAction) {
-        if self.last.count != state.count {
+    fn notify(&self, state: &CalcState, action: &CalcAction) {
+        if self.last.lock().unwrap().count != state.count {
             match action {
                 CalcAction::Add(i) => {
                     println!(
@@ -79,7 +79,7 @@ impl Subscriber<CalcState, CalcAction> for CalcSubscriber {
             }
         }
         //
-        self.last = state.clone();
+        *self.last.lock().unwrap() = state.clone();
     }
 }
 
