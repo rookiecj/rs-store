@@ -21,5 +21,5 @@ example:	## example
 	cargo run --bin calc_fn_basic
 
 publish: build	## publish
-	#cargo login
+	cargo login
 	cargo publish

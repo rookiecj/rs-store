@@ -17,11 +17,11 @@ pub fn main() {
 
     let store = Store::<CalcState, CalcAction>::new(Box::new(CalcReducer::default()));
 
-    store.add_subscriber(Box::new(CalcSubscriber::default()));
+    store.add_subscriber(Arc::new(CalcSubscriber::default()));
     store.dispatch(CalcAction::Add(1));
 
     thread::sleep(std::time::Duration::from_secs(1));
-    store.add_subscriber(Box::new(CalcSubscriber::default()));
+    store.add_subscriber(Arc::new(CalcSubscriber::default()));
     store.dispatch(CalcAction::Subtract(1));
 
     store.stop();

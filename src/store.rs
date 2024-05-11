@@ -1,4 +1,3 @@
-use std::cell::{Cell, RefCell};
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -132,9 +131,9 @@ where
 
     pub(crate) fn do_notify(&self, action: &Action) {
         // TODO thread pool
-        if let cloned = self.subscribers.lock().unwrap().clone() {
+        if let subscribers = self.subscribers.lock().unwrap().clone() {
             let state = self.state.lock().unwrap().clone();
-            for subscriber in cloned.iter() {
+            for subscriber in subscribers.iter() {
                 subscriber.notify(&state, action);
             }
         }
