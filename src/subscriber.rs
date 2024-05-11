@@ -7,6 +7,7 @@ where
     Action: Send + Sync,
 {
     func: F,
+    // error[E0392]: parameter `State` is never used
     _marker: std::marker::PhantomData<(State, Action)>,
 }
 
@@ -16,7 +17,7 @@ where
     State: Default + Send + Sync + Clone,
     Action: Send + Sync,
 {
-    fn notify(&mut self, state: &State, action: &Action) {
+    fn notify(&self, state: &State, action: &Action) {
         (self.func)(state, action)
     }
 }
