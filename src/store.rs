@@ -27,7 +27,7 @@ where
     State: Default + Send + Sync + Clone,
     Action: Send + Sync,
 {
-    fn notify(&self, state: &State, action: &Action);
+    fn on_notify(&self, state: &State, action: &Action);
 }
 
 /// Dispatcher dispatches actions to the store
@@ -134,7 +134,7 @@ where
         if let subscribers = self.subscribers.lock().unwrap().clone() {
             let state = self.state.lock().unwrap().clone();
             for subscriber in subscribers.iter() {
-                subscriber.notify(&state, action);
+                subscriber.on_notify(&state, action);
             }
         }
     }

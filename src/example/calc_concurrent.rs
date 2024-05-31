@@ -72,19 +72,19 @@ impl CalcSubscriber {
 }
 
 impl Subscriber<CalcState, CalcAction> for CalcSubscriber {
-    fn notify(&self, state: &CalcState, action: &CalcAction) {
-        println!("CalcSubscriber::notify: {}, action: {:?}", self.id, action);
+    fn on_notify(&self, state: &CalcState, action: &CalcAction) {
+        println!("CalcSubscriber::on_notify: id:{}, action: {:?}", self.id, action);
 
         match action {
             CalcAction::Add(i) => {
                 println!(
-                    "CalcSubscriber::notify: {}, state: {:?} <- old: {:?}",
+                    "CalcSubscriber::on_notify: id:{}, state: {:?} <- old: {:?}",
                     self.id, state, self.last
                 );
             }
             CalcAction::Subtract(i) => {
                 println!(
-                    "CalcSubscriber::notify: {}, state: {:?} <- old: {:?}",
+                    "CalcSubscriber::on_notify: id:{}, state: {:?} <- old: {:?}",
                     self.id, state, self.last
                 );
             }

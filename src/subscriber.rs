@@ -17,7 +17,7 @@ where
     State: Default + Send + Sync + Clone,
     Action: Send + Sync,
 {
-    fn notify(&self, state: &State, action: &Action) {
+    fn on_notify(&self, state: &State, action: &Action) {
         (self.func)(state, action)
     }
 }

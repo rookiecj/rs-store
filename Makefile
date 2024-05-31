@@ -11,14 +11,16 @@ build:
 clean:
 	cargo clean
 
-example-calc:	## example calc
-	cargo run --bin calc
+example-calc:	## example calc_basic
+	cargo run --bin calc_basic
 
 example-calc_fn:	## example calc_fn
-	cargo run --bin calc_fn
-
-example:	## example
 	cargo run --bin calc_fn_basic
+
+example-calc_curr:	## example calc_concurrent
+	cargo run --bin calc_concurrent
+
+example: example-calc example-calc_fn example-calc_curr	## example all
 
 publish: build	## publish
 	cargo login

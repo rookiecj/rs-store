@@ -41,10 +41,10 @@ fn calc_reducer(state: &CalcState, action: &CalcAction) -> CalcState {
 fn calc_subscriber(state: &CalcState, action: &CalcAction) {
     match action {
         CalcAction::Add(i) => {
-            println!("CalcSubscriber::notify: state:{:?}, action:{}", state, i);
+            println!("CalcSubscriber::on_notify: state:{:?}, action:{}", state, i);
         }
         CalcAction::Subtract(i) => {
-            println!("CalcSubscriber::notify: state:{:?}, action: -{}", state, i);
+            println!("CalcSubscriber::on_notify: state:{:?}, action: -{}", state, i);
         }
     }
 }

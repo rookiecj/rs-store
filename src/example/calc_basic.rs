@@ -61,18 +61,18 @@ impl Default for CalcSubscriber {
 }
 
 impl Subscriber<CalcState, CalcAction> for CalcSubscriber {
-    fn notify(&self, state: &CalcState, action: &CalcAction) {
+    fn on_notify(&self, state: &CalcState, action: &CalcAction) {
         if self.last.lock().unwrap().count != state.count {
             match action {
                 CalcAction::Add(i) => {
                     println!(
-                        "CalcSubscriber::notify: state:{:?} <- last {:?} + action:{}",
+                        "CalcSubscriber::on_notify: state:{:?} <- last {:?} + action:{}",
                         state, self.last, i
                     );
                 }
                 CalcAction::Subtract(i) => {
                     println!(
-                        "CalcSubscriber::notify: state:{:?} <- last {:?} - action:{}",
+                        "CalcSubscriber::on_notify: state:{:?} <- last {:?} - action:{}",
                         state, self.last, i
                     );
                 }
