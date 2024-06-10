@@ -97,7 +97,10 @@ impl Subscriber<CalcState, CalcAction> for CalcSubscriber {
 pub fn main() {
     println!("Hello, Calc!");
 
-    let store = Store::<CalcState, CalcAction>::new(Box::new(CalcReducer::default()));
+    let store = Store::<CalcState, CalcAction>::new_with_name(
+        Box::new(CalcReducer::default()),
+        CalcState::default(),
+        "store-concurrent".into()).unwrap();
 
     store.add_subscriber(Arc::new(CalcSubscriber::default()));
     store.dispatch(CalcAction::Add(1));

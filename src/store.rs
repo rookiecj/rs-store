@@ -1,17 +1,14 @@
-use std::sync::mpsc::Sender;
+use std::any::type_name;
 use std::sync::{Arc, Mutex};
+use std::sync::mpsc::Sender;
 use std::thread;
 
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum StoreError {
     #[error("no error")]
     NoError,
-    #[error("send error {inner}")]
-    SendError { inner: String },
-    #[error("lock error {inner}")]
-    LockError { inner: String },
-    #[error("close error {inner}")]
-    CloseError { inner: String },
+    #[error("store error: {0}")]
+    Error(String),
 }
 
 pub trait Reducer<State, Action>
@@ -81,6 +78,15 @@ where
         reducer: Box<dyn Reducer<State, Action> + Send + Sync>,
         state: State,
     ) -> Arc<Store<State, Action>> {
+        Self::new_with_name(reducer, state, type_name::<Self>().into()).unwrap()
+    }
+
+    /// create a new store with a reducer and an initial state
+    pub fn new_with_name(
+        reducer: Box<dyn Reducer<State, Action> + Send + Sync>,
+        state: State,
+        name: String,
+    ) -> Result<Arc<Store<State, Action>>, StoreError> {
         // create a channel
         // and start a thread in which the store will listen for actions
         let (tx, rx) = std::sync::mpsc::channel::<Action>();
@@ -96,18 +102,21 @@ where
         // the shore referenced by Arc<Store> will be passed to the thread
         let rx_store = Arc::new(store);
         let tx_store = rx_store.clone();
-        let handle = thread::spawn(move || {
+        let builder = thread::Builder::new()
+            .name(name);
+        let r = builder.spawn(move || {
             for action in rx {
                 rx_store.do_reduce(&action);
                 rx_store.do_notify(&action);
             }
         });
 
+        let handle = r.map_err( |e| StoreError::Error(e.to_string()))?;
         tx_store.dispatcher.lock().unwrap().replace(handle);
-        tx_store
+        Ok(tx_store)
     }
 
-    /// get last state
+    /// get the last state
     pub fn get_state(&self) -> State {
         return self.state.lock().unwrap().clone();
     }
