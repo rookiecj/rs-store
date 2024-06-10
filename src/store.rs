@@ -1,17 +1,14 @@
-use std::sync::mpsc::Sender;
+use std::any::type_name;
 use std::sync::{Arc, Mutex};
+use std::sync::mpsc::Sender;
 use std::thread;
 
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum StoreError {
     #[error("no error")]
     NoError,
-    #[error("send error {inner}")]
-    SendError { inner: String },
-    #[error("lock error {inner}")]
-    LockError { inner: String },
-    #[error("close error {inner}")]
-    CloseError { inner: String },
+    #[error("store error: {0}")]
+    Error(String),
 }
 
 pub trait Reducer<State, Action>
@@ -35,6 +32,20 @@ pub trait Dispatcher<Action: Send + Sync> {
     fn dispatch(&self, action: Action);
 }
 
+pub trait Subscription: Send {
+    fn unsubscribe(&self);
+}
+
+struct SubscriptionImpl {
+    unsubscribe: Box<dyn Fn() + Send + Sync>,
+}
+
+impl Subscription for SubscriptionImpl {
+    fn unsubscribe(&self) {
+        (self.unsubscribe)();
+    }
+}
+
 /// Store is a simple implementation of a Redux store
 pub struct Store<State, Action>
 where
@@ -43,7 +54,7 @@ where
 {
     state: Mutex<State>,
     pub reducers: Mutex<Vec<Box<dyn Reducer<State, Action> + Send + Sync>>>,
-    pub subscribers: Mutex<Vec<Arc<dyn Subscriber<State, Action> + Send + Sync>>>,
+    pub subscribers: Arc<Mutex<Vec<Arc<dyn Subscriber<State, Action> + Send + Sync>>>>,
     pub tx: Mutex<Option<Sender<Action>>>,
     dispatcher: Mutex<Option<thread::JoinHandle<()>>>,
 }
@@ -57,7 +68,7 @@ where
         Store {
             state: Default::default(),
             reducers: Mutex::new(Vec::default()),
-            subscribers: Mutex::new(Vec::default()),
+            subscribers: Arc::new(Mutex::new(Vec::default())),
             tx: Mutex::new(None),
             dispatcher: Mutex::new(None),
         }
@@ -81,13 +92,22 @@ where
         reducer: Box<dyn Reducer<State, Action> + Send + Sync>,
         state: State,
     ) -> Arc<Store<State, Action>> {
+        Self::new_with_name(reducer, state, type_name::<Self>().into()).unwrap()
+    }
+
+    /// create a new store with a reducer and an initial state
+    pub fn new_with_name(
+        reducer: Box<dyn Reducer<State, Action> + Send + Sync>,
+        state: State,
+        name: String,
+    ) -> Result<Arc<Store<State, Action>>, StoreError> {
         // create a channel
         // and start a thread in which the store will listen for actions
         let (tx, rx) = std::sync::mpsc::channel::<Action>();
         let store = Store {
             state: Mutex::new(state),
             reducers: Mutex::new(vec![reducer]),
-            subscribers: Mutex::new(Vec::default()),
+            subscribers: Arc::new(Mutex::new(Vec::default())),
             tx: Mutex::new(Some(tx)),
             dispatcher: Mutex::new(None),
         };
@@ -96,18 +116,21 @@ where
         // the shore referenced by Arc<Store> will be passed to the thread
         let rx_store = Arc::new(store);
         let tx_store = rx_store.clone();
-        let handle = thread::spawn(move || {
+        let builder = thread::Builder::new()
+            .name(name);
+        let r = builder.spawn(move || {
             for action in rx {
                 rx_store.do_reduce(&action);
                 rx_store.do_notify(&action);
             }
         });
 
+        let handle = r.map_err( |e| StoreError::Error(e.to_string()))?;
         tx_store.dispatcher.lock().unwrap().replace(handle);
-        tx_store
+        Ok(tx_store)
     }
 
-    /// get last state
+    /// get the last state
     pub fn get_state(&self) -> State {
         return self.state.lock().unwrap().clone();
     }
@@ -118,8 +141,22 @@ where
     }
 
     /// add a subscriber to the store
-    pub fn add_subscriber(&self, subscriber: Arc<dyn Subscriber<State, Action> + Send + Sync>) {
-        self.subscribers.lock().unwrap().push(subscriber);
+    pub fn add_subscriber(
+        &self,
+        subscriber: Arc<dyn Subscriber<State, Action> + Send + Sync>,
+    ) -> Box<dyn Subscription> {
+
+        // append a subscriber
+        self.subscribers.lock().unwrap().push(subscriber.clone());
+
+        // disposer for the subscriber
+        let subscribers = self.subscribers.clone();
+        return Box::new(SubscriptionImpl {
+            unsubscribe: Box::new(move || {
+                let mut subscribers = subscribers.lock().unwrap();
+                subscribers.retain(|s| !Arc::ptr_eq(s, &subscriber));
+            }),
+        });
     }
 
     pub(crate) fn do_reduce(&self, action: &Action) {

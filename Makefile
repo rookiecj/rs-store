@@ -20,7 +20,10 @@ example-calc_fn:	## example calc_fn
 example-calc_curr:	## example calc_concurrent
 	cargo run --bin calc_concurrent
 
-example: example-calc example-calc_fn example-calc_curr	## example all
+example-calc_unsubcribe:	## example calc_unsubcribe
+	cargo run --bin calc_unsubscribe
+
+example: example-calc example-calc_fn example-calc_curr	example-calc_unsubcribe 	## example all
 
 publish: build	## publish
 	cargo login

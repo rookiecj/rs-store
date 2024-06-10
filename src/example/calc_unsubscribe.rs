@@ -100,20 +100,32 @@ pub fn main() {
     let store = Store::<CalcState, CalcAction>::new_with_name(
         Box::new(CalcReducer::default()),
         CalcState::default(),
-        "store-concurrent".into()).unwrap();
+        "store-unsubscribe".into()).unwrap();
 
     store.add_subscriber(Arc::new(CalcSubscriber::default()));
     store.dispatch(CalcAction::Add(1));
 
     let store_clone = store.clone();
-    thread::spawn(move || {
+    let handle = thread::spawn(move || {
         thread::sleep(std::time::Duration::from_secs(1));
 
-        store_clone.add_subscriber(Arc::new(CalcSubscriber::new(1)));
+        // subscribe
+        let subscription = store_clone.add_subscriber(Arc::new(CalcSubscriber::new(1)));
         store_clone.dispatch(CalcAction::Subtract(1));
-    })
+        subscription
+    });
+
+    let subscription = handle
     .join()
     .unwrap();
 
-    //store.stop();
+    println!("Unsubscribing...");
+    subscription.unsubscribe();
+
+    println!("Send 42...");
+    store.dispatch(CalcAction::Add(42));
+
+    store.stop();
+
+    println!("Done!");
 }

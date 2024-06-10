@@ -27,3 +27,7 @@ path = "src/example/calc_fn_basic.rs"
 [[bin]]
 name = "calc_concurrent"
 path = "src/example/calc_concurrent.rs"
+
+[[bin]]
+name = "calc_unsubscribe"
+path = "src/example/calc_unsubscribe.rs"
