@@ -32,6 +32,20 @@ pub trait Dispatcher<Action: Send + Sync> {
     fn dispatch(&self, action: Action);
 }
 
+pub trait Subscription: Send {
+    fn unsubscribe(&self);
+}
+
+struct SubscriptionImpl {
+    unsubscribe: Box<dyn Fn() + Send + Sync>,
+}
+
+impl Subscription for SubscriptionImpl {
+    fn unsubscribe(&self) {
+        (self.unsubscribe)();
+    }
+}
+
 /// Store is a simple implementation of a Redux store
 pub struct Store<State, Action>
 where
@@ -40,7 +54,7 @@ where
 {
     state: Mutex<State>,
     pub reducers: Mutex<Vec<Box<dyn Reducer<State, Action> + Send + Sync>>>,
-    pub subscribers: Mutex<Vec<Arc<dyn Subscriber<State, Action> + Send + Sync>>>,
+    pub subscribers: Arc<Mutex<Vec<Arc<dyn Subscriber<State, Action> + Send + Sync>>>>,
     pub tx: Mutex<Option<Sender<Action>>>,
     dispatcher: Mutex<Option<thread::JoinHandle<()>>>,
 }
@@ -54,7 +68,7 @@ where
         Store {
             state: Default::default(),
             reducers: Mutex::new(Vec::default()),
-            subscribers: Mutex::new(Vec::default()),
+            subscribers: Arc::new(Mutex::new(Vec::default())),
             tx: Mutex::new(None),
             dispatcher: Mutex::new(None),
         }
@@ -93,7 +107,7 @@ where
         let store = Store {
             state: Mutex::new(state),
             reducers: Mutex::new(vec![reducer]),
-            subscribers: Mutex::new(Vec::default()),
+            subscribers: Arc::new(Mutex::new(Vec::default())),
             tx: Mutex::new(Some(tx)),
             dispatcher: Mutex::new(None),
         };
@@ -127,8 +141,22 @@ where
     }
 
     /// add a subscriber to the store
-    pub fn add_subscriber(&self, subscriber: Arc<dyn Subscriber<State, Action> + Send + Sync>) {
-        self.subscribers.lock().unwrap().push(subscriber);
+    pub fn add_subscriber(
+        &self,
+        subscriber: Arc<dyn Subscriber<State, Action> + Send + Sync>,
+    ) -> Box<dyn Subscription> {
+
+        // append a subscriber
+        self.subscribers.lock().unwrap().push(subscriber.clone());
+
+        // disposer for the subscriber
+        let subscribers = self.subscribers.clone();
+        return Box::new(SubscriptionImpl {
+            unsubscribe: Box::new(move || {
+                let mut subscribers = subscribers.lock().unwrap();
+                subscribers.retain(|s| !Arc::ptr_eq(s, &subscriber));
+            }),
+        });
     }
 
     pub(crate) fn do_reduce(&self, action: &Action) {

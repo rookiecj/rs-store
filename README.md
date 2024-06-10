@@ -31,6 +31,8 @@ pub fn main() {
 
 ### To Do
 
+- [X] add subscription to unsubscribe
+- [X] add thread name
 - [ ] add Middleware
 - [ ] add Thunk
 - [ ] Add tests
