@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::thread;
 
-use rs_store::Dispatcher;
+use rs_store::{DispatchOp, Dispatcher};
 use rs_store::{FnReducer, FnSubscriber, Store};
 
 #[derive(Debug)]
@@ -21,19 +21,19 @@ impl Default for CalcState {
     }
 }
 
-fn calc_reducer(state: &CalcState, action: &CalcAction) -> CalcState {
+fn calc_reducer(state: &CalcState, action: &CalcAction) -> DispatchOp<CalcState> {
     match action {
         CalcAction::Add(i) => {
             println!("CalcReducer::reduce: + {}", i);
-            CalcState {
+            DispatchOp::Dispatch(CalcState {
                 count: state.count + i,
-            }
+            })
         }
         CalcAction::Subtract(i) => {
             println!("CalcReducer::reduce: - {}", i);
-            CalcState {
+            DispatchOp::Dispatch(CalcState {
                 count: state.count - i,
-            }
+            })
         }
     }
 }
@@ -44,7 +44,10 @@ fn calc_subscriber(state: &CalcState, action: &CalcAction) {
             println!("CalcSubscriber::on_notify: state:{:?}, action:{}", state, i);
         }
         CalcAction::Subtract(i) => {
-            println!("CalcSubscriber::on_notify: state:{:?}, action: -{}", state, i);
+            println!(
+                "CalcSubscriber::on_notify: state:{:?}, action: -{}",
+                state, i
+            );
         }
     }
 }

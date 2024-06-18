@@ -1,6 +1,6 @@
 use std::any::type_name;
-use std::sync::{Arc, Mutex};
 use std::sync::mpsc::Sender;
+use std::sync::{Arc, Mutex};
 use std::thread;
 
 #[derive(Debug, Clone, thiserror::Error)]
@@ -11,12 +11,21 @@ pub enum StoreError {
     Error(String),
 }
 
+/// determine if the action should be dispatched or not
+#[derive(Debug, Clone)]
+pub enum DispatchOp<State> {
+    /// Dispatch new state
+    Dispatch(State),
+    /// Keep new state but do not dispatch
+    Keep(State),
+}
+
 pub trait Reducer<State, Action>
 where
     State: Default + Send + Sync + Clone,
     Action: Send + Sync,
 {
-    fn reduce(&self, state: &State, action: &Action) -> State;
+    fn reduce(&self, state: &State, action: &Action) -> DispatchOp<State>;
 }
 
 pub trait Subscriber<State, Action>
@@ -92,7 +101,7 @@ where
         reducer: Box<dyn Reducer<State, Action> + Send + Sync>,
         state: State,
     ) -> Arc<Store<State, Action>> {
-        Self::new_with_name(reducer, state, type_name::<Self>().into()).unwrap()
+        Self::new_with_name(reducer, state, "store".into()).unwrap()
     }
 
     /// create a new store with a reducer and an initial state
@@ -116,16 +125,16 @@ where
         // the shore referenced by Arc<Store> will be passed to the thread
         let rx_store = Arc::new(store);
         let tx_store = rx_store.clone();
-        let builder = thread::Builder::new()
-            .name(name);
+        let builder = thread::Builder::new().name(name);
         let r = builder.spawn(move || {
             for action in rx {
-                rx_store.do_reduce(&action);
-                rx_store.do_notify(&action);
+                if rx_store.do_reduce(&action) {
+                    rx_store.do_notify(&action);
+                }
             }
         });
 
-        let handle = r.map_err( |e| StoreError::Error(e.to_string()))?;
+        let handle = r.map_err(|e| StoreError::Error(e.to_string()))?;
         tx_store.dispatcher.lock().unwrap().replace(handle);
         Ok(tx_store)
     }
@@ -145,7 +154,6 @@ where
         &self,
         subscriber: Arc<dyn Subscriber<State, Action> + Send + Sync>,
     ) -> Box<dyn Subscription> {
-
         // append a subscriber
         self.subscribers.lock().unwrap().push(subscriber.clone());
 
@@ -159,11 +167,22 @@ where
         });
     }
 
-    pub(crate) fn do_reduce(&self, action: &Action) {
+    pub(crate) fn do_reduce(&self, action: &Action) -> bool {
         let mut state = self.state.lock().unwrap();
+        let mut need_dispatch = false;
         for reducer in self.reducers.lock().unwrap().iter() {
-            *state = reducer.reduce(&state, action);
+            match reducer.reduce(&state, action) {
+                DispatchOp::Dispatch(new_state) => {
+                    *state = new_state;
+                    need_dispatch = true;
+                }
+                DispatchOp::Keep(new_state) => {
+                    // keep the state but do not dispatch
+                    *state = new_state;
+                }
+            }
         }
+        need_dispatch
     }
 
     pub(crate) fn do_notify(&self, action: &Action) {

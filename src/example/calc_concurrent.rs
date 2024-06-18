@@ -1,7 +1,7 @@
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-use rs_store::Dispatcher;
+use rs_store::{DispatchOp, Dispatcher};
 use rs_store::{Reducer, Store, Subscriber};
 
 #[derive(Debug)]
@@ -30,19 +30,19 @@ impl Default for CalcState {
 }
 
 impl Reducer<CalcState, CalcAction> for CalcReducer {
-    fn reduce(&self, state: &CalcState, action: &CalcAction) -> CalcState {
+    fn reduce(&self, state: &CalcState, action: &CalcAction) -> DispatchOp<CalcState> {
         match action {
             CalcAction::Add(i) => {
                 println!("CalcReducer::reduce: + {}", i);
-                CalcState {
+                DispatchOp::Dispatch(CalcState {
                     count: state.count + i,
-                }
+                })
             }
             CalcAction::Subtract(i) => {
                 println!("CalcReducer::reduce: - {}", i);
-                CalcState {
+                DispatchOp::Dispatch(CalcState {
                     count: state.count - i,
-                }
+                })
             }
         }
     }
@@ -73,7 +73,10 @@ impl CalcSubscriber {
 
 impl Subscriber<CalcState, CalcAction> for CalcSubscriber {
     fn on_notify(&self, state: &CalcState, action: &CalcAction) {
-        println!("CalcSubscriber::on_notify: id:{}, action: {:?}", self.id, action);
+        println!(
+            "CalcSubscriber::on_notify: id:{}, action: {:?}",
+            self.id, action
+        );
 
         match action {
             CalcAction::Add(i) => {
@@ -100,7 +103,9 @@ pub fn main() {
     let store = Store::<CalcState, CalcAction>::new_with_name(
         Box::new(CalcReducer::default()),
         CalcState::default(),
-        "store-concurrent".into()).unwrap();
+        "store-concurrent".into(),
+    )
+    .unwrap();
 
     store.add_subscriber(Arc::new(CalcSubscriber::default()));
     store.dispatch(CalcAction::Add(1));

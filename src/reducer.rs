@@ -1,8 +1,8 @@
-use crate::Reducer;
+use crate::{DispatchOp, Reducer};
 
 pub struct FnReducer<F, State, Action>
 where
-    F: Fn(&State, &Action) -> State,
+    F: Fn(&State, &Action) -> DispatchOp<State>,
     State: Default + Send + Sync + Clone,
     Action: Send + Sync,
 {
@@ -12,18 +12,18 @@ where
 
 impl<F, State, Action> Reducer<State, Action> for FnReducer<F, State, Action>
 where
-    F: Fn(&State, &Action) -> State,
+    F: Fn(&State, &Action) -> DispatchOp<State>,
     State: Default + Send + Sync + Clone,
     Action: Send + Sync,
 {
-    fn reduce(&self, state: &State, action: &Action) -> State {
+    fn reduce(&self, state: &State, action: &Action) -> DispatchOp<State> {
         (self.func)(state, action)
     }
 }
 
 impl<F, State, Action> From<F> for FnReducer<F, State, Action>
 where
-    F: Fn(&State, &Action) -> State,
+    F: Fn(&State, &Action) -> DispatchOp<State>,
     State: Default + Send + Sync + Clone,
     Action: Send + Sync,
 {
