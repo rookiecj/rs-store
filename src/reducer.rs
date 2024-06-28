@@ -1,4 +1,12 @@
-use crate::{DispatchOp, Reducer};
+use crate::DispatchOp;
+
+pub trait Reducer<State, Action>
+where
+    State: Default + Send + Sync + Clone,
+    Action: Send + Sync,
+{
+    fn reduce(&self, state: &State, action: &Action) -> DispatchOp<State>;
+}
 
 pub struct FnReducer<F, State, Action>
 where

@@ -1,7 +1,9 @@
-use std::any::type_name;
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 use std::thread;
+
+use crate::dispatcher::Dispatcher;
+use crate::{Reducer, Subscriber, Subscription};
 
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum StoreError {
@@ -18,41 +20,6 @@ pub enum DispatchOp<State> {
     Dispatch(State),
     /// Keep new state but do not dispatch
     Keep(State),
-}
-
-pub trait Reducer<State, Action>
-where
-    State: Default + Send + Sync + Clone,
-    Action: Send + Sync,
-{
-    fn reduce(&self, state: &State, action: &Action) -> DispatchOp<State>;
-}
-
-pub trait Subscriber<State, Action>
-where
-    State: Default + Send + Sync + Clone,
-    Action: Send + Sync,
-{
-    fn on_notify(&self, state: &State, action: &Action);
-}
-
-/// Dispatcher dispatches actions to the store
-pub trait Dispatcher<Action: Send + Sync> {
-    fn dispatch(&self, action: Action);
-}
-
-pub trait Subscription: Send {
-    fn unsubscribe(&self);
-}
-
-struct SubscriptionImpl {
-    unsubscribe: Box<dyn Fn() + Send + Sync>,
-}
-
-impl Subscription for SubscriptionImpl {
-    fn unsubscribe(&self) {
-        (self.unsubscribe)();
-    }
 }
 
 /// Store is a simple implementation of a Redux store
@@ -81,6 +48,16 @@ where
             tx: Mutex::new(None),
             dispatcher: Mutex::new(None),
         }
+    }
+}
+
+struct SubscriptionImpl {
+    unsubscribe: Box<dyn Fn() + Send + Sync>,
+}
+
+impl Subscription for SubscriptionImpl {
+    fn unsubscribe(&self) {
+        (self.unsubscribe)();
     }
 }
 

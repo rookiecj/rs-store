@@ -1,4 +1,15 @@
-use crate::Subscriber;
+pub trait Subscriber<State, Action>
+where
+    State: Default + Send + Sync + Clone,
+    Action: Send + Sync,
+{
+    fn on_notify(&self, state: &State, action: &Action);
+}
+
+/// it is used for deregistration
+pub trait Subscription: Send {
+    fn unsubscribe(&self);
+}
 
 pub struct FnSubscriber<F, State, Action>
 where

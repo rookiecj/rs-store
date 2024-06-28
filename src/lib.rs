@@ -1,7 +1,11 @@
-pub mod reducer;
-pub mod store;
-pub mod subscriber;
+pub mod dispatcher;
+pub use dispatcher::*;
 
+pub mod reducer;
 pub use reducer::*;
+
+pub mod store;
 pub use store::*;
+
+pub mod subscriber;
 pub use subscriber::*;
