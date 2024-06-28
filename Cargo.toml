@@ -1,6 +1,6 @@
 [package]
 name = "rs-store"
-version = "0.7.0"
+version = "0.8.0"
 edition = "2021"
 authors = ["Changju Lee", "Changju Lee<rookiecj@gmail.com>"]
 description = "Redux Store for Rust"
@@ -31,3 +31,7 @@ path = "src/example/calc_concurrent.rs"
 [[bin]]
 name = "calc_unsubscribe"
 path = "src/example/calc_unsubscribe.rs"
+
+[[bin]]
+name = "calc_clear_subscriber"
+path = "src/example/calc_clear_subscribers.rs"

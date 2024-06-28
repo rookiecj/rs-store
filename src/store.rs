@@ -167,6 +167,12 @@ where
         });
     }
 
+    /// clear all subscribers
+    pub fn clear_subscribers(&self) {
+        let mut subscribers = self.subscribers.lock().unwrap();
+        subscribers.clear();
+    }
+
     pub(crate) fn do_reduce(&self, action: &Action) -> bool {
         let mut state = self.state.lock().unwrap();
         let mut need_dispatch = false;

@@ -23,7 +23,11 @@ example-calc_curr:	## example calc_concurrent
 example-calc_unsubcribe:	## example calc_unsubcribe
 	cargo run --bin calc_unsubscribe
 
-example: example-calc example-calc_fn example-calc_curr	example-calc_unsubcribe 	## example all
+example-calc_clear_subscriber:	## example calc_unsubcribe
+	cargo run --bin calc_clear_subscriber
+
+
+example: example-calc example-calc_fn example-calc_curr	example-calc_unsubcribe example-calc_clear_subscriber	## example all
 
 publish: build	## publish
 	cargo login
