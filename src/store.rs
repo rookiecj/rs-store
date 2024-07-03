@@ -22,6 +22,15 @@ pub enum DispatchOp<State> {
     Keep(State),
 }
 
+// #[derive(Clone,Debug)]
+pub enum ActionOp<A>
+where
+    A: Send + Sync + 'static,
+{
+    Action(A),
+    Exit,
+}
+
 /// Store is a simple implementation of a Redux store
 pub struct Store<State, Action>
 where
@@ -31,7 +40,7 @@ where
     state: Mutex<State>,
     pub reducers: Mutex<Vec<Box<dyn Reducer<State, Action> + Send + Sync>>>,
     pub subscribers: Arc<Mutex<Vec<Arc<dyn Subscriber<State, Action> + Send + Sync>>>>,
-    pub tx: Mutex<Option<Sender<Action>>>,
+    pub tx: Mutex<Option<Sender<ActionOp<Action>>>>,
     dispatcher: Mutex<Option<thread::JoinHandle<()>>>,
 }
 
@@ -89,7 +98,7 @@ where
     ) -> Result<Arc<Store<State, Action>>, StoreError> {
         // create a channel
         // and start a thread in which the store will listen for actions
-        let (tx, rx) = std::sync::mpsc::channel::<Action>();
+        let (tx, rx) = std::sync::mpsc::channel::<ActionOp<Action>>();
         let store = Store {
             state: Mutex::new(state),
             reducers: Mutex::new(vec![reducer]),
@@ -105,8 +114,15 @@ where
         let builder = thread::Builder::new().name(name);
         let r = builder.spawn(move || {
             for action in rx {
-                if rx_store.do_reduce(&action) {
-                    rx_store.do_notify(&action);
+                match action {
+                    ActionOp::Action(action) => {
+                        if rx_store.do_reduce(&action) {
+                            rx_store.do_notify(&action);
+                        }
+                    }
+                    ActionOp::Exit => {
+                        break;
+                    }
                 }
             }
         });
@@ -181,6 +197,7 @@ where
     /// close the store
     pub fn close(&self) {
         if let Some(tx) = self.tx.lock().unwrap().take() {
+            tx.send(ActionOp::Exit).unwrap_or(());
             drop(tx);
         }
     }
@@ -214,7 +231,7 @@ where
     }
 }
 
-impl<State, Action> Dispatcher<Action> for Store<State, Action>
+impl<State, Action> Dispatcher<Action> for Arc<Store<State, Action>>
 where
     State: Default + Send + Sync + Clone + 'static,
     Action: Send + Sync + 'static,
@@ -222,8 +239,19 @@ where
     fn dispatch(&self, action: Action) {
         let sender = self.tx.lock().unwrap();
         if let Some(tx) = sender.as_ref() {
-            tx.send(action).unwrap_or(());
+            tx.send(ActionOp::Action(action)).unwrap_or(());
         }
+    }
+
+    fn dispatch_thunk(
+        &self,
+        thunk: Box<dyn Fn(Arc<&dyn Dispatcher<Action>>) + Send>,
+    ) -> thread::JoinHandle<()> {
+        let self_clone = self.clone();
+        return thread::spawn(move || {
+            let dispatcher = Arc::new(&self_clone as &dyn Dispatcher<Action>);
+            thunk(dispatcher);
+        });
     }
 }
 

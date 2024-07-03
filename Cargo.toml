@@ -35,3 +35,7 @@ path = "src/example/calc_unsubscribe.rs"
 [[bin]]
 name = "calc_clear_subscriber"
 path = "src/example/calc_clear_subscribers.rs"
+
+[[bin]]
+name = "calc_thunk"
+path = "src/example/calc_thunk.rs"
