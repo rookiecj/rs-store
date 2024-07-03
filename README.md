@@ -29,10 +29,10 @@ pub fn main() {
 
 ```
 
-### To Do
+### Features
 
 - [X] add thread name
 - [X] subscription to unsubscribe
-- [X] clear subscribers
-- [ ] add Thunk Middleware
+- [X] clear subscribers (clear_subscribers)
+- [X] add Thunk action(dispatch_thunk)
 - [ ] Add tests

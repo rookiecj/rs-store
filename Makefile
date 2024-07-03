@@ -26,8 +26,11 @@ example-calc_unsubcribe:	## example calc_unsubcribe
 example-calc_clear_subscriber:	## example calc_unsubcribe
 	cargo run --bin calc_clear_subscriber
 
+example-calc_thunk:	## example calc_thunk
+	cargo run --bin calc_thunk
 
-example: example-calc example-calc_fn example-calc_curr	example-calc_unsubcribe example-calc_clear_subscriber	## example all
+
+example: example-calc example-calc_fn example-calc_curr	example-calc_unsubcribe example-calc_clear_subscriber example-calc_thunk	## example all
 
 publish: build	## publish
 	cargo login
