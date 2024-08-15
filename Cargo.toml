@@ -1,6 +1,6 @@
 [package]
 name = "rs-store"
-version = "0.9.0"
+version = "0.10.0"
 edition = "2021"
 authors = ["Changju Lee", "Changju Lee<rookiecj@gmail.com>"]
 description = "Redux Store for Rust"
@@ -15,6 +15,7 @@ keywords = ["redux", "store", "rust", "state", "management"]
 [dependencies]
 thiserror = "1.0.58"
 once_cell = "1.19.0"
+crossbeam = "0.8"
 
 [[bin]]
 name = "calc_basic"

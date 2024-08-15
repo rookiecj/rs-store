@@ -1,9 +1,12 @@
-use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
+use crate::channel::{BackpressureChannel, SenderChannel};
 use crate::dispatcher::Dispatcher;
-use crate::{Reducer, Subscriber, Subscription};
+use crate::{channel, Reducer, Subscriber, Subscription};
+
+pub const DEFAULT_CAPACITY: usize = 16;
+pub const DEFAULT_POLICY: channel::BackpressurePolicy = channel::BackpressurePolicy::DropOld;
 
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum StoreError {
@@ -40,7 +43,8 @@ where
     state: Mutex<State>,
     pub reducers: Mutex<Vec<Box<dyn Reducer<State, Action> + Send + Sync>>>,
     pub subscribers: Arc<Mutex<Vec<Arc<dyn Subscriber<State, Action> + Send + Sync>>>>,
-    pub tx: Mutex<Option<Sender<ActionOp<Action>>>>,
+    pub tx: Mutex<Option<SenderChannel<ActionOp<Action>>>>,
+    // reduce and dispatch thread
     dispatcher: Mutex<Option<thread::JoinHandle<()>>>,
 }
 
@@ -90,15 +94,26 @@ where
         Self::new_with_name(reducer, state, "store".into()).unwrap()
     }
 
-    /// create a new store with a reducer and an initial state
+    /// create a new store with name
     pub fn new_with_name(
         reducer: Box<dyn Reducer<State, Action> + Send + Sync>,
         state: State,
         name: String,
     ) -> Result<Arc<Store<State, Action>>, StoreError> {
+        Self::new_with(reducer, state, name, DEFAULT_CAPACITY, DEFAULT_POLICY)
+    }
+
+    /// create a new store with name
+    pub fn new_with(
+        reducer: Box<dyn Reducer<State, Action> + Send + Sync>,
+        state: State,
+        name: String,
+        capacity: usize,
+        policy: channel::BackpressurePolicy,
+    ) -> Result<Arc<Store<State, Action>>, StoreError> {
         // create a channel
         // and start a thread in which the store will listen for actions
-        let (tx, rx) = std::sync::mpsc::channel::<ActionOp<Action>>();
+        let (tx, rx) = BackpressureChannel::<ActionOp<Action>>::new(capacity, policy);
         let store = Store {
             state: Mutex::new(state),
             reducers: Mutex::new(vec![reducer]),
@@ -113,7 +128,7 @@ where
         let tx_store = rx_store.clone();
         let builder = thread::Builder::new().name(name);
         let r = builder.spawn(move || {
-            for action in rx {
+            while let Some(action) = rx.recv() {
                 match action {
                     ActionOp::Action(action) => {
                         if rx_store.do_reduce(&action) {
@@ -134,7 +149,7 @@ where
 
     /// get the last state
     pub fn get_state(&self) -> State {
-        return self.state.lock().unwrap().clone();
+        self.state.lock().unwrap().clone()
     }
 
     /// add a reducer to the store
@@ -152,12 +167,12 @@ where
 
         // disposer for the subscriber
         let subscribers = self.subscribers.clone();
-        return Box::new(SubscriptionImpl {
+        Box::new(SubscriptionImpl {
             unsubscribe: Box::new(move || {
                 let mut subscribers = subscribers.lock().unwrap();
                 subscribers.retain(|s| !Arc::ptr_eq(s, &subscriber));
             }),
-        });
+        })
     }
 
     /// clear all subscribers
@@ -248,12 +263,95 @@ where
         thunk: Box<dyn Fn(Arc<&dyn Dispatcher<Action>>) + Send>,
     ) -> thread::JoinHandle<()> {
         let self_clone = self.clone();
-        return thread::spawn(move || {
+        thread::spawn(move || {
             let dispatcher = Arc::new(&self_clone as &dyn Dispatcher<Action>);
             thunk(dispatcher);
-        });
+        })
     }
 }
 
 #[cfg(test)]
-mod tests {}
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    struct TestReducer;
+
+    impl Reducer<i32, i32> for TestReducer {
+        fn reduce(&self, state: &i32, action: &i32) -> DispatchOp<i32> {
+            DispatchOp::Dispatch(state + action)
+        }
+    }
+
+    struct TestSubscriber;
+
+    impl Subscriber<i32, i32> for TestSubscriber {
+        fn on_notify(&self, state: &i32, action: &i32) {
+            println!("State: {}, Action: {}", state, action);
+        }
+    }
+
+    #[test]
+    fn test_store_creation() {
+        let reducer = Box::new(TestReducer);
+        let store = Store::new(reducer);
+
+        assert_eq!(store.get_state(), 0);
+    }
+
+    #[test]
+    fn test_store_dispatch() {
+        let reducer = Box::new(TestReducer);
+        let store = Store::new(reducer);
+
+        store.dispatch(1);
+        thread::sleep(Duration::from_millis(100)); // Wait for the dispatcher to process
+
+        assert_eq!(store.get_state(), 1);
+    }
+
+    #[test]
+    fn test_store_subscriber() {
+        let reducer = Box::new(TestReducer);
+        let store = Store::new(reducer);
+
+        let subscriber = Arc::new(TestSubscriber);
+        store.add_subscriber(subscriber);
+
+        store.dispatch(1);
+        thread::sleep(Duration::from_millis(100)); // Wait for the dispatcher to process
+
+        assert_eq!(store.get_state(), 1);
+    }
+
+    #[test]
+    fn test_store_with_initial_state() {
+        let reducer = Box::new(TestReducer);
+        let store = Store::new_with_state(reducer, 10);
+
+        assert_eq!(store.get_state(), 10);
+    }
+
+    #[test]
+    fn test_store_with_name() {
+        let reducer = Box::new(TestReducer);
+        let store = Store::new_with_name(reducer, 10, "test_store".to_string()).unwrap();
+
+        assert_eq!(store.get_state(), 10);
+    }
+
+    #[test]
+    fn test_store_with_custom_capacity_and_policy() {
+        let reducer = Box::new(TestReducer);
+        let store = Store::new_with(
+            reducer,
+            10,
+            "test_store".to_string(),
+            5,
+            channel::BackpressurePolicy::DropOld,
+        )
+            .unwrap();
+
+        assert_eq!(store.get_state(), 10);
+    }
+}

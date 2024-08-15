@@ -36,9 +36,9 @@ pub fn main() {
 - [X] clear subscribers (clear_subscribers)
 - [X] add Thunk action(dispatch_thunk)
 - [ ] notify the latest state when a subscriber added
-- [ ] add backpressure policy(drop oldest)
-- [ ] bounding channel size(sync_channel), dispatch can be failed
+- [X] add backpressure policy(drop oldest)
+- [x] bounding channel size(sync_channel), dispatch can be failed
 - [ ] add scheduler for notification(CurrentThread, ThreadPool)
 - [ ] stream  (pull model) instead of subscription(push model)
 - [ ] stats middleware which can be used to log the state changes
-- [ ] Add tests
+- [x] add tests
