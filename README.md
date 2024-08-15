@@ -5,10 +5,13 @@ rs-store is a Redux Store written in Rust.
 ### Key Features
 
 Manage and receive notifications of state changes through the Reducer and Subscriber interfaces.
-Store registers Reducer and Subscriber, dispatches actions to change the state, and sends notifications.
-Store is designed to be thread-safe, enabling parallel processing.
+Store registers Reducer and Subscriber, dispatches actions to change the state, and sends notifications to subscribers.
+Store is designed to change states in thread-safe manner.
 
 ### How to use
+
+rust documentation is available at [crates.io](https://crates.io/crates/rs-store)
+and [docs.rs](https://docs.rs/rs-store/0.10.1/rs_store/).
 
 ```rust
 
