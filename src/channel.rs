@@ -1,20 +1,31 @@
-use crossbeam::channel::{self, Receiver, Sender, TrySendError};
 use std::marker::PhantomData;
+use std::thread;
 use std::time::Duration;
-use std::{fmt, thread};
+
+use crossbeam::channel::{self, Receiver, Sender, TrySendError};
 
 /// the Backpressure policy
 #[derive(Clone, Copy)]
 pub enum BackpressurePolicy {
+    /// Block the sender when the queue is full
+    BlockOnFull,
     /// Drop the oldest item when the queue is full
     DropOld,
     /// Drop the latest item when the queue is full
     DropLatest,
 }
 
+#[derive(thiserror::Error, Debug)]
+pub(crate) enum SenderError<T> {
+    #[error("Failed to send: {0}")]
+    SendError(T),
+    #[error("Failed to try_send: {0}")]
+    TrySendError(TrySendError<T>),
+}
+
 /// Channel to hold the sender with backpressure policy
 #[derive(Clone)]
-pub struct SenderChannel<T> {
+pub(crate) struct SenderChannel<T> {
     sender: Sender<T>,
     receiver: Receiver<T>,
     policy: BackpressurePolicy,
@@ -29,26 +40,29 @@ impl<T> SenderChannel<T> {
         }
     }
 
-    pub fn send(&self, item: T) -> Result<(), TrySendError<T>> {
+    pub fn send(&self, item: T) -> Result<(), SenderError<T>> {
         match self.policy {
+            BackpressurePolicy::BlockOnFull => self.sender.send(item).map_err(|e| {
+                SenderError::SendError(e.0)
+            }),
             BackpressurePolicy::DropOld => {
                 if let Err(TrySendError::Full(item)) = self.sender.try_send(item) {
                     // Drop the oldest item and try sending again
                     let _ = self.receiver.try_recv(); // Remove the oldest item
-                    self.sender.try_send(item)
+                    self.sender.try_send(item).map_err(SenderError::TrySendError)
                 } else {
                     Ok(())
                 }
             }
             BackpressurePolicy::DropLatest => {
                 // Try to send the item, if the queue is full, just ignore the item (drop the latest)
-                self.sender.try_send(item)
+                self.sender.try_send(item).map_err(SenderError::TrySendError)
             }
         }
     }
 }
 
-pub struct ReceiverChannel<T> {
+pub(crate) struct ReceiverChannel<T> {
     receiver: Receiver<T>,
 }
 
@@ -125,8 +139,9 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::sync::mpsc;
+
+    use super::*;
 
     #[test]
     fn test_channel_backpressure_drop_old() {

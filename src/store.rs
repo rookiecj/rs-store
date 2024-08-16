@@ -6,7 +6,7 @@ use crate::dispatcher::Dispatcher;
 use crate::{channel, Reducer, Subscriber, Subscription};
 
 pub const DEFAULT_CAPACITY: usize = 16;
-pub const DEFAULT_POLICY: channel::BackpressurePolicy = channel::BackpressurePolicy::DropOld;
+pub const DEFAULT_POLICY: channel::BackpressurePolicy = channel::BackpressurePolicy::BlockOnFull;
 
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum StoreError {
