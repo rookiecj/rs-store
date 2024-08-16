@@ -41,9 +41,9 @@ where
     Action: Send + Sync + 'static,
 {
     state: Mutex<State>,
-    pub reducers: Mutex<Vec<Box<dyn Reducer<State, Action> + Send + Sync>>>,
-    pub subscribers: Arc<Mutex<Vec<Arc<dyn Subscriber<State, Action> + Send + Sync>>>>,
-    pub tx: Mutex<Option<SenderChannel<ActionOp<Action>>>>,
+    pub(crate) reducers: Mutex<Vec<Box<dyn Reducer<State, Action> + Send + Sync>>>,
+    pub(crate) subscribers: Arc<Mutex<Vec<Arc<dyn Subscriber<State, Action> + Send + Sync>>>>,
+    pub(crate) tx: Mutex<Option<SenderChannel<ActionOp<Action>>>>,
     // reduce and dispatch thread
     dispatcher: Mutex<Option<thread::JoinHandle<()>>>,
 }
@@ -201,11 +201,10 @@ where
 
     pub(crate) fn do_notify(&self, action: &Action) {
         // TODO thread pool
-        if let subscribers = self.subscribers.lock().unwrap().clone() {
-            let state = self.state.lock().unwrap().clone();
-            for subscriber in subscribers.iter() {
-                subscriber.on_notify(&state, action);
-            }
+        let subscribers = self.subscribers.lock().unwrap().clone();
+        let state = self.state.lock().unwrap().clone();
+        for subscriber in subscribers.iter() {
+            subscriber.on_notify(&state, action);
         }
     }
 

@@ -32,13 +32,13 @@ pub(crate) struct SenderChannel<T> {
 }
 
 impl<T> SenderChannel<T> {
-    pub fn new(sender: Sender<T>, receiver: Receiver<T>, policy: BackpressurePolicy) -> Self {
-        SenderChannel {
-            sender,
-            receiver,
-            policy,
-        }
-    }
+    // pub fn new(sender: Sender<T>, receiver: Receiver<T>, policy: BackpressurePolicy) -> Self {
+    //     SenderChannel {
+    //         sender,
+    //         receiver,
+    //         policy,
+    //     }
+    // }
 
     pub fn send(&self, item: T) -> Result<(), SenderError<T>> {
         match self.policy {
@@ -71,6 +71,7 @@ impl<T> ReceiverChannel<T> {
         self.receiver.recv().ok()
     }
 
+    #[allow(dead_code)]
     pub fn try_recv(&self) -> Option<T> {
         self.receiver.try_recv().ok()
     }
@@ -78,8 +79,6 @@ impl<T> ReceiverChannel<T> {
 
 /// Channel with back pressure
 pub(crate) struct BackpressureChannel<T> {
-    capacity: usize,
-    policy: BackpressurePolicy,
     phantom_data: PhantomData<T>,
 }
 
@@ -100,6 +99,7 @@ impl<T> BackpressureChannel<T> {
     }
 }
 
+#[allow(dead_code)]
 fn main() {
     let (sender, receiver) = BackpressureChannel::new(5, BackpressurePolicy::DropOldest);
 
