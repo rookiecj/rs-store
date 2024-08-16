@@ -5,15 +5,20 @@ help:  ## show this help
 	@cat $(MAKEFILE_LIST) | grep -E "^[a-zA-Z0-9_-]+:.*?## .*$$" | \
     awk 'BEGIN {FS = ":.*?# "}; {printf "\033[36m%-30s\033[0m %s\n", $$1, $$2}'
 
-build:
+build:	## build
 	cargo build --lib
 
-clean:
+clean:	## clean
 	cargo clean
 
 .PHONY: test
-test:
+test:	## test
 	cargo test
+
+.PHONY: doc
+doc:	## doc
+	cargo doc --lib --no-deps -p rs-store
+
 
 example-calc:	## example calc_basic
 	cargo run --bin calc_basic

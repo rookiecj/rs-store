@@ -1,5 +1,6 @@
 use crate::DispatchOp;
 
+/// Reducer reduces the state based on the action.
 pub trait Reducer<State, Action>
 where
     State: Default + Send + Sync + Clone,
@@ -8,6 +9,7 @@ where
     fn reduce(&self, state: &State, action: &Action) -> DispatchOp<State>;
 }
 
+/// FnReducer is a reducer that is created from a function.
 pub struct FnReducer<F, State, Action>
 where
     F: Fn(&State, &Action) -> DispatchOp<State>,

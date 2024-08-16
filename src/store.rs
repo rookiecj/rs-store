@@ -5,9 +5,13 @@ use crate::channel::{BackpressureChannel, SenderChannel};
 use crate::dispatcher::Dispatcher;
 use crate::{channel, Reducer, Subscriber, Subscription};
 
+/// Default capacity for the channel
 pub const DEFAULT_CAPACITY: usize = 16;
+/// Default backpressure policy for the channel
 pub const DEFAULT_POLICY: channel::BackpressurePolicy = channel::BackpressurePolicy::BlockOnFull;
 
+
+/// StoreError represents an error that occurred in the store
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum StoreError {
     #[error("no error")]
@@ -26,7 +30,7 @@ pub enum DispatchOp<State> {
 }
 
 // #[derive(Clone,Debug)]
-pub enum ActionOp<A>
+pub(crate) enum ActionOp<A>
 where
     A: Send + Sync + 'static,
 {

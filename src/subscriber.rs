@@ -1,16 +1,19 @@
+/// Subscriber is a trait that can be implemented to receive notifications from the store.
 pub trait Subscriber<State, Action>
 where
     State: Default + Send + Sync + Clone,
     Action: Send + Sync,
 {
+    /// on_notify is called when the store is notified of an action.
     fn on_notify(&self, state: &State, action: &Action);
 }
 
-/// it is used for deregistration
+/// Subscription is a handle to unsubscribe from the store.
 pub trait Subscription: Send {
     fn unsubscribe(&self);
 }
 
+/// FnSubscriber is a subscriber that is created from a function.
 pub struct FnSubscriber<F, State, Action>
 where
     F: Fn(&State, &Action),
