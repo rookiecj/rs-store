@@ -10,7 +10,7 @@ pub enum BackpressurePolicy {
     /// Block the sender when the queue is full
     BlockOnFull,
     /// Drop the oldest item when the queue is full
-    DropOld,
+    DropOldest,
     /// Drop the latest item when the queue is full
     DropLatest,
 }
@@ -45,7 +45,7 @@ impl<T> SenderChannel<T> {
             BackpressurePolicy::BlockOnFull => self.sender.send(item).map_err(|e| {
                 SenderError::SendError(e.0)
             }),
-            BackpressurePolicy::DropOld => {
+            BackpressurePolicy::DropOldest => {
                 if let Err(TrySendError::Full(item)) = self.sender.try_send(item) {
                     // Drop the oldest item and try sending again
                     let _ = self.receiver.try_recv(); // Remove the oldest item
@@ -101,7 +101,7 @@ impl<T> BackpressureChannel<T> {
 }
 
 fn main() {
-    let (sender, receiver) = BackpressureChannel::new(5, BackpressurePolicy::DropOld);
+    let (sender, receiver) = BackpressureChannel::new(5, BackpressurePolicy::DropOldest);
 
     let mut producers = vec![];
 
@@ -145,7 +145,7 @@ mod tests {
 
     #[test]
     fn test_channel_backpressure_drop_old() {
-        let (sender, receiver) = BackpressureChannel::new(5, BackpressurePolicy::DropOld);
+        let (sender, receiver) = BackpressureChannel::new(5, BackpressurePolicy::DropOldest);
 
         let (tx, rx) = mpsc::channel(); // Channel to signal when the producer is done
 

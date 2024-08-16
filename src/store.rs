@@ -348,7 +348,7 @@ mod tests {
             10,
             "test_store".to_string(),
             5,
-            channel::BackpressurePolicy::DropOld,
+            channel::BackpressurePolicy::DropOldest,
         )
             .unwrap();
 
