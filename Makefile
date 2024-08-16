@@ -1,15 +1,24 @@
 .DEFAULT_GOAL := help
 
-.PHONY: help
+.PHONY: help build clean
 help:  ## show this help
 	@cat $(MAKEFILE_LIST) | grep -E "^[a-zA-Z0-9_-]+:.*?## .*$$" | \
     awk 'BEGIN {FS = ":.*?# "}; {printf "\033[36m%-30s\033[0m %s\n", $$1, $$2}'
 
-build:
+build:	## build
 	cargo build --lib
 
-clean:
+clean:	## clean
 	cargo clean
+
+.PHONY: test
+test:	## test
+	cargo test
+
+.PHONY: doc
+doc:	## doc
+	cargo doc --lib --no-deps -p rs-store
+
 
 example-calc:	## example calc_basic
 	cargo run --bin calc_basic
@@ -32,6 +41,27 @@ example-calc_thunk:	## example calc_thunk
 
 example: example-calc example-calc_fn example-calc_curr	example-calc_unsubcribe example-calc_clear_subscriber example-calc_thunk	## example all
 
-publish: build	## publish
+VERSION := $(shell cargo pkgid -p "rs-store" | cut -d\# -f2 | cut -d@ -f2)
+
+.PHONY: version
+version:
+#	cargo metadata --no-deps --format-version=1 | jq -r '.packages[] | select(.name == "rs-store") | .version'
+	@echo $(VERSION)
+
+.PHONY: check_version_tag
+check_version_tag:	## check version
+	@git tag | grep -q "^v$(VERSION)" && (echo "tag v$(VERSION) already exist"; exit 1)
+
+.PHONY: add_tag
+add_tag:	## add tag
+	git tag -a "v$(VERSION)" -m "v$(VERSION)"
+
+.PHONY: publish
+publish: check_version_tag build publish_cargo add_tag	## publish
+	@echo "published v$(VERSION)"
+
+.PHONY: publish_cargo
+publish_cargo:	## publish to cargo
 	cargo login
 	cargo publish
+

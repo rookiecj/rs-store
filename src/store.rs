@@ -5,9 +5,13 @@ use crate::channel::{BackpressureChannel, SenderChannel};
 use crate::dispatcher::Dispatcher;
 use crate::{channel, Reducer, Subscriber, Subscription};
 
+/// Default capacity for the channel
 pub const DEFAULT_CAPACITY: usize = 16;
-pub const DEFAULT_POLICY: channel::BackpressurePolicy = channel::BackpressurePolicy::DropOld;
+/// Default backpressure policy for the channel
+pub const DEFAULT_POLICY: channel::BackpressurePolicy = channel::BackpressurePolicy::BlockOnFull;
 
+
+/// StoreError represents an error that occurred in the store
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum StoreError {
     #[error("no error")]
@@ -26,7 +30,7 @@ pub enum DispatchOp<State> {
 }
 
 // #[derive(Clone,Debug)]
-pub enum ActionOp<A>
+pub(crate) enum ActionOp<A>
 where
     A: Send + Sync + 'static,
 {
@@ -41,9 +45,9 @@ where
     Action: Send + Sync + 'static,
 {
     state: Mutex<State>,
-    pub reducers: Mutex<Vec<Box<dyn Reducer<State, Action> + Send + Sync>>>,
-    pub subscribers: Arc<Mutex<Vec<Arc<dyn Subscriber<State, Action> + Send + Sync>>>>,
-    pub tx: Mutex<Option<SenderChannel<ActionOp<Action>>>>,
+    pub(crate) reducers: Mutex<Vec<Box<dyn Reducer<State, Action> + Send + Sync>>>,
+    pub(crate) subscribers: Arc<Mutex<Vec<Arc<dyn Subscriber<State, Action> + Send + Sync>>>>,
+    pub(crate) tx: Mutex<Option<SenderChannel<ActionOp<Action>>>>,
     // reduce and dispatch thread
     dispatcher: Mutex<Option<thread::JoinHandle<()>>>,
 }
@@ -201,11 +205,10 @@ where
 
     pub(crate) fn do_notify(&self, action: &Action) {
         // TODO thread pool
-        if let subscribers = self.subscribers.lock().unwrap().clone() {
-            let state = self.state.lock().unwrap().clone();
-            for subscriber in subscribers.iter() {
-                subscriber.on_notify(&state, action);
-            }
+        let subscribers = self.subscribers.lock().unwrap().clone();
+        let state = self.state.lock().unwrap().clone();
+        for subscriber in subscribers.iter() {
+            subscriber.on_notify(&state, action);
         }
     }
 
@@ -348,7 +351,7 @@ mod tests {
             10,
             "test_store".to_string(),
             5,
-            channel::BackpressurePolicy::DropOld,
+            channel::BackpressurePolicy::DropOldest,
         )
             .unwrap();
 

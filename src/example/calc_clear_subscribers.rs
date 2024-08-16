@@ -79,13 +79,13 @@ impl Subscriber<CalcState, CalcAction> for CalcSubscriber {
         );
 
         match action {
-            CalcAction::Add(i) => {
+            CalcAction::Add(_i) => {
                 println!(
                     "CalcSubscriber::on_notify: id:{}, state: {:?} <- old: {:?}",
                     self.id, state, self.last
                 );
             }
-            CalcAction::Subtract(i) => {
+            CalcAction::Subtract(_i) => {
                 println!(
                     "CalcSubscriber::on_notify: id:{}, state: {:?} <- old: {:?}",
                     self.id, state, self.last
@@ -105,7 +105,7 @@ pub fn main() {
         CalcState::default(),
         "store-unsubscribe".into(),
     )
-    .unwrap();
+        .unwrap();
 
     store.add_subscriber(Arc::new(CalcSubscriber::default()));
     store.dispatch(CalcAction::Add(1));
@@ -120,7 +120,7 @@ pub fn main() {
         subscription
     });
 
-    let subscription = handle.join().unwrap();
+    let _ = handle.join().unwrap();
 
     println!("clear subscribers...");
     store.clear_subscribers();
