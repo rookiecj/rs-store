@@ -1,4 +1,3 @@
-use once_cell::sync::Lazy;
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 
@@ -55,22 +54,22 @@ struct CalcSubscriber {
 }
 
 impl Default for CalcSubscriber {
-    fn default() -> CalcSubscriber {
-        CalcSubscriber {
+    fn default() -> Self {
+        Self {
             id: 0,
             last: Mutex::new(CalcState::default()),
         }
     }
 }
 
-impl CalcSubscriber {
-    fn new(id: i32) -> CalcSubscriber {
-        CalcSubscriber {
-            id,
-            last: Mutex::new(CalcState::default()),
-        }
-    }
-}
+// impl CalcSubscriber {
+//     fn new(id: i32) -> Self {
+//         Self {
+//             id,
+//             last: Mutex::new(CalcState::default()),
+//         }
+//     }
+// }
 
 impl Subscriber<CalcState, CalcAction> for CalcSubscriber {
     fn on_notify(&self, state: &CalcState, action: &CalcAction) {
@@ -80,13 +79,13 @@ impl Subscriber<CalcState, CalcAction> for CalcSubscriber {
         );
 
         match action {
-            CalcAction::Add(i) => {
+            CalcAction::Add(_i) => {
                 println!(
                     "CalcSubscriber::on_notify: id:{}, state: {:?} <- old: {:?}",
                     self.id, state, self.last
                 );
             }
-            CalcAction::Subtract(i) => {
+            CalcAction::Subtract(_i) => {
                 println!(
                     "CalcSubscriber::on_notify: id:{}, state: {:?} <- old: {:?}",
                     self.id, state, self.last
@@ -132,7 +131,7 @@ pub fn main() {
     let subtract_thunk = get_subtract_thunk(cond_done.clone(), 1);
     store.dispatch_thunk(subtract_thunk);
 
-    cond_done.wait(lock_done.lock().unwrap()).unwrap();
+    drop(cond_done.wait(lock_done.lock().unwrap()).unwrap());
 
     store.stop();
 }

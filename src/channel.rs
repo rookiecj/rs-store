@@ -42,9 +42,9 @@ impl<T> SenderChannel<T> {
 
     pub fn send(&self, item: T) -> Result<(), SenderError<T>> {
         match self.policy {
-            BackpressurePolicy::BlockOnFull => self.sender.send(item).map_err(|e| {
-                SenderError::SendError(e.0)
-            }),
+            BackpressurePolicy::BlockOnFull => {
+                self.sender.send(item).map_err(|e| SenderError::SendError(e.0))
+            }
             BackpressurePolicy::DropOldest => {
                 if let Err(TrySendError::Full(item)) = self.sender.try_send(item) {
                     // Drop the oldest item and try sending again
@@ -139,15 +139,11 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::mpsc;
-
     use super::*;
 
     #[test]
     fn test_channel_backpressure_drop_old() {
         let (sender, receiver) = BackpressureChannel::new(5, BackpressurePolicy::DropOldest);
-
-        let (tx, rx) = mpsc::channel(); // Channel to signal when the producer is done
 
         let producer = {
             let sender_channel = sender.clone();
@@ -160,7 +156,6 @@ mod tests {
                     }
                     thread::sleep(Duration::from_millis(50)); // Slow down to observe full condition
                 }
-                tx.send(()).unwrap(); // Signal that the producer is done
             })
         };
 
@@ -190,18 +185,11 @@ mod tests {
         assert!(received_items.len() < 20);
         // Ensure the last items were not dropped (based on the DropOld policy)
         assert_eq!(received_items.last(), Some(&19));
-
-        // Check that the channel is closed
-        // assert_eq!(rx.try_recv(), Err(TryRecvError::Empty));
-
-        assert_eq!(rx.try_recv(), Ok(()));
     }
 
     #[test]
     fn test_channel_backpressure_drop_latest() {
         let (sender, receiver) = BackpressureChannel::new(5, BackpressurePolicy::DropLatest);
-
-        let (tx, rx) = mpsc::channel(); // Channel to signal when the producer is done
 
         let producer = {
             let sender_channel = sender.clone();
@@ -214,7 +202,6 @@ mod tests {
                     }
                     thread::sleep(Duration::from_millis(50)); // Slow down to observe full condition
                 }
-                tx.send(()).unwrap(); // Signal that the producer is done
             })
         };
 
@@ -244,8 +231,5 @@ mod tests {
         // Ensure the last item received is not necessarily the last one sent, based on the DropLatest policy
         assert!(received_items.contains(&0)); // The earliest items should be present
         assert!(received_items.last().unwrap() < &19); // The latest items might be dropped
-
-        // Check that the channel is closed
-        // assert_eq!(rx.try_recv(), Err(TryRecvError::Empty));
     }
 }
