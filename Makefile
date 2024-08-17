@@ -49,8 +49,10 @@ version:
 	@echo $(VERSION)
 
 .PHONY: check_version_tag
-check_version_tag:	## check version
-	@git tag | grep -q "^v$(VERSION)" && (echo "tag v$(VERSION) already exist"; exit 1)
+check_version_tag: TAG_EXISTS := $(shell git tag | grep -q "^v$(VERSION)" && echo "true" || echo "false")
+check_version_tag:	## check version tag
+	# version tag should not be found
+	[ "$(TAG_EXISTS)" = "false" ]
 
 .PHONY: add_tag
 add_tag:	## add tag
