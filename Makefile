@@ -61,6 +61,8 @@ add_tag:	## add tag
 .PHONY: publish
 publish: check_version_tag build publish_cargo add_tag	## publish
 	@echo "published v$(VERSION)"
+	@echo push tag v$(VERSION) to origin
+	@git push origin v$(VERSION)
 
 .PHONY: publish_cargo
 publish_cargo:	## publish to cargo
