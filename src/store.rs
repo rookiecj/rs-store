@@ -3,7 +3,7 @@ use std::thread;
 
 use crate::channel::{BackpressureChannel, SenderChannel};
 use crate::dispatcher::Dispatcher;
-use crate::{channel, Reducer, Subscriber, Subscription};
+use crate::{channel, Iter, Reducer, Subscriber, Subscription, TryIter};
 
 /// Default capacity for the channel
 pub const DEFAULT_CAPACITY: usize = 16;
@@ -50,6 +50,9 @@ where
     pub(crate) tx: Mutex<Option<SenderChannel<ActionOp<Action>>>>,
     // reduce and dispatch thread
     dispatcher: Mutex<Option<thread::JoinHandle<()>>>,
+    // subscriber에서 변화된 state를 수신하는 rx
+    // should be clonable
+    pub(crate) subscriber_rx: Option<spmc::Receiver<State>>,
 }
 
 impl<State, Action> Default for Store<State, Action>
@@ -64,6 +67,7 @@ where
             subscribers: Arc::new(Mutex::new(Vec::default())),
             tx: Mutex::new(None),
             dispatcher: Mutex::new(None),
+            subscriber_rx: None,
         }
     }
 }
@@ -118,12 +122,15 @@ where
         // create a channel
         // and start a thread in which the store will listen for actions
         let (tx, rx) = BackpressureChannel::<ActionOp<Action>>::new(capacity, policy);
+        // TODO spmc channel은 unbounded channel 이다. hot channel 로 만들어야 한다.
+        let (mut subscriber_tx, subscriber_rx) = spmc::channel();
         let store = Store {
             state: Mutex::new(state),
             reducers: Mutex::new(vec![reducer]),
             subscribers: Arc::new(Mutex::new(Vec::default())),
             tx: Mutex::new(Some(tx)),
             dispatcher: Mutex::new(None),
+            subscriber_rx: Some(subscriber_rx),
         };
 
         // start a thread in which the store will listen for actions,
@@ -132,11 +139,12 @@ where
         let tx_store = rx_store.clone();
         let builder = thread::Builder::new().name(name);
         let r = builder.spawn(move || {
+            // when the store drops the tx, rx will be closed
             while let Some(action) = rx.recv() {
                 match action {
                     ActionOp::Action(action) => {
                         if rx_store.do_reduce(&action) {
-                            rx_store.do_notify(&action);
+                            rx_store.do_notify(&mut subscriber_tx, &action);
                         }
                     }
                     ActionOp::Exit => {
@@ -151,9 +159,20 @@ where
         Ok(tx_store)
     }
 
-    /// get the last state
-    pub fn get_state(&self) -> State {
+    /// get a snapshot of the latest state
+    pub(crate) fn get_snapshot(&self) -> State {
         self.state.lock().unwrap().clone()
+    }
+
+    /// get the state
+    pub fn get_state(&self) -> Iter<State> {
+        // TODO 하나의 subscriber만 receive 하고 있다, bus형태로 변경
+        Iter::new(self.subscriber_rx.as_ref().unwrap().clone())
+    }
+
+    /// get the state
+    pub fn get_try_state(&self) -> TryIter<State> {
+        TryIter::new(self.subscriber_rx.as_ref().unwrap().clone())
     }
 
     /// add a reducer to the store
@@ -166,6 +185,7 @@ where
         &self,
         subscriber: Arc<dyn Subscriber<State, Action> + Send + Sync>,
     ) -> Box<dyn Subscription> {
+        // TODO get_state()를 이용해서 구현 또는 삭제
         // append a subscriber
         self.subscribers.lock().unwrap().push(subscriber.clone());
 
@@ -203,13 +223,15 @@ where
         need_dispatch
     }
 
-    pub(crate) fn do_notify(&self, action: &Action) {
-        // TODO thread pool
-        let subscribers = self.subscribers.lock().unwrap().clone();
+    pub(crate) fn do_notify(&self, subscriber_tx: &mut spmc::Sender<State>, action: &Action) {
         let state = self.state.lock().unwrap().clone();
-        for subscriber in subscribers.iter() {
-            subscriber.on_notify(&state, action);
-        }
+        subscriber_tx.send(state).unwrap_or(());
+        // TODO get_state()를 이용해서 구현 또는 삭제
+        // let subscribers = self.subscribers.lock().unwrap().clone();
+        // let state = self.state.lock().unwrap().clone();
+        // for subscriber in subscribers.iter() {
+        //     subscriber.on_notify(&state, action);
+        // }
     }
 
     /// close the store
@@ -299,7 +321,7 @@ mod tests {
         let reducer = Box::new(TestReducer);
         let store = Store::new(reducer);
 
-        assert_eq!(store.get_state(), 0);
+        assert_eq!(store.get_snapshot(), 0);
     }
 
     #[test]
@@ -310,7 +332,7 @@ mod tests {
         store.dispatch(1);
         thread::sleep(Duration::from_millis(100)); // Wait for the dispatcher to process
 
-        assert_eq!(store.get_state(), 1);
+        assert_eq!(store.get_snapshot(), 1);
     }
 
     #[test]
@@ -324,7 +346,7 @@ mod tests {
         store.dispatch(1);
         thread::sleep(Duration::from_millis(100)); // Wait for the dispatcher to process
 
-        assert_eq!(store.get_state(), 1);
+        assert_eq!(store.get_snapshot(), 1);
     }
 
     #[test]
@@ -332,7 +354,7 @@ mod tests {
         let reducer = Box::new(TestReducer);
         let store = Store::new_with_state(reducer, 10);
 
-        assert_eq!(store.get_state(), 10);
+        assert_eq!(store.get_snapshot(), 10);
     }
 
     #[test]
@@ -340,7 +362,7 @@ mod tests {
         let reducer = Box::new(TestReducer);
         let store = Store::new_with_name(reducer, 10, "test_store".to_string()).unwrap();
 
-        assert_eq!(store.get_state(), 10);
+        assert_eq!(store.get_snapshot(), 10);
     }
 
     #[test]
@@ -355,6 +377,39 @@ mod tests {
         )
             .unwrap();
 
-        assert_eq!(store.get_state(), 10);
+        assert_eq!(store.get_snapshot(), 10);
     }
+
+    #[test]
+    fn test_get_state_blocking() {
+        let reducer = Box::new(TestReducer);
+        let store = Store::new(reducer);
+
+        // Dispatch an action in a separate thread after a delay
+        let store_clone = store.clone();
+        thread::spawn(move || {
+            thread::sleep(Duration::from_millis(200)); // Delay to simulate blocking
+            store_clone.dispatch(1);
+        });
+
+        // get_state() should block until the new state is available
+        let mut iter = store.get_state();
+        assert_eq!(iter.next(), Some(1));
+        store.close();
+        assert_eq!(iter.next(), None);
+    }
+
+    #[test]
+    fn test_get_try_state() {
+        let reducer = Box::new(TestReducer);
+        let store = Store::new(reducer);
+
+        store.dispatch(1);
+        thread::sleep(Duration::from_millis(100)); // Wait for the dispatcher to process
+
+        let mut iter = store.get_try_state();
+        assert_eq!(iter.next(), Some(1));
+        assert_eq!(iter.next(), None);
+    }
+
 }

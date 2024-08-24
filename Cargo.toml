@@ -16,6 +16,7 @@ keywords = ["redux", "store", "rust", "state", "management"]
 thiserror = "1.0.58"
 once_cell = "1.19.0"
 crossbeam = "0.8"
+spmc = "0.3"
 
 [[bin]]
 name = "calc_basic"

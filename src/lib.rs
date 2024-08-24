@@ -11,3 +11,6 @@ pub(crate) mod channel;
 pub mod subscriber;
 
 pub use subscriber::*;
+
+pub mod iterator;
+pub use iterator::*;
