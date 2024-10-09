@@ -189,13 +189,12 @@ where
     }
 
     pub(crate) fn do_reduce(&self, action: &Action) -> bool {
-        let action_clone = action.clone();
         let result = panic::catch_unwind(panic::AssertUnwindSafe(|| {
             let mut need_dispatch = false;
             // avoid PoisonError
             let mut next_state = self.state.lock().unwrap().clone();
             for reducer in self.reducers.lock().unwrap().iter() {
-                match reducer.reduce(&next_state, action_clone) {
+                match reducer.reduce(&next_state, action) {
                     DispatchOp::Dispatch(new_state) => {
                         next_state = new_state;
                         need_dispatch = true;
@@ -378,9 +377,10 @@ mod tests {
     struct PanicReducer;
 
     impl Reducer<i32, i32> for PanicReducer {
-        fn reduce(&self, state: &i32, action: &i32) -> DispatchOp<i32> {
+        #[allow(unreachable_code)]
+        fn reduce(&self, _state: &i32, _action: &i32) -> DispatchOp<i32> {
             panic!("reduce: panicking");
-            DispatchOp::Dispatch(state + action)
+            DispatchOp::Dispatch(_state + _action)
         }
     }
 
@@ -404,6 +404,7 @@ mod tests {
         state: Mutex<i32>,
     }
     impl Subscriber<i32, i32> for PanicSubscriber {
+        #[allow(unreachable_code)]
         fn on_notify(&self, state: &i32, action: &i32) {
             panic!("on_notify: State: {}, Action: {}", *state, *action);
             *self.state.lock().unwrap() = *state;
