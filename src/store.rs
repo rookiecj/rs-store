@@ -44,6 +44,7 @@ where
     State: Default + Send + Sync + Clone + 'static,
     Action: Send + Sync + 'static,
 {
+    name: String,
     state: Mutex<State>,
     pub(crate) reducers: Mutex<Vec<Box<dyn Reducer<State, Action> + Send + Sync>>>,
     pub(crate) subscribers: Arc<Mutex<Vec<Arc<dyn Subscriber<State, Action> + Send + Sync>>>>,
@@ -59,6 +60,7 @@ where
 {
     fn default() -> Store<State, Action> {
         Store {
+            name: "store".to_string(),
             state: Default::default(),
             reducers: Mutex::new(Vec::default()),
             subscribers: Arc::new(Mutex::new(Vec::default())),
@@ -119,6 +121,7 @@ where
         // and start a thread in which the store will listen for actions
         let (tx, rx) = BackpressureChannel::<ActionOp<Action>>::new(capacity, policy);
         let store = Store {
+            name: name.clone(),
             state: Mutex::new(state),
             reducers: Mutex::new(vec![reducer]),
             subscribers: Arc::new(Mutex::new(Vec::default())),
@@ -189,8 +192,8 @@ where
         let action_clone = action.clone();
         let result = panic::catch_unwind(panic::AssertUnwindSafe(|| {
             let mut need_dispatch = false;
-            let mut state = self.state.lock().unwrap();
-            let mut next_state = state.clone();
+            // avoid PoisonError
+            let mut next_state = self.state.lock().unwrap().clone();
             for reducer in self.reducers.lock().unwrap().iter() {
                 match reducer.reduce(&next_state, action_clone) {
                     DispatchOp::Dispatch(new_state) => {
@@ -203,11 +206,15 @@ where
                     }
                 }
             }
-            *state = next_state;
+            *self.state.lock().unwrap() = next_state;
             need_dispatch
         }));
 
-        result.unwrap_or_else(|_| false)
+        result.unwrap_or_else(|err| {
+            // get thread name
+            eprintln!("{}: error while reducing {:?}", self.name.clone(), err);
+            false
+        })
     }
 
     pub(crate) fn do_notify(&self, action: &Action) {
@@ -215,7 +222,10 @@ where
         let subscribers = self.subscribers.lock().unwrap().clone();
         let next_state = self.state.lock().unwrap().clone();
         for subscriber in subscribers.iter() {
-            let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| { subscriber.on_notify(&next_state, action) }));
+            let result = panic::catch_unwind(panic::AssertUnwindSafe(|| { subscriber.on_notify(&next_state, action) }));
+            result.unwrap_or_else(|err| {
+                eprintln!("{}: error while notifying {:?}", self.name.clone(), err);
+            });
         }
     }
 
@@ -297,7 +307,7 @@ mod tests {
 
     impl Subscriber<i32, i32> for TestSubscriber {
         fn on_notify(&self, state: &i32, action: &i32) {
-            println!("State: {}, Action: {}", state, action);
+            println!("on_notify: State {:}, Action: {:}", state, action);
         }
     }
 
@@ -363,5 +373,61 @@ mod tests {
             .unwrap();
 
         assert_eq!(store.get_state(), 10);
+    }
+
+    struct PanicReducer;
+
+    impl Reducer<i32, i32> for PanicReducer {
+        fn reduce(&self, state: &i32, action: &i32) -> DispatchOp<i32> {
+            panic!("reduce: panicking");
+            DispatchOp::Dispatch(state + action)
+        }
+    }
+
+    // no update state when a panic happened while reducing an action
+    #[test]
+    fn test_panic_on_reducer() {
+        // given
+        let reducer = Box::new(PanicReducer);
+        let store = Store::new_with_state(reducer, 42);
+
+        // when
+        store.dispatch(1);
+        thread::sleep(Duration::from_millis(100));
+
+        // then
+        assert_eq!(store.get_state(), 42);
+    }
+
+
+    struct PanicSubscriber {
+        state: Mutex<i32>,
+    }
+    impl Subscriber<i32, i32> for PanicSubscriber {
+        fn on_notify(&self, state: &i32, action: &i32) {
+            panic!("on_notify: State: {}, Action: {}", *state, *action);
+            *self.state.lock().unwrap() = *state;
+        }
+    }
+
+    #[test]
+    fn test_panic_on_subscriber() {
+        // given
+        let reducer = Box::new(TestReducer);
+        let store = Store::new_with_state(reducer, 42);
+        let panic_subscriber = Arc::new(PanicSubscriber { state: Mutex::new(0) });
+        let panic_subscriber_clone = Arc::clone(&panic_subscriber);
+        store.add_subscriber(panic_subscriber_clone);
+
+        // when
+        store.dispatch(1);
+        thread::sleep(Duration::from_millis(100));
+
+        // then
+        // the action reduced successfully,
+        assert_eq!(store.get_state(), 43);
+        // but the subscriber failed to get the state
+        let state = panic_subscriber.state.lock().unwrap();
+        assert_eq!(*state, 0);
     }
 }
