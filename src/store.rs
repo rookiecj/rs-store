@@ -1,5 +1,5 @@
 use std::sync::{Arc, Mutex};
-use std::thread;
+use std::{panic, thread};
 
 use crate::channel::{BackpressureChannel, SenderChannel};
 use crate::dispatcher::Dispatcher;
@@ -186,29 +186,36 @@ where
     }
 
     pub(crate) fn do_reduce(&self, action: &Action) -> bool {
-        let mut state = self.state.lock().unwrap();
-        let mut need_dispatch = false;
-        for reducer in self.reducers.lock().unwrap().iter() {
-            match reducer.reduce(&state, action) {
-                DispatchOp::Dispatch(new_state) => {
-                    *state = new_state;
-                    need_dispatch = true;
-                }
-                DispatchOp::Keep(new_state) => {
-                    // keep the state but do not dispatch
-                    *state = new_state;
+        let action_clone = action.clone();
+        let result = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+            let mut need_dispatch = false;
+            let mut state = self.state.lock().unwrap();
+            let mut next_state = state.clone();
+            for reducer in self.reducers.lock().unwrap().iter() {
+                match reducer.reduce(&next_state, action_clone) {
+                    DispatchOp::Dispatch(new_state) => {
+                        next_state = new_state;
+                        need_dispatch = true;
+                    }
+                    DispatchOp::Keep(new_state) => {
+                        // keep the state but do not dispatch
+                        next_state = new_state;
+                    }
                 }
             }
-        }
-        need_dispatch
+            *state = next_state;
+            need_dispatch
+        }));
+
+        result.unwrap_or_else(|_| false)
     }
 
     pub(crate) fn do_notify(&self, action: &Action) {
         // TODO thread pool
         let subscribers = self.subscribers.lock().unwrap().clone();
-        let state = self.state.lock().unwrap().clone();
+        let next_state = self.state.lock().unwrap().clone();
         for subscriber in subscribers.iter() {
-            subscriber.on_notify(&state, action);
+            let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| { subscriber.on_notify(&next_state, action) }));
         }
     }
 
