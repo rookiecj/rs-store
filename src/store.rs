@@ -1,15 +1,13 @@
-use std::sync::{Arc, Mutex};
-use std::{panic, thread};
-
 use crate::channel::{BackpressureChannel, SenderChannel};
 use crate::dispatcher::Dispatcher;
 use crate::{channel, Reducer, Subscriber, Subscription};
+use std::sync::{Arc, Mutex};
+use std::{panic, thread};
 
 /// Default capacity for the channel
 pub const DEFAULT_CAPACITY: usize = 16;
 /// Default backpressure policy for the channel
 pub const DEFAULT_POLICY: channel::BackpressurePolicy = channel::BackpressurePolicy::BlockOnFull;
-
 
 /// StoreError represents an error that occurred in the store
 #[derive(Debug, Clone, thiserror::Error)]
@@ -221,7 +219,9 @@ where
         let subscribers = self.subscribers.lock().unwrap().clone();
         let next_state = self.state.lock().unwrap().clone();
         for subscriber in subscribers.iter() {
-            let result = panic::catch_unwind(panic::AssertUnwindSafe(|| { subscriber.on_notify(&next_state, action) }));
+            let result = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+                subscriber.on_notify(&next_state, action)
+            }));
             result.unwrap_or_else(|err| {
                 eprintln!("{}: error while notifying {:?}", self.name.clone(), err);
             });
@@ -279,11 +279,11 @@ where
 
     fn dispatch_thunk(
         &self,
-        thunk: Box<dyn Fn(Arc<&dyn Dispatcher<Action>>) + Send>,
+        thunk: Box<dyn FnOnce(Box<dyn Dispatcher<Action>>) + Send>,
     ) -> thread::JoinHandle<()> {
         let self_clone = self.clone();
         thread::spawn(move || {
-            let dispatcher = Arc::new(&self_clone as &dyn Dispatcher<Action>);
+            let dispatcher = Box::new(self_clone);
             thunk(dispatcher);
         })
     }
@@ -399,7 +399,6 @@ mod tests {
         assert_eq!(store.get_state(), 42);
     }
 
-
     struct PanicSubscriber {
         state: Mutex<i32>,
     }
@@ -416,7 +415,9 @@ mod tests {
         // given
         let reducer = Box::new(TestReducer);
         let store = Store::new_with_state(reducer, 42);
-        let panic_subscriber = Arc::new(PanicSubscriber { state: Mutex::new(0) });
+        let panic_subscriber = Arc::new(PanicSubscriber {
+            state: Mutex::new(0),
+        });
         let panic_subscriber_clone = Arc::clone(&panic_subscriber);
         store.add_subscriber(panic_subscriber_clone);
 

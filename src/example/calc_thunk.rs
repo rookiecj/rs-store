@@ -101,7 +101,7 @@ impl Subscriber<CalcState, CalcAction> for CalcSubscriber {
 fn get_subtract_thunk(
     cond: Arc<Condvar>,
     i: i32,
-) -> Box<dyn Fn(Arc<&dyn Dispatcher<CalcAction>>) + Send> {
+) -> Box<dyn FnOnce(Box<dyn Dispatcher<CalcAction>>) + Send> {
     Box::new(move |dispatcher| {
         println!("thunk: working on long running task....");
         thread::sleep(std::time::Duration::from_secs(1));

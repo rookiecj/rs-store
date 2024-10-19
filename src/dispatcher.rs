@@ -1,4 +1,3 @@
-use std::sync::Arc;
 use std::thread;
 
 /// Dispatcher dispatches actions to the store
@@ -13,6 +12,6 @@ pub trait Dispatcher<Action: Send> {
     /// a thread is created to dispatch the thunk, so the thread is joined before the app exits
     fn dispatch_thunk(
         &self,
-        thunk: Box<dyn Fn(Arc<&dyn Dispatcher<Action>>) + Send>,
+        thunk: Box<dyn FnOnce(Box<dyn Dispatcher<Action>>) + Send>,
     ) -> thread::JoinHandle<()>;
 }
