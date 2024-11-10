@@ -14,4 +14,7 @@ pub trait Dispatcher<Action: Send> {
         &self,
         thunk: Box<dyn FnOnce(Box<dyn Dispatcher<Action>>) + Send>,
     ) -> thread::JoinHandle<()>;
+
+    /// dispatch_task is used to dispatch a task.
+    fn dispatch_task(&self, task: Box<dyn FnOnce() + Send>) -> thread::JoinHandle<()>;
 }

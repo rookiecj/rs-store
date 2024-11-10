@@ -1,8 +1,9 @@
 use crate::channel::{BackpressureChannel, SenderChannel};
 use crate::dispatcher::Dispatcher;
-use crate::{channel, Reducer, Subscriber, Subscription};
+use crate::{channel, DispatchOp, Effect, Reducer, Subscriber, Subscription};
+use fmt::Debug;
 use std::sync::{Arc, Mutex};
-use std::{panic, thread};
+use std::{fmt, panic, thread};
 
 /// Default capacity for the channel
 pub const DEFAULT_CAPACITY: usize = 16;
@@ -18,22 +19,6 @@ pub enum StoreError {
     Error(String),
 }
 
-/// determine if the action should be dispatched or not
-#[derive(Debug, Clone)]
-pub enum DispatchOp<State, Action, Effect>
-where
-    Effect: Fn(Box<dyn Dispatcher<Action>>) + Send,
-    Action: Send + Sync + 'static,
-{
-    /// Dispatch new state
-    Dispatch(State, Option<Effect>),
-    /// Keep new state but do not dispatch
-    Keep(State, Option<Effect>),
-
-    _PhantomData(std::marker::PhantomData<Action>),
-}
-
-// #[derive(Clone,Debug)]
 pub(crate) enum ActionOp<A>
 where
     A: Send + Sync + 'static,
@@ -43,29 +28,26 @@ where
 }
 
 /// Store is a simple implementation of a Redux store
-pub struct Store<State, Action, Effect>
+pub struct Store<State, Action>
 where
     State: Default + Send + Sync + Clone + 'static,
     Action: Send + Sync + 'static,
-    Effect: Fn(Box<dyn Dispatcher<Action>>) + Send + Sync + 'static,
 {
     name: String,
     state: Mutex<State>,
-    pub(crate) reducers: Mutex<Vec<Box<dyn Reducer<State, Action, Effect> + Send + Sync>>>,
+    pub(crate) reducers: Mutex<Vec<Box<dyn Reducer<State, Action> + Send + Sync>>>,
     pub(crate) subscribers: Arc<Mutex<Vec<Arc<dyn Subscriber<State, Action> + Send + Sync>>>>,
     pub(crate) tx: Mutex<Option<SenderChannel<ActionOp<Action>>>>,
     // reduce and dispatch thread
     dispatcher: Mutex<Option<thread::JoinHandle<()>>>,
 }
 
-impl<State, Action, Effect> Default for Store<State, Action, Effect>
+impl<State, Action> Default for Store<State, Action>
 where
     State: Default + Send + Sync + Clone + 'static,
     Action: Send + Sync + 'static,
-    Effect: Fn(Box<dyn Dispatcher<Action>>) + Send + Sync + 'static,
-    // Effect: FnOnce(Box<dyn Dispatcher<Action>>) + Send,
 {
-    fn default() -> Store<State, Action, Effect> {
+    fn default() -> Store<State, Action> {
         Store {
             name: "store".to_string(),
             state: Default::default(),
@@ -87,44 +69,43 @@ impl Subscription for SubscriptionImpl {
     }
 }
 
-impl<State, Action, Effect> Store<State, Action, Effect>
+impl<State, Action> Store<State, Action>
 where
     State: Default + Send + Sync + Clone + 'static,
     Action: Send + Sync + 'static,
-    Effect: Fn(Box<dyn Dispatcher<Action> + 'static>) + Send + Sync + 'static,
 {
     /// create a new store with a reducer
     pub fn new(
-        reducer: Box<dyn Reducer<State, Action, Effect> + Send + Sync>,
-    ) -> Arc<Store<State, Action, Effect>> {
+        reducer: Box<dyn Reducer<State, Action> + Send + Sync>,
+    ) -> Arc<Store<State, Action>> {
         Self::new_with_state(reducer, Default::default())
     }
 
     /// create a new store with a reducer and an initial state
     pub fn new_with_state(
-        reducer: Box<dyn Reducer<State, Action, Effect> + Send + Sync>,
+        reducer: Box<dyn Reducer<State, Action> + Send + Sync>,
         state: State,
-    ) -> Arc<Store<State, Action, Effect>> {
+    ) -> Arc<Store<State, Action>> {
         Self::new_with_name(reducer, state, "store".into()).unwrap()
     }
 
     /// create a new store with name
     pub fn new_with_name(
-        reducer: Box<dyn Reducer<State, Action, Effect> + Send + Sync>,
+        reducer: Box<dyn Reducer<State, Action> + Send + Sync>,
         state: State,
         name: String,
-    ) -> Result<Arc<Store<State, Action, Effect>>, StoreError> {
+    ) -> Result<Arc<Store<State, Action>>, StoreError> {
         Self::new_with(reducer, state, name, DEFAULT_CAPACITY, DEFAULT_POLICY)
     }
 
     /// create a new store with name
     pub fn new_with(
-        reducer: Box<dyn Reducer<State, Action, Effect> + Send + Sync>,
+        reducer: Box<dyn Reducer<State, Action> + Send + Sync>,
         state: State,
         name: String,
         capacity: usize,
         policy: channel::BackpressurePolicy,
-    ) -> Result<Arc<Store<State, Action, Effect>>, StoreError> {
+    ) -> Result<Arc<Store<State, Action>>, StoreError> {
         // create a channel
         // and start a thread in which the store will listen for actions
         let (tx, rx) = BackpressureChannel::<ActionOp<Action>>::new(capacity, policy);
@@ -147,10 +128,17 @@ where
                 match action {
                     ActionOp::Action(action) => {
                         let (need_dispatch, effects) = rx_store.do_reduce(&action);
+                        // do effects
                         if let Some(effects) = effects {
-                            //rx_store.do_effects(&action, effects);
                             for effect in effects {
-                                rx_store.dispatch_thunk(Box::new(effect));
+                                match effect {
+                                    Effect::Function(f) => {
+                                        rx_store.dispatch_task(f);
+                                    }
+                                    Effect::Thunk(thunk) => {
+                                        rx_store.dispatch_thunk(thunk);
+                                    }
+                                }
                             }
                         }
                         if need_dispatch {
@@ -175,7 +163,7 @@ where
     }
 
     /// add a reducer to the store
-    pub fn add_reducer(&self, reducer: Box<dyn Reducer<State, Action, Effect> + Send + Sync>) {
+    pub fn add_reducer(&self, reducer: Box<dyn Reducer<State, Action> + Send + Sync>) {
         self.reducers.lock().unwrap().push(reducer);
     }
 
@@ -203,7 +191,7 @@ where
         subscribers.clear();
     }
 
-    pub(crate) fn do_reduce(&self, action: &Action) -> (bool, Option<Vec<Box<Effect>>>) {
+    pub(crate) fn do_reduce(&self, action: &Action) -> (bool, Option<Vec<Effect<Action>>>) {
         let result = panic::catch_unwind(panic::AssertUnwindSafe(|| {
             let mut need_dispatch = false;
             let mut effects = vec![];
@@ -214,7 +202,7 @@ where
                     DispatchOp::Dispatch(new_state, effect) => {
                         next_state = new_state;
                         if let Some(effect) = effect {
-                            effects.push(Box::new(effect));
+                            effects.push(effect);
                         }
                         need_dispatch = true;
                     }
@@ -222,10 +210,9 @@ where
                         // keep the state but do not dispatch
                         next_state = new_state;
                         if let Some(effect) = effect {
-                            effects.push(Box::new(effect));
+                            effects.push(effect);
                         }
                     }
-                    DispatchOp::_PhantomData(_) => {}
                 }
             }
             *self.state.lock().unwrap() = next_state;
@@ -238,13 +225,6 @@ where
             (false, None)
         })
     }
-
-    // pub(crate) fn do_effects(&self, action: &Action, effects: &Vec<Effect>) {
-    //     let self_clone = Arc::new(self.clone());
-    //     for effect in effects {
-    //         self_clone.dispatch_thunk(effect);
-    //     }
-    // }
 
     pub(crate) fn do_notify(&self, action: &Action) {
         // TODO thread pool
@@ -286,11 +266,10 @@ where
 
 /// close tx channel when the store is dropped, but not the dispatcher
 /// if you want to stop the dispatcher, call the stop method
-impl<State, Action, Effect> Drop for Store<State, Action, Effect>
+impl<State, Action> Drop for Store<State, Action>
 where
     State: Default + Send + Sync + Clone + 'static,
     Action: Send + Sync + 'static,
-    Effect: Fn(Box<(dyn Dispatcher<Action> + 'static)>) + Send + Sync + 'static,
 {
     fn drop(&mut self) {
         //self.stop();
@@ -298,12 +277,10 @@ where
     }
 }
 
-impl<State, Action, Effect> Dispatcher<Action> for Arc<Store<State, Action, Effect>>
+impl<State, Action> Dispatcher<Action> for Arc<Store<State, Action>>
 where
     State: Default + Send + Sync + Clone + 'static,
     Action: Send + Sync + 'static,
-    //Effect: FnOnce(Box<dyn Dispatcher<Action>>) + Send + Sync + 'static,
-    Effect: Fn(Box<dyn Dispatcher<Action> + 'static>) + Send + Sync + 'static,
 {
     fn dispatch(&self, action: Action) {
         let sender = self.tx.lock().unwrap();
@@ -318,8 +295,14 @@ where
     ) -> thread::JoinHandle<()> {
         let self_clone = self.clone();
         thread::spawn(move || {
-            let dispatcher: Box<Arc<Store<State, Action, Effect>>> = Box::new(self_clone);
+            let dispatcher: Box<Arc<Store<State, Action>>> = Box::new(self_clone);
             thunk(dispatcher);
+        })
+    }
+
+    fn dispatch_task(&self, task: Box<dyn FnOnce() + Send>) -> thread::JoinHandle<()> {
+        thread::spawn(move || {
+            task();
         })
     }
 }
@@ -331,12 +314,8 @@ mod tests {
 
     struct TestReducer;
     //     Effect: Fn(Box<dyn Dispatcher<Action>>) + Send + Sync + 'static,
-    impl Reducer<i32, i32, Box<dyn Fn(Box<dyn Dispatcher<i32>>) + Send + Sync>> for TestReducer {
-        fn reduce(
-            &self,
-            state: &i32,
-            action: &i32,
-        ) -> DispatchOp<i32, i32, Box<dyn Fn(Box<dyn Dispatcher<i32>>) + Send + Sync>> {
+    impl Reducer<i32, i32> for TestReducer {
+        fn reduce(&self, state: &i32, action: &i32) -> DispatchOp<i32, i32> {
             let new_state = state + action;
             DispatchOp::Dispatch(new_state, None)
         }
@@ -416,13 +395,9 @@ mod tests {
 
     struct PanicReducer;
 
-    impl Reducer<i32, i32, Box<dyn Fn(Box<dyn Dispatcher<i32>>) + Send + Sync>> for PanicReducer {
+    impl Reducer<i32, i32> for PanicReducer {
         #[allow(unreachable_code)]
-        fn reduce(
-            &self,
-            _state: &i32,
-            _action: &i32,
-        ) -> DispatchOp<i32, i32, Box<dyn Fn(Box<dyn Dispatcher<i32>>) + Send + Sync>> {
+        fn reduce(&self, _state: &i32, _action: &i32) -> DispatchOp<i32, i32> {
             panic!("reduce: panicking");
             DispatchOp::Dispatch(_state + _action, None)
         }

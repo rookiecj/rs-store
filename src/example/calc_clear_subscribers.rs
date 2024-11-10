@@ -30,19 +30,19 @@ impl Default for CalcState {
 }
 
 impl Reducer<CalcState, CalcAction> for CalcReducer {
-    fn reduce(&self, state: &CalcState, action: &CalcAction) -> DispatchOp<CalcState> {
+    fn reduce(&self, state: &CalcState, action: &CalcAction) -> DispatchOp<CalcState, CalcAction> {
         match action {
             CalcAction::Add(i) => {
                 println!("CalcReducer::reduce: + {}", i);
                 DispatchOp::Dispatch(CalcState {
                     count: state.count + i,
-                })
+                }, None)
             }
             CalcAction::Subtract(i) => {
                 println!("CalcReducer::reduce: - {}", i);
                 DispatchOp::Dispatch(CalcState {
                     count: state.count - i,
-                })
+                }, None)
             }
         }
     }

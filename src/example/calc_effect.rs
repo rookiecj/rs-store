@@ -1,13 +1,13 @@
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 
-use rs_store::{DispatchOp, Dispatcher};
+use rs_store::{DispatchOp, Dispatcher, Effect};
 use rs_store::{Reducer, Store, Subscriber};
 
 #[derive(Debug)]
 enum CalcAction {
-    Add(i32),
-    Subtract(i32),
+    Add(i32, Arc<Condvar>),
+    Subtract(i32, Arc<Condvar>),
 }
 
 struct CalcReducer {}
@@ -32,17 +32,23 @@ impl Default for CalcState {
 impl Reducer<CalcState, CalcAction> for CalcReducer {
     fn reduce(&self, state: &CalcState, action: &CalcAction) -> DispatchOp<CalcState, CalcAction> {
         match action {
-            CalcAction::Add(i) => {
+            CalcAction::Add(i, cond) => {
                 println!("CalcReducer::reduce: + {}", i);
-                DispatchOp::Dispatch(CalcState {
-                    count: state.count + i,
-                }, None)
+                DispatchOp::Dispatch(
+                    CalcState {
+                        count: state.count + i,
+                    },
+                    Some(Effect::Thunk(subtract_effect_thunk(*i, cond.clone()))),
+                )
             }
-            CalcAction::Subtract(i) => {
+            CalcAction::Subtract(i, cond) => {
                 println!("CalcReducer::reduce: - {}", i);
-                DispatchOp::Dispatch(CalcState {
-                    count: state.count - i,
-                }, None)
+                DispatchOp::Dispatch(
+                    CalcState {
+                        count: state.count - i,
+                    },
+                    Some(Effect::Function(subtract_effect_task(*i, cond.clone()))),
+                )
             }
         }
     }
@@ -62,15 +68,6 @@ impl Default for CalcSubscriber {
     }
 }
 
-// impl CalcSubscriber {
-//     fn new(id: i32) -> Self {
-//         Self {
-//             id,
-//             last: Mutex::new(CalcState::default()),
-//         }
-//     }
-// }
-
 impl Subscriber<CalcState, CalcAction> for CalcSubscriber {
     fn on_notify(&self, state: &CalcState, action: &CalcAction) {
         println!(
@@ -79,13 +76,13 @@ impl Subscriber<CalcState, CalcAction> for CalcSubscriber {
         );
 
         match action {
-            CalcAction::Add(_i) => {
+            CalcAction::Add(_i, _) => {
                 println!(
                     "CalcSubscriber::on_notify: id:{}, state: {:?} <- old: {:?}",
                     self.id, state, self.last
                 );
             }
-            CalcAction::Subtract(_i) => {
+            CalcAction::Subtract(_i, _) => {
                 println!(
                     "CalcSubscriber::on_notify: id:{}, state: {:?} <- old: {:?}",
                     self.id, state, self.last
@@ -97,19 +94,24 @@ impl Subscriber<CalcState, CalcAction> for CalcSubscriber {
     }
 }
 
-// now we can have a thunk before create the store
-fn get_subtract_thunk(
-    cond: Arc<Condvar>,
+fn subtract_effect_thunk(
     i: i32,
+    cond: Arc<Condvar>,
 ) -> Box<dyn FnOnce(Box<dyn Dispatcher<CalcAction>>) + Send> {
     Box::new(move |dispatcher| {
-        println!("thunk: working on long running task....");
+        println!("effect: working on long running task....");
         thread::sleep(std::time::Duration::from_secs(1));
 
-        println!("thunk: dispatching action...");
+        println!("effect: dispatching action...");
+        dispatcher.dispatch(CalcAction::Subtract(i, cond.clone()))
+    })
+}
+
+fn subtract_effect_task(i: i32, cond: Arc<Condvar>) -> Box<dyn FnOnce() + Send> {
+    Box::new(move || {
+        println!("effect: set done");
         // set done signal
         cond.notify_all();
-        dispatcher.dispatch(CalcAction::Subtract(i));
     })
 }
 
@@ -123,15 +125,14 @@ pub fn main() {
     )
     .unwrap();
 
-    store.add_subscriber(Arc::new(CalcSubscriber::default()));
-    store.dispatch(CalcAction::Add(1));
-
     let lock_done = Arc::new(Mutex::new(false));
     let cond_done: Arc<Condvar> = Arc::new(Condvar::new());
-    let subtract_thunk = get_subtract_thunk(cond_done.clone(), 1);
-    store.dispatch_thunk(subtract_thunk);
+
+    store.add_subscriber(Arc::new(CalcSubscriber::default()));
+    store.dispatch(CalcAction::Add(1, cond_done.clone()));
 
     drop(cond_done.wait(lock_done.lock().unwrap()).unwrap());
+    thread::sleep(std::time::Duration::from_secs(1));
 
     store.stop();
 }
