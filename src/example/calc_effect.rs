@@ -107,7 +107,7 @@ fn subtract_effect_thunk(
     })
 }
 
-fn subtract_effect_task(i: i32, cond: Arc<Condvar>) -> Box<dyn FnOnce() + Send> {
+fn subtract_effect_task(_i: i32, cond: Arc<Condvar>) -> Box<dyn FnOnce() + Send> {
     Box::new(move || {
         println!("effect: set done");
         // set done signal

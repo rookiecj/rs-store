@@ -44,3 +44,7 @@ path = "src/example/calc_thunk.rs"
 [[bin]]
 name = "calc_effect"
 path = "src/example/calc_effect.rs"
+
+[[bin]]
+name = "calc_basic_builder"
+path = "src/example/calc_basic_builder.rs"

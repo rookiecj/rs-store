@@ -38,8 +38,17 @@ example-calc_clear_subscriber:	## example calc_unsubcribe
 example-calc_thunk:	## example calc_thunk
 	cargo run --bin calc_thunk
 
+example-calc_basic_builder:	## example calc_basic_builder
+	cargo run --bin calc_basic_builder
 
-example: example-calc example-calc_fn example-calc_curr	example-calc_unsubcribe example-calc_clear_subscriber example-calc_thunk	## example all
+
+examples: example-calc \
+	example-calc_fn \
+	example-calc_curr \
+	example-calc_unsubcribe \
+	example-calc_clear_subscriber \
+	example-calc_thunk \
+	example-calc_basic_builder	## example all
 
 VERSION := $(shell cargo pkgid -p "rs-store" | cut -d\# -f2 | cut -d@ -f2)
 

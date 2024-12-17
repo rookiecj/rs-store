@@ -3,6 +3,7 @@ use crate::dispatcher::Dispatcher;
 use crate::{channel, DispatchOp, Effect, Reducer, Subscriber, Subscription};
 use fmt::Debug;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use std::{fmt, panic, thread};
 
 /// Default capacity for the channel
@@ -13,10 +14,12 @@ pub const DEFAULT_POLICY: channel::BackpressurePolicy = channel::BackpressurePol
 /// StoreError represents an error that occurred in the store
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum StoreError {
-    #[error("no error")]
-    NoError,
-    #[error("store error: {0}")]
-    Error(String),
+    #[error("dispatch error: {0}")]
+    DispatchError(String),
+    #[error("reducer error: {0}")]
+    ReducerError(String),
+    #[error("subscription error: {0}")]
+    SubscriptionError(String),
 }
 
 pub(crate) enum ActionOp<A>
@@ -95,12 +98,12 @@ where
         state: State,
         name: String,
     ) -> Result<Arc<Store<State, Action>>, StoreError> {
-        Self::new_with(reducer, state, name, DEFAULT_CAPACITY, DEFAULT_POLICY)
+        Self::new_with(vec![reducer], state, name, DEFAULT_CAPACITY, DEFAULT_POLICY)
     }
 
     /// create a new store with name
     pub fn new_with(
-        reducer: Box<dyn Reducer<State, Action> + Send + Sync>,
+        reducers: Vec<Box<dyn Reducer<State, Action> + Send + Sync>>,
         state: State,
         name: String,
         capacity: usize,
@@ -112,7 +115,7 @@ where
         let store = Store {
             name: name.clone(),
             state: Mutex::new(state),
-            reducers: Mutex::new(vec![reducer]),
+            reducers: Mutex::new(reducers),
             subscribers: Arc::new(Mutex::new(Vec::default())),
             tx: Mutex::new(Some(tx)),
             dispatcher: Mutex::new(None),
@@ -152,7 +155,7 @@ where
             }
         });
 
-        let handle = r.map_err(|e| StoreError::Error(e.to_string()))?;
+        let handle = r.map_err(|e| StoreError::DispatchError(e.to_string()))?;
         tx_store.dispatcher.lock().unwrap().replace(handle);
         Ok(tx_store)
     }
@@ -262,6 +265,18 @@ where
     pub fn detach(&self) -> Option<thread::JoinHandle<()>> {
         self.dispatcher.lock().unwrap().take()
     }
+
+    pub fn dispatch(&self, action: Action) -> Result<(), StoreError> {
+        let sender = self.tx.lock().unwrap();
+        if let Some(tx) = sender.as_ref() {
+            tx.send(ActionOp::Action(action)).unwrap_or(());
+            Ok(())
+        } else {
+            Err(StoreError::DispatchError(
+                "Dispatch channel is closed".to_string(),
+            ))
+        }
+    }
 }
 
 /// close tx channel when the store is dropped, but not the dispatcher
@@ -305,6 +320,18 @@ where
             task();
         })
     }
+}
+
+pub trait StoreMetrics {
+    fn action_processed(&self, action_type: &str, duration: Duration);
+    fn state_changed(&self, old_size: usize, new_size: usize);
+    fn subscriber_notified(&self, count: usize, duration: Duration);
+}
+
+// Mock 객체 생성을 위한 트레이트 제공
+pub trait MockableStore<S, A> {
+    fn get_action_history(&self) -> Vec<A>;
+    fn get_state_history(&self) -> Vec<S>;
 }
 
 #[cfg(test)]
@@ -382,7 +409,7 @@ mod tests {
     fn test_store_with_custom_capacity_and_policy() {
         let reducer = Box::new(TestReducer);
         let store = Store::new_with(
-            reducer,
+            vec![reducer],
             10,
             "test_store".to_string(),
             5,

@@ -7,7 +7,11 @@ pub use reducer::*;
 pub mod store;
 pub use store::*;
 
-pub(crate) mod channel;
-pub mod subscriber;
+pub mod builder;
+pub use builder::*;
 
+pub(crate) mod channel;
+pub use channel::*;
+
+pub mod subscriber;
 pub use subscriber::*;
