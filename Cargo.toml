@@ -17,34 +17,34 @@ thiserror = "1.0.58"
 once_cell = "1.19.0"
 crossbeam = "0.8"
 
-[[bin]]
-name = "calc_basic"
-path = "src/example/calc_basic.rs"
+# [[bin]]
+# name = "calc_basic"
+# path = "examples/calc_basic.rs"
 
-[[bin]]
-name = "calc_fn_basic"
-path = "src/example/calc_fn_basic.rs"
+# [[bin]]
+# name = "calc_fn_basic"
+# path = "examples/calc_fn_basic.rs"
 
-[[bin]]
-name = "calc_concurrent"
-path = "src/example/calc_concurrent.rs"
+# [[bin]]
+# name = "calc_concurrent"
+# path = "examples/calc_concurrent.rs"
 
-[[bin]]
-name = "calc_unsubscribe"
-path = "src/example/calc_unsubscribe.rs"
+# [[bin]]
+# name = "calc_unsubscribe"
+# path = "examples/calc_unsubscribe.rs"
 
-[[bin]]
-name = "calc_clear_subscriber"
-path = "src/example/calc_clear_subscribers.rs"
+# [[bin]]
+# name = "calc_clear_subscriber"
+# path = "examples/calc_clear_subscribers.rs"
 
-[[bin]]
-name = "calc_thunk"
-path = "src/example/calc_thunk.rs"
+# [[bin]]
+# name = "calc_thunk"
+# path = "examples/calc_thunk.rs"
 
-[[bin]]
-name = "calc_effect"
-path = "src/example/calc_effect.rs"
+# [[bin]]
+# name = "calc_effect"
+# path = "examples/calc_effect.rs"
 
-[[bin]]
-name = "calc_basic_builder"
-path = "src/example/calc_basic_builder.rs"
+# [[bin]]
+# name = "calc_basic_builder"
+# path = "examples/calc_basic_builder.rs"

@@ -21,32 +21,32 @@ doc:	## doc
 
 
 example-calc:	## example calc_basic
-	cargo run --bin calc_basic
+	cargo run --example calc_basic
 
 example-calc_fn:	## example calc_fn
-	cargo run --bin calc_fn_basic
+	cargo run --example calc_fn_basic
 
 example-calc_curr:	## example calc_concurrent
-	cargo run --bin calc_concurrent
+	cargo run --example calc_concurrent
 
 example-calc_unsubcribe:	## example calc_unsubcribe
-	cargo run --bin calc_unsubscribe
+	cargo run --example calc_unsubscribe
 
-example-calc_clear_subscriber:	## example calc_unsubcribe
-	cargo run --bin calc_clear_subscriber
+example-calc_clear_subscribers:	## example calc_clear_subscribers
+	cargo run --example calc_clear_subscribers
 
 example-calc_thunk:	## example calc_thunk
-	cargo run --bin calc_thunk
+	cargo run --example calc_thunk
 
 example-calc_basic_builder:	## example calc_basic_builder
-	cargo run --bin calc_basic_builder
+	cargo run --example calc_basic_builder
 
 
 examples: example-calc \
 	example-calc_fn \
 	example-calc_curr \
 	example-calc_unsubcribe \
-	example-calc_clear_subscriber \
+	example-calc_clear_subscribers \
 	example-calc_thunk \
 	example-calc_basic_builder	## example all
 
