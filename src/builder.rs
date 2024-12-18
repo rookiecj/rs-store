@@ -1,11 +1,13 @@
 use crate::channel;
 use crate::BackpressurePolicy;
+use crate::Middleware;
 use crate::Reducer;
 use crate::Store;
 use crate::StoreError;
 use crate::DEFAULT_CAPACITY;
 use crate::DEFAULT_POLICY;
 use std::sync::Arc;
+use std::sync::Mutex;
 
 pub struct StoreBuilder<State, Action>
 where
@@ -17,6 +19,7 @@ where
     reducers: Vec<Box<dyn Reducer<State, Action> + Send + Sync>>,
     capacity: usize,
     policy: BackpressurePolicy,
+    middlewares: Vec<Arc<Mutex<dyn Middleware<State, Action> + Send + Sync>>>,
 }
 
 impl<State, Action> Default for StoreBuilder<State, Action>
@@ -31,6 +34,7 @@ where
             reducers: Vec::new(),
             capacity: DEFAULT_CAPACITY,
             policy: DEFAULT_POLICY,
+            middlewares: Vec::new(),
         }
     }
 }
@@ -82,6 +86,30 @@ where
         self
     }
 
+    pub fn with_middleware(
+        mut self,
+        middleware: Arc<Mutex<dyn Middleware<State, Action> + Send + Sync>>,
+    ) -> Self {
+        self.middlewares = vec![middleware];
+        self
+    }
+
+    pub fn with_middlewares(
+        mut self,
+        middlewares: Vec<Arc<Mutex<dyn Middleware<State, Action> + Send + Sync>>>,
+    ) -> Self {
+        self.middlewares = middlewares;
+        self
+    }
+
+    pub fn add_middleware(
+        mut self,
+        middleware: Arc<Mutex<dyn Middleware<State, Action> + Send + Sync>>,
+    ) -> Self {
+        self.middlewares.push(middleware);
+        self
+    }
+
     pub fn build(self) -> Result<Arc<Store<State, Action>>, StoreError> {
         if self.reducers.is_empty() {
             return Err(StoreError::ReducerError("reducers are empty".to_string()));
@@ -99,6 +127,7 @@ where
             self.name,
             self.capacity,
             self.policy,
+            self.middlewares,
         )
     }
 }
@@ -145,6 +174,30 @@ mod tests {
     fn test_builder_with_capacity() {
         let store =
             StoreBuilder::default().with_reducer(Box::new(TestReducer)).with_capacity(100).build();
+        assert!(store.is_ok());
+    }
+
+    struct TestMiddleware;
+    impl Middleware<i32, i32> for TestMiddleware {
+        fn before_dispatch(&mut self, _action: &i32, _state: &i32) -> Result<(), StoreError> {
+            Ok(())
+        }
+        fn after_dispatch(
+            &mut self,
+            _action: &i32,
+            _old_state: &i32,
+            _new_state: &i32,
+            _effects: &Vec<crate::Effect<i32>>,
+        ) -> Result<(), StoreError> {
+            Ok(())
+        }
+    }
+    #[test]
+    fn test_builder_with_middleware() {
+        let store = StoreBuilder::default()
+            .with_reducer(Box::new(TestReducer))
+            .with_middleware(Arc::new(Mutex::new(TestMiddleware)))
+            .build();
         assert!(store.is_ok());
     }
 }

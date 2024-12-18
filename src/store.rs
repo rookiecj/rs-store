@@ -1,5 +1,6 @@
 use crate::channel::{BackpressureChannel, SenderChannel};
 use crate::dispatcher::Dispatcher;
+use crate::middleware::Middleware;
 use crate::{channel, DispatchOp, Effect, Reducer, Subscriber, Subscription};
 use fmt::Debug;
 use std::sync::{Arc, Mutex};
@@ -43,6 +44,7 @@ where
     pub(crate) tx: Mutex<Option<SenderChannel<ActionOp<Action>>>>,
     // reduce and dispatch thread
     dispatcher: Mutex<Option<thread::JoinHandle<()>>>,
+    middlewares: Mutex<Vec<Arc<Mutex<dyn Middleware<State, Action> + Send + Sync>>>>,
 }
 
 impl<State, Action> Default for Store<State, Action>
@@ -58,6 +60,7 @@ where
             subscribers: Arc::new(Mutex::new(Vec::default())),
             tx: Mutex::new(None),
             dispatcher: Mutex::new(None),
+            middlewares: Mutex::new(Vec::default()),
         }
     }
 }
@@ -98,7 +101,14 @@ where
         state: State,
         name: String,
     ) -> Result<Arc<Store<State, Action>>, StoreError> {
-        Self::new_with(vec![reducer], state, name, DEFAULT_CAPACITY, DEFAULT_POLICY)
+        Self::new_with(
+            vec![reducer],
+            state,
+            name,
+            DEFAULT_CAPACITY,
+            DEFAULT_POLICY,
+            vec![],
+        )
     }
 
     /// create a new store with name
@@ -108,15 +118,15 @@ where
         name: String,
         capacity: usize,
         policy: channel::BackpressurePolicy,
+        middleware: Vec<Arc<Mutex<dyn Middleware<State, Action> + Send + Sync>>>,
     ) -> Result<Arc<Store<State, Action>>, StoreError> {
-        // create a channel
-        // and start a thread in which the store will listen for actions
         let (tx, rx) = BackpressureChannel::<ActionOp<Action>>::new(capacity, policy);
         let store = Store {
             name: name.clone(),
             state: Mutex::new(state),
             reducers: Mutex::new(reducers),
             subscribers: Arc::new(Mutex::new(Vec::default())),
+            middlewares: Mutex::new(middleware),
             tx: Mutex::new(Some(tx)),
             dispatcher: Mutex::new(None),
         };
@@ -194,12 +204,26 @@ where
         subscribers.clear();
     }
 
+    /// do reduce
+    ///
+    /// ### Return
+    /// * bool : true if the state to be dispatched
+    /// * effects : side effects
     pub(crate) fn do_reduce(&self, action: &Action) -> (bool, Option<Vec<Effect<Action>>>) {
         let result = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+            let current_state = self.state.lock().unwrap().clone();
+
+            // Execute before_dispatch for all middlewares
+            for middleware in self.middlewares.lock().unwrap().iter() {
+                if let Err(e) = middleware.lock().unwrap().before_dispatch(action, &current_state) {
+                    eprintln!("Middleware before_dispatch error: {:?}", e);
+                    return (false, None);
+                }
+            }
+
             let mut need_dispatch = false;
             let mut effects = vec![];
-            // avoid PoisonError
-            let mut next_state = self.state.lock().unwrap().clone();
+            let mut next_state = current_state.clone();
             for reducer in self.reducers.lock().unwrap().iter() {
                 match reducer.reduce(&next_state, action) {
                     DispatchOp::Dispatch(new_state, effect) => {
@@ -218,6 +242,19 @@ where
                     }
                 }
             }
+
+            // Execute after_dispatch for all middlewares in reverse order
+            for middleware in self.middlewares.lock().unwrap().iter() {
+                if let Err(e) = middleware.lock().unwrap().after_dispatch(
+                    action,
+                    &current_state,
+                    &next_state,
+                    &effects,
+                ) {
+                    eprintln!("Middleware after_dispatch error: {:?}", e);
+                }
+            }
+
             *self.state.lock().unwrap() = next_state;
             (need_dispatch, Some(effects))
         }));
@@ -277,6 +314,11 @@ where
             ))
         }
     }
+
+    /// Add middleware method
+    pub fn add_middleware(&self, middleware: Arc<Mutex<dyn Middleware<State, Action>>>) {
+        self.middlewares.lock().unwrap().push(middleware);
+    }
 }
 
 /// close tx channel when the store is dropped, but not the dispatcher
@@ -326,12 +368,6 @@ pub trait StoreMetrics {
     fn action_processed(&self, action_type: &str, duration: Duration);
     fn state_changed(&self, old_size: usize, new_size: usize);
     fn subscriber_notified(&self, count: usize, duration: Duration);
-}
-
-// Mock 객체 생성을 위한 트레이트 제공
-pub trait MockableStore<S, A> {
-    fn get_action_history(&self) -> Vec<A>;
-    fn get_state_history(&self) -> Vec<S>;
 }
 
 #[cfg(test)]
@@ -414,6 +450,7 @@ mod tests {
             "test_store".to_string(),
             5,
             channel::BackpressurePolicy::DropOldest,
+            vec![],
         )
         .unwrap();
 

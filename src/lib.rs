@@ -1,6 +1,8 @@
 pub mod dispatcher;
 pub use dispatcher::*;
 
+pub mod middleware;
+pub use middleware::*;
 pub mod reducer;
 pub use reducer::*;
 
