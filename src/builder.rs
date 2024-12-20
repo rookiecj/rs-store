@@ -198,7 +198,7 @@ mod tests {
             _action: &i32,
             _old_state: &i32,
             _new_state: &i32,
-            _effects: &mut Vec<crate::Effect<i32>>,
+            _effects: &mut Vec<crate::Effect<i32, i32>>,
             _dispatcher: Arc<dyn Dispatcher<i32>>,
         ) -> Result<MiddlewareOp, StoreError> {
             Ok(MiddlewareOp::ContinueAction)

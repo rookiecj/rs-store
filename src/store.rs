@@ -157,11 +157,13 @@ where
                                             },
                                         ));
                                     }
-                                    Effect::Function(f) => {
-                                        let _ = the_dispatcher.dispatch_task(f);
+                                    Effect::Function(task) => {
+                                        let _ = the_dispatcher.dispatch_task(Box::new(move || {
+                                            let _ = task();
+                                        }));
                                     }
-                                    Effect::Thunk(t) => {
-                                        let _ = the_dispatcher.dispatch_thunk(t);
+                                    Effect::Thunk(thunk) => {
+                                        let _ = the_dispatcher.dispatch_thunk(thunk);
                                     }
                                 };
                             }
@@ -229,7 +231,7 @@ where
         &self,
         action: &Action,
         dispatcher: Arc<dyn Dispatcher<Action>>,
-    ) -> (bool, Option<Vec<Effect<Action>>>) {
+    ) -> (bool, Option<Vec<Effect<Action, State>>>) {
         let result = panic::catch_unwind(panic::AssertUnwindSafe(|| {
             let current_state = self.state.lock().unwrap().clone();
 
