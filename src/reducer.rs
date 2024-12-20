@@ -5,9 +5,11 @@ use crate::Dispatcher;
 /// `Effect` is used to encapsulate actions that should be performed as a result of a state change.
 /// These actions can be either simple functions or more complex thunks that require a dispatcher.
 pub enum Effect<Action> {
-    /// A function that takes no arguments and returns nothing.
+    /// An action that should be dispatched.
+    Action(Action),
+    /// A task which will be executed asynchronously.
     Function(Box<dyn FnOnce() + Send>),
-    /// A thunk that takes the dispatcher as an argument and returns nothing.
+    /// A task that takes the dispatcher as an argument.
     Thunk(Box<dyn FnOnce(Box<dyn Dispatcher<Action>>) + Send>),
 }
 
@@ -18,7 +20,6 @@ pub enum DispatchOp<State, Action> {
     /// Keep new state but do not dispatch
     Keep(State, Option<Effect<Action>>),
 }
-
 
 /// Reducer reduces the state based on the action.
 pub trait Reducer<State, Action>
@@ -40,8 +41,7 @@ where
     _marker: std::marker::PhantomData<(State, Action)>,
 }
 
-impl<F, State, Action> Reducer<State, Action>
-for FnReducer<F, State, Action>
+impl<F, State, Action> Reducer<State, Action> for FnReducer<F, State, Action>
 where
     F: Fn(&State, &Action) -> DispatchOp<State, Action>,
     State: Default + Send + Sync + Clone,

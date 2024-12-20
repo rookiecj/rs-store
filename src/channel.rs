@@ -5,9 +5,10 @@ use std::time::Duration;
 use crossbeam::channel::{self, Receiver, Sender, TrySendError};
 
 /// the Backpressure policy
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 pub enum BackpressurePolicy {
     /// Block the sender when the queue is full
+    #[default]
     BlockOnFull,
     /// Drop the oldest item when the queue is full
     DropOldest,

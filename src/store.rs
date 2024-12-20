@@ -1,7 +1,7 @@
-use crate::channel::{BackpressureChannel, SenderChannel};
+use crate::channel::{BackpressureChannel, BackpressurePolicy, SenderChannel};
 use crate::dispatcher::Dispatcher;
 use crate::middleware::Middleware;
-use crate::{channel, DispatchOp, Effect, Reducer, Subscriber, Subscription};
+use crate::{DispatchOp, Effect, MiddlewareOp, Reducer, Subscriber, Subscription};
 use fmt::Debug;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -9,8 +9,6 @@ use std::{fmt, panic, thread};
 
 /// Default capacity for the channel
 pub const DEFAULT_CAPACITY: usize = 16;
-/// Default backpressure policy for the channel
-pub const DEFAULT_POLICY: channel::BackpressurePolicy = channel::BackpressurePolicy::BlockOnFull;
 
 /// StoreError represents an error that occurred in the store
 #[derive(Debug, Clone, thiserror::Error)]
@@ -23,11 +21,11 @@ pub enum StoreError {
     SubscriptionError(String),
 }
 
-pub(crate) enum ActionOp<A>
+pub(crate) enum ActionOp<Action>
 where
-    A: Send + Sync + 'static,
+    Action: Send + Sync + 'static,
 {
-    Action(A),
+    Action(Action),
     Exit,
 }
 
@@ -43,7 +41,7 @@ where
     pub(crate) subscribers: Arc<Mutex<Vec<Arc<dyn Subscriber<State, Action> + Send + Sync>>>>,
     pub(crate) tx: Mutex<Option<SenderChannel<ActionOp<Action>>>>,
     // reduce and dispatch thread
-    dispatcher: Mutex<Option<thread::JoinHandle<()>>>,
+    dispatch_thread: Mutex<Option<thread::JoinHandle<()>>>,
     middlewares: Mutex<Vec<Arc<Mutex<dyn Middleware<State, Action> + Send + Sync>>>>,
 }
 
@@ -59,7 +57,7 @@ where
             reducers: Mutex::new(Vec::default()),
             subscribers: Arc::new(Mutex::new(Vec::default())),
             tx: Mutex::new(None),
-            dispatcher: Mutex::new(None),
+            dispatch_thread: Mutex::new(None),
             middlewares: Mutex::new(Vec::default()),
         }
     }
@@ -106,7 +104,7 @@ where
             state,
             name,
             DEFAULT_CAPACITY,
-            DEFAULT_POLICY,
+            BackpressurePolicy::default(),
             vec![],
         )
     }
@@ -117,7 +115,7 @@ where
         state: State,
         name: String,
         capacity: usize,
-        policy: channel::BackpressurePolicy,
+        policy: BackpressurePolicy,
         middleware: Vec<Arc<Mutex<dyn Middleware<State, Action> + Send + Sync>>>,
     ) -> Result<Arc<Store<State, Action>>, StoreError> {
         let (tx, rx) = BackpressureChannel::<ActionOp<Action>>::new(capacity, policy);
@@ -128,11 +126,10 @@ where
             subscribers: Arc::new(Mutex::new(Vec::default())),
             middlewares: Mutex::new(middleware),
             tx: Mutex::new(Some(tx)),
-            dispatcher: Mutex::new(None),
+            dispatch_thread: Mutex::new(None),
         };
 
-        // start a thread in which the store will listen for actions,
-        // the shore referenced by Arc<Store> will be passed to the thread
+        // start a thread in which the store will listen for actions
         let rx_store = Arc::new(store);
         let tx_store = rx_store.clone();
         let builder = thread::Builder::new().name(name);
@@ -140,20 +137,37 @@ where
             while let Some(action) = rx.recv() {
                 match action {
                     ActionOp::Action(action) => {
-                        let (need_dispatch, effects) = rx_store.do_reduce(&action);
-                        // do effects
-                        if let Some(effects) = effects {
-                            for effect in effects {
+                        // dispacher is implemented as a trait, so it is impossible to pass the store itself as a dispatcher
+                        // so we need to pass a cloned store as a dispatcher
+                        let the_dispatcher = Arc::new(rx_store.clone());
+
+                        // do reduce
+                        let (need_dispatch, effects) =
+                            rx_store.do_reduce(&action, the_dispatcher.clone());
+
+                        // do effect remains
+                        if let Some(mut effects) = effects {
+                            while effects.len() > 0 {
+                                let effect = effects.remove(0);
                                 match effect {
+                                    Effect::Action(a) => {
+                                        the_dispatcher.dispatch_thunk(Box::new(
+                                            move |dispatcher| {
+                                                dispatcher.dispatch(a);
+                                            },
+                                        ));
+                                    }
                                     Effect::Function(f) => {
-                                        rx_store.dispatch_task(f);
+                                        let _ = the_dispatcher.dispatch_task(f);
                                     }
-                                    Effect::Thunk(thunk) => {
-                                        rx_store.dispatch_thunk(thunk);
+                                    Effect::Thunk(t) => {
+                                        let _ = the_dispatcher.dispatch_thunk(t);
                                     }
-                                }
+                                };
                             }
                         }
+
+                        // do notify subscribers
                         if need_dispatch {
                             rx_store.do_notify(&action);
                         }
@@ -166,11 +180,13 @@ where
         });
 
         let handle = r.map_err(|e| StoreError::DispatchError(e.to_string()))?;
-        tx_store.dispatcher.lock().unwrap().replace(handle);
+        tx_store.dispatch_thread.lock().unwrap().replace(handle);
         Ok(tx_store)
     }
 
-    /// get the last state
+    /// get the lastest state(for debugging)
+    ///
+    /// prefer to use `subscribe` to get the state
     pub fn get_state(&self) -> State {
         self.state.lock().unwrap().clone()
     }
@@ -209,49 +225,94 @@ where
     /// ### Return
     /// * bool : true if the state to be dispatched
     /// * effects : side effects
-    pub(crate) fn do_reduce(&self, action: &Action) -> (bool, Option<Vec<Effect<Action>>>) {
+    pub(crate) fn do_reduce(
+        &self,
+        action: &Action,
+        dispatcher: Arc<dyn Dispatcher<Action>>,
+    ) -> (bool, Option<Vec<Effect<Action>>>) {
         let result = panic::catch_unwind(panic::AssertUnwindSafe(|| {
             let current_state = self.state.lock().unwrap().clone();
 
             // Execute before_dispatch for all middlewares
-            for middleware in self.middlewares.lock().unwrap().iter() {
-                if let Err(e) = middleware.lock().unwrap().before_dispatch(action, &current_state) {
-                    eprintln!("Middleware before_dispatch error: {:?}", e);
-                    return (false, None);
+            let mut reduce_action = true;
+            let mut skip_index = self.middlewares.lock().unwrap().len();
+            for (index, middleware) in self.middlewares.lock().unwrap().iter().enumerate() {
+                match middleware.lock().unwrap().before_reduce(
+                    action,
+                    &current_state,
+                    dispatcher.clone(),
+                ) {
+                    Ok(MiddlewareOp::ContinueAction) => {
+                        // continue dispatching the action
+                    }
+                    Ok(MiddlewareOp::DoneAction) => {
+                        // stop dispatching the action
+                        // last middleware wins
+                        reduce_action = false;
+                    }
+                    Ok(MiddlewareOp::BreakChain) => {
+                        // break the middleware chain
+                        skip_index = index;
+                        break;
+                    }
+                    Err(e) => {
+                        eprintln!("Middleware error: {:?}", e);
+                        //return (false, None);
+                    }
                 }
             }
 
-            let mut need_dispatch = false;
             let mut effects = vec![];
             let mut next_state = current_state.clone();
-            for reducer in self.reducers.lock().unwrap().iter() {
-                match reducer.reduce(&next_state, action) {
-                    DispatchOp::Dispatch(new_state, effect) => {
-                        next_state = new_state;
-                        if let Some(effect) = effect {
-                            effects.push(effect);
+            let mut need_dispatch = true;
+            if reduce_action {
+                for reducer in self.reducers.lock().unwrap().iter() {
+                    match reducer.reduce(&next_state, action) {
+                        DispatchOp::Dispatch(new_state, effect) => {
+                            next_state = new_state;
+                            if let Some(effect) = effect {
+                                effects.push(effect);
+                            }
+                            need_dispatch = true;
                         }
-                        need_dispatch = true;
-                    }
-                    DispatchOp::Keep(new_state, effect) => {
-                        // keep the state but do not dispatch
-                        next_state = new_state;
-                        if let Some(effect) = effect {
-                            effects.push(effect);
+                        DispatchOp::Keep(new_state, effect) => {
+                            // keep the state but do not dispatch
+                            next_state = new_state;
+                            if let Some(effect) = effect {
+                                effects.push(effect);
+                            }
+                            need_dispatch = false;
                         }
                     }
                 }
             }
 
             // Execute after_dispatch for all middlewares in reverse order
-            for middleware in self.middlewares.lock().unwrap().iter() {
-                if let Err(e) = middleware.lock().unwrap().after_dispatch(
+            let skip_middlewares = if skip_index != self.middlewares.lock().unwrap().len() {
+                self.middlewares.lock().unwrap().len() - skip_index - 1
+            } else {
+                0
+            };
+            for middleware in self.middlewares.lock().unwrap().iter().rev().skip(skip_middlewares) {
+                match middleware.lock().unwrap().after_reduce(
                     action,
                     &current_state,
                     &next_state,
-                    &effects,
+                    &mut effects,
+                    dispatcher.clone(),
                 ) {
-                    eprintln!("Middleware after_dispatch error: {:?}", e);
+                    Ok(MiddlewareOp::ContinueAction) => {
+                        // do nothing
+                    }
+                    Ok(MiddlewareOp::DoneAction) => {
+                        // do nothing
+                    }
+                    Ok(MiddlewareOp::BreakChain) => {
+                        break;
+                    }
+                    Err(e) => {
+                        eprintln!("Middleware error: {:?}", e);
+                    }
                 }
             }
 
@@ -300,7 +361,7 @@ where
 
     /// detach the dispatcher thread from the store
     pub fn detach(&self) -> Option<thread::JoinHandle<()>> {
-        self.dispatcher.lock().unwrap().take()
+        self.dispatch_thread.lock().unwrap().take()
     }
 
     pub fn dispatch(&self, action: Action) -> Result<(), StoreError> {
@@ -373,7 +434,6 @@ pub trait StoreMetrics {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::Duration;
 
     struct TestReducer;
     //     Effect: Fn(Box<dyn Dispatcher<Action>>) + Send + Sync + 'static,
@@ -406,7 +466,7 @@ mod tests {
         let store = Store::new(reducer);
 
         store.dispatch(1);
-        thread::sleep(Duration::from_millis(100)); // Wait for the dispatcher to process
+        store.stop();
 
         assert_eq!(store.get_state(), 1);
     }
@@ -420,7 +480,7 @@ mod tests {
         store.add_subscriber(subscriber);
 
         store.dispatch(1);
-        thread::sleep(Duration::from_millis(100)); // Wait for the dispatcher to process
+        store.stop();
 
         assert_eq!(store.get_state(), 1);
     }
@@ -449,7 +509,7 @@ mod tests {
             10,
             "test_store".to_string(),
             5,
-            channel::BackpressurePolicy::DropOldest,
+            BackpressurePolicy::DropOldest,
             vec![],
         )
         .unwrap();
@@ -476,7 +536,8 @@ mod tests {
 
         // when
         store.dispatch(1);
-        thread::sleep(Duration::from_millis(100));
+        //thread::sleep(Duration::from_millis(100));
+        store.stop();
 
         // then
         assert_eq!(store.get_state(), 42);
@@ -506,7 +567,7 @@ mod tests {
 
         // when
         store.dispatch(1);
-        thread::sleep(Duration::from_millis(100));
+        store.stop();
 
         // then
         // the action reduced successfully,
@@ -514,5 +575,51 @@ mod tests {
         // but the subscriber failed to get the state
         let state = panic_subscriber.state.lock().unwrap();
         assert_eq!(*state, 0);
+    }
+
+    enum EffectAction {
+        ActionProduceEffect(i32),
+        ResponseForTheEffect(i32),
+    }
+
+    struct EffectReducer {}
+    impl EffectReducer {
+        fn new() -> Self {
+            Self {}
+        }
+    }
+    impl Reducer<i32, EffectAction> for EffectReducer {
+        fn reduce(&self, _state: &i32, action: &EffectAction) -> DispatchOp<i32, EffectAction> {
+            println!("reduce: {:?}", _state);
+            match action {
+                EffectAction::ActionProduceEffect(value) => {
+                    let new_state = *value;
+                    // produce effect
+                    let effect = Effect::Action(EffectAction::ResponseForTheEffect(new_state + 1));
+                    DispatchOp::Dispatch(new_state, Some(effect))
+                }
+                EffectAction::ResponseForTheEffect(value) => {
+                    let new_state = *value;
+                    DispatchOp::Dispatch(new_state, None)
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_effect() {
+        let reducer = Box::new(EffectReducer::new());
+        let store = Store::new(reducer);
+
+        store.dispatch(EffectAction::ActionProduceEffect(42));
+
+        // at this point, the state probably not be changed
+        //assert_eq!(store.get_state(), 42);
+
+        // give time to the effect
+        thread::sleep(Duration::from_secs(1));
+        store.stop();
+
+        assert_eq!(store.get_state(), 43);
     }
 }

@@ -5,7 +5,6 @@ use crate::Reducer;
 use crate::Store;
 use crate::StoreError;
 use crate::DEFAULT_CAPACITY;
-use crate::DEFAULT_POLICY;
 use std::sync::Arc;
 use std::sync::Mutex;
 
@@ -33,7 +32,7 @@ where
             state: Default::default(),
             reducers: Vec::new(),
             capacity: DEFAULT_CAPACITY,
-            policy: DEFAULT_POLICY,
+            policy: Default::default(),
             middlewares: Vec::new(),
         }
     }
@@ -44,8 +43,15 @@ where
     State: Default + Send + Sync + Clone + 'static,
     Action: Send + Sync + 'static,
 {
-    pub fn new() -> Self {
-        Default::default()
+    pub fn new(reducer: Box<dyn Reducer<State, Action> + Send + Sync>) -> Self {
+        StoreBuilder {
+            name: "store".to_string(),
+            state: Default::default(),
+            reducers: vec![reducer],
+            capacity: DEFAULT_CAPACITY,
+            policy: Default::default(),
+            middlewares: Vec::new(),
+        }
     }
 
     pub fn with_name(mut self, name: String) -> Self {
@@ -134,7 +140,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::DispatchOp;
+    use crate::{DispatchOp, Dispatcher, MiddlewareOp};
 
     use super::*;
 
@@ -179,19 +185,26 @@ mod tests {
 
     struct TestMiddleware;
     impl Middleware<i32, i32> for TestMiddleware {
-        fn before_dispatch(&mut self, _action: &i32, _state: &i32) -> Result<(), StoreError> {
-            Ok(())
+        fn before_reduce(
+            &mut self,
+            _action: &i32,
+            _state: &i32,
+            _dispatcher: Arc<dyn Dispatcher<i32>>,
+        ) -> Result<MiddlewareOp, StoreError> {
+            Ok(MiddlewareOp::ContinueAction)
         }
-        fn after_dispatch(
+        fn after_reduce(
             &mut self,
             _action: &i32,
             _old_state: &i32,
             _new_state: &i32,
-            _effects: &Vec<crate::Effect<i32>>,
-        ) -> Result<(), StoreError> {
-            Ok(())
+            _effects: &mut Vec<crate::Effect<i32>>,
+            _dispatcher: Arc<dyn Dispatcher<i32>>,
+        ) -> Result<MiddlewareOp, StoreError> {
+            Ok(MiddlewareOp::ContinueAction)
         }
     }
+
     #[test]
     fn test_builder_with_middleware() {
         let store = StoreBuilder::default()
