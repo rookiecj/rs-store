@@ -346,7 +346,7 @@ where
     /// close the store
     pub fn close(&self) {
         if let Some(tx) = self.tx.lock().unwrap().take() {
-            tx.send(ActionOp::Exit).unwrap_or(());
+            tx.send(ActionOp::Exit).unwrap_or(0);
             drop(tx);
         }
     }
@@ -366,11 +366,15 @@ where
         self.dispatch_thread.lock().unwrap().take()
     }
 
-    pub fn dispatch(&self, action: Action) -> Result<(), StoreError> {
+    /// dispatch an action
+    ///
+    /// ### Return
+    /// * Ok(remains) : the number of remaining actions in the channel
+    pub fn dispatch(&self, action: Action) -> Result<i64, StoreError> {
         let sender = self.tx.lock().unwrap();
         if let Some(tx) = sender.as_ref() {
-            tx.send(ActionOp::Action(action)).unwrap_or(());
-            Ok(())
+            let remains = tx.send(ActionOp::Action(action)).unwrap_or(0);
+            Ok(remains)
         } else {
             Err(StoreError::DispatchError(
                 "Dispatch channel is closed".to_string(),
@@ -405,7 +409,7 @@ where
     fn dispatch(&self, action: Action) {
         let sender = self.tx.lock().unwrap();
         if let Some(tx) = sender.as_ref() {
-            tx.send(ActionOp::Action(action)).unwrap_or(());
+            let _ = tx.send(ActionOp::Action(action)).unwrap_or(0);
         }
     }
 

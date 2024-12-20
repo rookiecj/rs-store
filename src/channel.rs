@@ -41,23 +41,40 @@ impl<T> SenderChannel<T> {
     //     }
     // }
 
-    pub fn send(&self, item: T) -> Result<(), SenderError<T>> {
+    pub fn send(&self, item: T) -> Result<i64, SenderError<T>> {
         match self.policy {
             BackpressurePolicy::BlockOnFull => {
-                self.sender.send(item).map_err(|e| SenderError::SendError(e.0))
+                match self.sender.send(item).map_err(|e| SenderError::SendError(e.0)) {
+                    Ok(_) => Ok(self.receiver.len() as i64),
+                    Err(e) => Err(e),
+                }
             }
             BackpressurePolicy::DropOldest => {
                 if let Err(TrySendError::Full(item)) = self.sender.try_send(item) {
                     // Drop the oldest item and try sending again
+                    #[cfg(feature = "dbg")]
+                    eprintln!("store: dropping the oldest item in channel");
                     let _ = self.receiver.try_recv(); // Remove the oldest item
-                    self.sender.try_send(item).map_err(SenderError::TrySendError)
+                    match self.sender.try_send(item).map_err(SenderError::TrySendError) {
+                        Ok(_) => {
+                            Ok(self.receiver.len() as i64)
+                        },
+                        Err(e) => Err(e),
+                    }
                 } else {
-                    Ok(())
+                    Ok(0)
                 }
             }
             BackpressurePolicy::DropLatest => {
                 // Try to send the item, if the queue is full, just ignore the item (drop the latest)
-                self.sender.try_send(item).map_err(SenderError::TrySendError)
+                match self.sender.try_send(item).map_err(SenderError::TrySendError) {
+                    Ok(_) => Ok(self.receiver.len() as i64),
+                    Err(e) => {
+                        #[cfg(feature = "dbg")]
+                        eprintln!("store: dropping the latest item in channel");
+                        Err(e)
+                    },
+                }
             }
         }
     }
