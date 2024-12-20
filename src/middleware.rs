@@ -56,7 +56,7 @@ where
         action: &Action,
         old_state: &State,
         new_state: &State,
-        effects: &mut Vec<Effect<Action, State>>,
+        effects: &mut Vec<Effect<Action>>,
         dispatcher: Arc<dyn Dispatcher<Action>>,
     ) -> Result<MiddlewareOp, StoreError>;
 }
@@ -110,7 +110,7 @@ mod tests {
             action: &Action,
             old_state: &State,
             new_state: &State,
-            _effects: &mut Vec<Effect<Action, State>>,
+            _effects: &mut Vec<Effect<Action>>,
             _dispatcher: Arc<dyn Dispatcher<Action>>,
         ) -> Result<MiddlewareOp, StoreError> {
             let log = format!(
@@ -168,7 +168,7 @@ mod tests {
             _action: &Action,
             _old_state: &State,
             _new_state: &State,
-            _effects: &mut Vec<Effect<Action, State>>,
+            _effects: &mut Vec<Effect<Action>>,
             _dispatcher: Arc<dyn Dispatcher<Action>>,
         ) -> Result<MiddlewareOp, StoreError> {
             Ok(MiddlewareOp::ContinueAction)
@@ -201,7 +201,7 @@ mod tests {
             _action: &Action,
             _old_state: &State,
             _new_state: &State,
-            _effects: &mut Vec<Effect<Action, State>>,
+            _effects: &mut Vec<Effect<Action>>,
             _dispatcher: Arc<dyn Dispatcher<Action>>,
         ) -> Result<MiddlewareOp, StoreError> {
             Ok(MiddlewareOp::ContinueAction)
@@ -233,7 +233,7 @@ mod tests {
             _action: &Action,
             _old_state: &State,
             _new_state: &State,
-            _effects: &mut Vec<Effect<Action, State>>,
+            _effects: &mut Vec<Effect<Action>>,
             _dispatcher: Arc<dyn Dispatcher<Action>>,
         ) -> Result<MiddlewareOp, StoreError> {
             Ok(MiddlewareOp::ContinueAction)
@@ -345,7 +345,7 @@ mod tests {
             _action: &MiddlewareAction,
             _old_state: &State,
             _new_state: &State,
-            _effects: &mut Vec<Effect<MiddlewareAction, State>>,
+            _effects: &mut Vec<Effect<MiddlewareAction>>,
             _dispatcher: Arc<dyn Dispatcher<MiddlewareAction>>,
         ) -> Result<MiddlewareOp, StoreError> {
             Ok(MiddlewareOp::ContinueAction)
@@ -410,14 +410,14 @@ mod tests {
                     };
                     // produce an effect w/o an action.
                     let value_clone = value.clone();
-                    let effect = Effect::Function(Box::new(move || {
-                        println!("effect: {:?}", value_clone);
-                        // but has a result
-                        let new_state = EffectState {
-                            value: value_clone + 1,
-                        };
-                        Ok(new_state)
-                    }));
+                    let effect = Effect::Function(
+                        "ActionProduceEffect".to_string(),
+                        Box::new(move || {
+                            println!("effect: {:?}", value_clone);
+                            // return the result of the effect
+                            Some(Box::new(value_clone + 1))
+                        }),
+                    );
                     DispatchOp::Dispatch(new_state, Some(effect))
                 }
                 EffectAction::ResponseForTheEffect(value) => {
@@ -449,7 +449,7 @@ mod tests {
             action: &EffectAction,
             _old_state: &EffectState,
             _new_state: &EffectState,
-            effects: &mut Vec<Effect<EffectAction, EffectState>>,
+            effects: &mut Vec<Effect<EffectAction>>,
             dispatcher: Arc<dyn Dispatcher<EffectAction>>,
         ) -> Result<MiddlewareOp, StoreError> {
             match action {
@@ -457,15 +457,18 @@ mod tests {
                     while effects.len() > 0 {
                         let effect = effects.remove(0);
                         match effect {
-                            Effect::Function(effect_fn) => {
+                            Effect::Function(key, effect_fn) => {
                                 // do async
                                 dispatcher.dispatch_thunk(Box::new(move |dispatcher| {
                                     // do side effect
-                                    let result = effect_fn();
-                                    // send response
-                                    dispatcher.dispatch(EffectAction::ResponseForTheEffect(
-                                        result.unwrap().value,
-                                    ));
+                                    if let Some(result) = effect_fn() {
+                                        // now we can ensure the response action from the key
+                                        assert_eq!(key, "ActionProduceEffect");
+                                        // dispatch the response action
+                                        dispatcher.dispatch(EffectAction::ResponseForTheEffect(
+                                            *result.downcast_ref::<i32>().unwrap(),
+                                        ));
+                                    }
                                 }));
                             }
                             _ => {

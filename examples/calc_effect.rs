@@ -1,3 +1,4 @@
+use std::any::Any;
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 
@@ -43,12 +44,15 @@ impl Reducer<CalcState, CalcAction> for CalcReducer {
             }
             CalcAction::Subtract(i, cond) => {
                 println!("CalcReducer::reduce: - {}", i);
-                DispatchOp::Dispatch(
-                    CalcState {
-                        count: state.count - i,
-                    },
-                    Some(Effect::Function(subtract_effect_fn(*i, cond.clone()))),
-                )
+
+                let new_state = CalcState {
+                    count: state.count - i,
+                };
+                let effect = Effect::Function(
+                    "subtract_effect_fn".to_string(),
+                    subtract_effect_fn(*i, cond.clone()),
+                );
+                DispatchOp::Dispatch(new_state, Some(effect))
             }
         }
     }
@@ -110,12 +114,13 @@ fn subtract_effect_thunk(
 fn subtract_effect_fn(
     _i: i32,
     cond: Arc<Condvar>,
-) -> Box<dyn FnOnce() -> Result<CalcState, String> + Send> {
+) -> Box<dyn FnOnce() -> Option<Box<dyn Any>> + Send> {
     Box::new(move || {
         println!("effect: set done");
         // set done signal
         cond.notify_all();
-        Ok(CalcState { count: 0 })
+        // no result
+        None
     })
 }
 

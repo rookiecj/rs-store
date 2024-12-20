@@ -157,7 +157,7 @@ where
                                             },
                                         ));
                                     }
-                                    Effect::Function(task) => {
+                                    Effect::Function(_, task) => {
                                         let _ = the_dispatcher.dispatch_task(Box::new(move || {
                                             let _ = task();
                                         }));
@@ -231,7 +231,7 @@ where
         &self,
         action: &Action,
         dispatcher: Arc<dyn Dispatcher<Action>>,
-    ) -> (bool, Option<Vec<Effect<Action, State>>>) {
+    ) -> (bool, Option<Vec<Effect<Action>>>) {
         let result = panic::catch_unwind(panic::AssertUnwindSafe(|| {
             let current_state = self.state.lock().unwrap().clone();
 
