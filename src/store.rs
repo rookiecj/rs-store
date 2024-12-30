@@ -238,101 +238,95 @@ where
         action: &Action,
         dispatcher: Arc<dyn Dispatcher<Action>>,
     ) -> (bool, Option<Vec<Effect<Action, State>>>) {
-        let result = panic::catch_unwind(panic::AssertUnwindSafe(|| {
-            let current_state = self.state.lock().unwrap().clone();
+        let current_state = self.state.lock().unwrap().clone();
 
-            // Execute before_dispatch for all middlewares
-            let mut reduce_action = true;
-            let mut skip_index = self.middlewares.lock().unwrap().len();
-            for (index, middleware) in self.middlewares.lock().unwrap().iter().enumerate() {
-                match middleware.lock().unwrap().before_reduce(
-                    action,
-                    &current_state,
-                    dispatcher.clone(),
-                ) {
-                    Ok(MiddlewareOp::ContinueAction) => {
-                        // continue dispatching the action
-                    }
-                    Ok(MiddlewareOp::DoneAction) => {
-                        // stop dispatching the action
-                        // last middleware wins
-                        reduce_action = false;
-                    }
-                    Ok(MiddlewareOp::BreakChain) => {
-                        // break the middleware chain
-                        skip_index = index;
-                        break;
-                    }
-                    Err(e) => {
-                        eprintln!("Middleware error: {:?}", e);
-                        //return (false, None);
-                    }
+        // Execute before_dispatch for all middlewares
+        let mut reduce_action = true;
+        let mut skip_index = self.middlewares.lock().unwrap().len();
+        for (index, middleware) in self.middlewares.lock().unwrap().iter().enumerate() {
+            match middleware.lock().unwrap().before_reduce(
+                action,
+                &current_state,
+                dispatcher.clone(),
+            ) {
+                Ok(MiddlewareOp::ContinueAction) => {
+                    // continue dispatching the action
+                }
+                Ok(MiddlewareOp::DoneAction) => {
+                    // stop dispatching the action
+                    // last middleware wins
+                    reduce_action = false;
+                }
+                Ok(MiddlewareOp::BreakChain) => {
+                    // break the middleware chain
+                    skip_index = index;
+                    break;
+                }
+                Err(_e) => {
+                    #[cfg(feature = "dbg")]
+                    eprintln!("Middleware error: {:?}", _e);
+                    //return (false, None);
                 }
             }
+        }
 
-            let mut effects = vec![];
-            let mut next_state = current_state.clone();
-            let mut need_dispatch = true;
-            if reduce_action {
-                for reducer in self.reducers.lock().unwrap().iter() {
-                    match reducer.reduce(&next_state, action) {
-                        DispatchOp::Dispatch(new_state, effect) => {
-                            next_state = new_state;
-                            if let Some(effect) = effect {
-                                effects.push(effect);
-                            }
-                            need_dispatch = true;
+        let mut effects = vec![];
+        let mut next_state = current_state.clone();
+        let mut need_dispatch = true;
+        if reduce_action {
+            for reducer in self.reducers.lock().unwrap().iter() {
+                match reducer.reduce(&next_state, action) {
+                    DispatchOp::Dispatch(new_state, effect) => {
+                        next_state = new_state;
+                        if let Some(effect) = effect {
+                            effects.push(effect);
                         }
-                        DispatchOp::Keep(new_state, effect) => {
-                            // keep the state but do not dispatch
-                            next_state = new_state;
-                            if let Some(effect) = effect {
-                                effects.push(effect);
-                            }
-                            need_dispatch = false;
+                        need_dispatch = true;
+                    }
+                    DispatchOp::Keep(new_state, effect) => {
+                        // keep the state but do not dispatch
+                        next_state = new_state;
+                        if let Some(effect) = effect {
+                            effects.push(effect);
                         }
+                        need_dispatch = false;
                     }
                 }
             }
+        }
 
-            // Execute after_dispatch for all middlewares in reverse order
-            let skip_middlewares = if skip_index != self.middlewares.lock().unwrap().len() {
-                self.middlewares.lock().unwrap().len() - skip_index - 1
-            } else {
-                0
-            };
-            for middleware in self.middlewares.lock().unwrap().iter().rev().skip(skip_middlewares) {
-                match middleware.lock().unwrap().after_reduce(
-                    action,
-                    &current_state,
-                    &next_state,
-                    &mut effects,
-                    dispatcher.clone(),
-                ) {
-                    Ok(MiddlewareOp::ContinueAction) => {
-                        // do nothing
-                    }
-                    Ok(MiddlewareOp::DoneAction) => {
-                        // do nothing
-                    }
-                    Ok(MiddlewareOp::BreakChain) => {
-                        break;
-                    }
-                    Err(e) => {
-                        eprintln!("Middleware error: {:?}", e);
-                    }
+        // Execute after_dispatch for all middlewares in reverse order
+        let skip_middlewares = if skip_index != self.middlewares.lock().unwrap().len() {
+            self.middlewares.lock().unwrap().len() - skip_index - 1
+        } else {
+            0
+        };
+        for middleware in self.middlewares.lock().unwrap().iter().rev().skip(skip_middlewares) {
+            match middleware.lock().unwrap().after_reduce(
+                action,
+                &current_state,
+                &next_state,
+                &mut effects,
+                dispatcher.clone(),
+            ) {
+                Ok(MiddlewareOp::ContinueAction) => {
+                    // do nothing
+                }
+                Ok(MiddlewareOp::DoneAction) => {
+                    // do nothing
+                }
+                Ok(MiddlewareOp::BreakChain) => {
+                    break;
+                }
+                Err(_e) => {
+                    #[cfg(feature = "dbg")]
+                    eprintln!("Middleware error: {:?}", _e);
                 }
             }
+        }
 
-            *self.state.lock().unwrap() = next_state;
-            (need_dispatch, Some(effects))
-        }));
-
-        result.unwrap_or_else(|err| {
-            // get thread name
-            eprintln!("{}: error while reducing {:?}", self.name.clone(), err);
-            (false, None)
-        })
+        *self.state.lock().unwrap() = next_state;
+        (need_dispatch, Some(effects))
     }
 
     pub(crate) fn do_notify(&self, action: &Action) {
@@ -340,13 +334,7 @@ where
         let subscribers = self.subscribers.lock().unwrap().clone();
         let next_state = self.state.lock().unwrap().clone();
         for subscriber in subscribers.iter() {
-            let result = panic::catch_unwind(panic::AssertUnwindSafe(|| {
-                subscriber.on_notify(&next_state, action)
-            }));
-            result.unwrap_or_else(|_err| {
-                #[cfg(feature = "dbg")]
-                eprintln!("{}: error while notifying {:?}", self.name.clone(), _err);
-            });
+            subscriber.on_notify(&next_state, action)
         }
     }
 
@@ -420,10 +408,7 @@ where
         }
     }
 
-    fn dispatch_thunk(
-        &self,
-        thunk: Box<dyn FnOnce(Box<dyn Dispatcher<Action>>) + Send>,
-    ) {
+    fn dispatch_thunk(&self, thunk: Box<dyn FnOnce(Box<dyn Dispatcher<Action>>) + Send>) {
         let self_clone = self.clone();
         let dispatcher: Box<Arc<Store<State, Action>>> = Box::new(self_clone);
         // thread::spawn(move || {
@@ -549,17 +534,22 @@ mod tests {
 
     // no update state when a panic happened while reducing an action
     #[test]
+    #[should_panic]
     fn test_panic_on_reducer() {
         // given
         let reducer = Box::new(PanicReducer);
         let store = Store::new_with_state(reducer, 42);
 
         // when
-        store.dispatch(1);
-        //thread::sleep(Duration::from_millis(100));
-        store.stop();
+        // if the panic occurs in a different thread created within the test function, the #[should_panic] attribute will not catch it
+        // you can use the std::panic::catch_unwind function to catch the panic and then propagate it to the main thread.
+        let result = std::panic::catch_unwind(|| {
+            store.dispatch(1);
+            store.stop();
+        });
 
         // then
+        assert!(result.is_err());
         assert_eq!(store.get_state(), 42);
     }
 
