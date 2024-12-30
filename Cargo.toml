@@ -15,8 +15,9 @@ keywords = ["redux", "store", "rust", "state", "management"]
 
 [dependencies]
 thiserror = "1.0.58"
-once_cell = "1.19.0"
 crossbeam = "0.8"
+lazy_static = "1.4"
+rusty_pool = { version = "0.7" }
 
 # [[bin]]
 # name = "calc_basic"

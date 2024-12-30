@@ -3,12 +3,17 @@ use crate::dispatcher::Dispatcher;
 use crate::middleware::Middleware;
 use crate::{DispatchOp, Effect, MiddlewareOp, Reducer, Subscriber, Subscription};
 use fmt::Debug;
+use lazy_static::lazy_static;
+use rusty_pool::ThreadPool;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use std::{fmt, panic, thread};
 
 /// Default capacity for the channel
 pub const DEFAULT_CAPACITY: usize = 16;
+lazy_static! {
+    static ref POOL: ThreadPool = ThreadPool::default();
+}
 
 /// StoreError represents an error that occurred in the store
 #[derive(Debug, Clone, thiserror::Error)]
@@ -35,6 +40,7 @@ where
     State: Default + Send + Sync + Clone + 'static,
     Action: Send + Sync + 'static,
 {
+    #[allow(dead_code)]
     name: String,
     state: Mutex<State>,
     pub(crate) reducers: Mutex<Vec<Box<dyn Reducer<State, Action> + Send + Sync>>>,
@@ -337,8 +343,9 @@ where
             let result = panic::catch_unwind(panic::AssertUnwindSafe(|| {
                 subscriber.on_notify(&next_state, action)
             }));
-            result.unwrap_or_else(|err| {
-                eprintln!("{}: error while notifying {:?}", self.name.clone(), err);
+            result.unwrap_or_else(|_err| {
+                #[cfg(feature = "dbg")]
+                eprintln!("{}: error while notifying {:?}", self.name.clone(), _err);
             });
         }
     }
@@ -416,16 +423,23 @@ where
     fn dispatch_thunk(
         &self,
         thunk: Box<dyn FnOnce(Box<dyn Dispatcher<Action>>) + Send>,
-    ) -> thread::JoinHandle<()> {
+    ) {
         let self_clone = self.clone();
-        thread::spawn(move || {
-            let dispatcher: Box<Arc<Store<State, Action>>> = Box::new(self_clone);
+        let dispatcher: Box<Arc<Store<State, Action>>> = Box::new(self_clone);
+        // thread::spawn(move || {
+        //     let dispatcher: Box<Arc<Store<State, Action>>> = Box::new(self_clone);
+        //     thunk(dispatcher);
+        // })
+        POOL.execute(move || {
             thunk(dispatcher);
         })
     }
 
-    fn dispatch_task(&self, task: Box<dyn FnOnce() + Send>) -> thread::JoinHandle<()> {
-        thread::spawn(move || {
+    fn dispatch_task(&self, task: Box<dyn FnOnce() + Send>) {
+        // thread::spawn(move || {
+        //     task();
+        // })
+        POOL.execute(move || {
             task();
         })
     }
