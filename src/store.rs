@@ -6,13 +6,12 @@ use fmt::Debug;
 use lazy_static::lazy_static;
 use rusty_pool::ThreadPool;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
-use std::{fmt, panic, thread};
+use std::{fmt, thread};
 
 /// Default capacity for the channel
 pub const DEFAULT_CAPACITY: usize = 16;
 lazy_static! {
-    static ref POOL: ThreadPool = ThreadPool::default();
+    pub(crate) static ref POOL: ThreadPool = ThreadPool::default();
 }
 
 /// StoreError represents an error that occurred in the store
@@ -396,49 +395,10 @@ where
     }
 }
 
-impl<State, Action> Dispatcher<Action> for Arc<Store<State, Action>>
-where
-    State: Default + Send + Sync + Clone + 'static,
-    Action: Send + Sync + 'static,
-{
-    fn dispatch(&self, action: Action) {
-        let sender = self.tx.lock().unwrap();
-        if let Some(tx) = sender.as_ref() {
-            let _ = tx.send(ActionOp::Action(action)).unwrap_or(0);
-        }
-    }
-
-    fn dispatch_thunk(&self, thunk: Box<dyn FnOnce(Box<dyn Dispatcher<Action>>) + Send>) {
-        let self_clone = self.clone();
-        let dispatcher: Box<Arc<Store<State, Action>>> = Box::new(self_clone);
-        // thread::spawn(move || {
-        //     let dispatcher: Box<Arc<Store<State, Action>>> = Box::new(self_clone);
-        //     thunk(dispatcher);
-        // })
-        POOL.execute(move || {
-            thunk(dispatcher);
-        })
-    }
-
-    fn dispatch_task(&self, task: Box<dyn FnOnce() + Send>) {
-        // thread::spawn(move || {
-        //     task();
-        // })
-        POOL.execute(move || {
-            task();
-        })
-    }
-}
-
-pub trait StoreMetrics {
-    fn action_processed(&self, action_type: &str, duration: Duration);
-    fn state_changed(&self, old_size: usize, new_size: usize);
-    fn subscriber_notified(&self, count: usize, duration: Duration);
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
 
     struct TestReducer;
     //     Effect: Fn(Box<dyn Dispatcher<Action>>) + Send + Sync + 'static,

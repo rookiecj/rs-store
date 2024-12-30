@@ -34,15 +34,21 @@ impl Reducer<CalcState, CalcAction> for CalcReducer {
         match action {
             CalcAction::Add(i) => {
                 println!("CalcReducer::reduce: + {}", i);
-                DispatchOp::Dispatch(CalcState {
-                    count: state.count + i,
-                }, None)
+                DispatchOp::Dispatch(
+                    CalcState {
+                        count: state.count + i,
+                    },
+                    None,
+                )
             }
             CalcAction::Subtract(i) => {
                 println!("CalcReducer::reduce: - {}", i);
-                DispatchOp::Dispatch(CalcState {
-                    count: state.count - i,
-                }, None)
+                DispatchOp::Dispatch(
+                    CalcState {
+                        count: state.count - i,
+                    },
+                    None,
+                )
             }
         }
     }
@@ -105,7 +111,7 @@ pub fn main() {
         CalcState::default(),
         "store-unsubscribe".into(),
     )
-        .unwrap();
+    .unwrap();
 
     store.add_subscriber(Arc::new(CalcSubscriber::default()));
     store.dispatch(CalcAction::Add(1));

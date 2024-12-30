@@ -56,9 +56,7 @@ impl<T> SenderChannel<T> {
                     eprintln!("store: dropping the oldest item in channel");
                     let _ = self.receiver.try_recv(); // Remove the oldest item
                     match self.sender.try_send(item).map_err(SenderError::TrySendError) {
-                        Ok(_) => {
-                            Ok(self.receiver.len() as i64)
-                        },
+                        Ok(_) => Ok(self.receiver.len() as i64),
                         Err(e) => Err(e),
                     }
                 } else {
@@ -73,7 +71,7 @@ impl<T> SenderChannel<T> {
                         #[cfg(feature = "dbg")]
                         eprintln!("store: dropping the latest item in channel");
                         Err(e)
-                    },
+                    }
                 }
             }
         }

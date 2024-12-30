@@ -15,5 +15,7 @@ pub use builder::*;
 pub(crate) mod channel;
 pub use channel::*;
 
+mod metrics;
 pub mod subscriber;
+
 pub use subscriber::*;
