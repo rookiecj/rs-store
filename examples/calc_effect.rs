@@ -1,7 +1,7 @@
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 
-use rs_store::{DispatchOp, Dispatcher, Effect};
+use rs_store::{DispatchOp, Dispatcher, Effect, EffectResult};
 use rs_store::{Reducer, Store, Subscriber};
 
 #[derive(Debug)]
@@ -47,7 +47,7 @@ impl Reducer<CalcState, CalcAction> for CalcReducer {
                     CalcState {
                         count: state.count - i,
                     },
-                    Some(Effect::Function(subtract_effect_fn(*i, cond.clone()))),
+                    Some(Effect::Function("subtract".to_string(), subtract_effect_fn(*i, cond.clone()))),
                 )
             }
         }
@@ -110,12 +110,12 @@ fn subtract_effect_thunk(
 fn subtract_effect_fn(
     _i: i32,
     cond: Arc<Condvar>,
-) -> Box<dyn FnOnce() -> Result<CalcState, String> + Send> {
+) -> Box<dyn FnOnce() -> EffectResult + Send> {
     Box::new(move || {
         println!("effect: set done");
         // set done signal
         cond.notify_all();
-        Ok(CalcState { count: 0 })
+        Ok(Box::new(CalcState { count: 0 }))
     })
 }
 

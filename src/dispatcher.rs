@@ -1,5 +1,5 @@
 use crate::store::ActionOp;
-use crate::Store;
+use crate::{store, Store};
 use std::sync::Arc;
 
 /// Dispatcher dispatches actions to the store
@@ -32,20 +32,13 @@ where
     fn dispatch_thunk(&self, thunk: Box<dyn FnOnce(Box<dyn Dispatcher<Action>>) + Send>) {
         let self_clone = self.clone();
         let dispatcher: Box<Arc<Store<State, Action>>> = Box::new(self_clone);
-        // thread::spawn(move || {
-        //     let dispatcher: Box<Arc<Store<State, Action>>> = Box::new(self_clone);
-        //     thunk(dispatcher);
-        // })
-        crate::store::POOL.execute(move || {
+        store::POOL.execute(move || {
             thunk(dispatcher);
         })
     }
 
     fn dispatch_task(&self, task: Box<dyn FnOnce() + Send>) {
-        // thread::spawn(move || {
-        //     task();
-        // })
-        crate::store::POOL.execute(move || {
+        store::POOL.execute(move || {
             task();
         })
     }

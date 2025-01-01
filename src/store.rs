@@ -142,8 +142,6 @@ where
             while let Some(action) = rx.recv() {
                 match action {
                     ActionOp::Action(action) => {
-                        // dispacher is implemented as a trait, so it is impossible to pass the store itself as a dispatcher
-                        // so we need to pass a cloned store as a dispatcher
                         let the_dispatcher = Arc::new(rx_store.clone());
 
                         // do reduce
@@ -162,13 +160,17 @@ where
                                             },
                                         ));
                                     }
-                                    Effect::Function(task) => {
-                                        let _ = the_dispatcher.dispatch_task(Box::new(move || {
-                                            let _ = task();
-                                        }));
+                                    Effect::Task(task) => {
+                                        the_dispatcher.dispatch_task(task);
                                     }
                                     Effect::Thunk(thunk) => {
-                                        let _ = the_dispatcher.dispatch_thunk(thunk);
+                                        the_dispatcher.dispatch_thunk(thunk);
+                                    }
+                                    Effect::Function(_tok, func) => {
+                                        the_dispatcher.dispatch_task(Box::new(move || {
+                                            // when the result of the function needs to be handled, it should be done in middleware
+                                            let _ = func();
+                                        }));
                                     }
                                 };
                             }
@@ -236,7 +238,7 @@ where
         &self,
         action: &Action,
         dispatcher: Arc<dyn Dispatcher<Action>>,
-    ) -> (bool, Option<Vec<Effect<Action, State>>>) {
+    ) -> (bool, Option<Vec<Effect<Action>>>) {
         let current_state = self.state.lock().unwrap().clone();
 
         // Execute before_dispatch for all middlewares
