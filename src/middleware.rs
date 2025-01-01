@@ -32,12 +32,15 @@ where
     /// Returns:
     /// - `MiddlewareOp::ContinueAction` if you want to continue the dispatch
     /// - `MiddlewareOp::DoneAction` if you want to skip the dispatch
+    #[allow(unused_variables)]
     fn before_reduce(
         &mut self,
         action: &Action,
         state: &State,
         dispatcher: Arc<dyn Dispatcher<Action>>,
-    ) -> Result<MiddlewareOp, StoreError>;
+    ) -> Result<MiddlewareOp, StoreError> {
+        Ok(MiddlewareOp::ContinueAction)
+    }
 
     /// called after reduce
     ///
@@ -50,6 +53,7 @@ where
     /// Returns:
     /// - `MiddlewareOp::ContinueAction` if you want to continue the dispatch
     /// - `MiddlewareOp::DoneAction` if you want to skip the dispatch
+    #[allow(unused_variables)]
     fn after_reduce(
         &mut self,
         action: &Action,
@@ -57,7 +61,9 @@ where
         new_state: &State,
         effects: &mut Vec<Effect<Action>>,
         dispatcher: Arc<dyn Dispatcher<Action>>,
-    ) -> Result<MiddlewareOp, StoreError>;
+    ) -> Result<MiddlewareOp, StoreError> {
+        Ok(MiddlewareOp::ContinueAction)
+    }
 }
 
 #[cfg(test)]
@@ -153,25 +159,25 @@ mod tests {
         State: std::fmt::Debug + Send + Sync,
         Action: std::fmt::Debug + Send + Sync,
     {
-        fn before_reduce(
-            &mut self,
-            _action: &Action,
-            _state: &State,
-            _dispatcher: Arc<dyn Dispatcher<Action>>,
-        ) -> Result<MiddlewareOp, StoreError> {
-            Ok(MiddlewareOp::ContinueAction)
-        }
-
-        fn after_reduce(
-            &mut self,
-            _action: &Action,
-            _old_state: &State,
-            _new_state: &State,
-            _effects: &mut Vec<Effect<Action>>,
-            _dispatcher: Arc<dyn Dispatcher<Action>>,
-        ) -> Result<MiddlewareOp, StoreError> {
-            Ok(MiddlewareOp::ContinueAction)
-        }
+        // fn before_reduce(
+        //     &mut self,
+        //     _action: &Action,
+        //     _state: &State,
+        //     _dispatcher: Arc<dyn Dispatcher<Action>>,
+        // ) -> Result<MiddlewareOp, StoreError> {
+        //     Ok(MiddlewareOp::ContinueAction)
+        // }
+        //
+        // fn after_reduce(
+        //     &mut self,
+        //     _action: &Action,
+        //     _old_state: &State,
+        //     _new_state: &State,
+        //     _effects: &mut Vec<Effect<Action>>,
+        //     _dispatcher: Arc<dyn Dispatcher<Action>>,
+        // ) -> Result<MiddlewareOp, StoreError> {
+        //     Ok(MiddlewareOp::ContinueAction)
+        // }
     }
 
     struct ChainMiddlewareDoneAction;
@@ -193,17 +199,6 @@ mod tests {
             _dispatcher: Arc<dyn Dispatcher<Action>>,
         ) -> Result<MiddlewareOp, StoreError> {
             Ok(MiddlewareOp::DoneAction)
-        }
-
-        fn after_reduce(
-            &mut self,
-            _action: &Action,
-            _old_state: &State,
-            _new_state: &State,
-            _effects: &mut Vec<Effect<Action>>,
-            _dispatcher: Arc<dyn Dispatcher<Action>>,
-        ) -> Result<MiddlewareOp, StoreError> {
-            Ok(MiddlewareOp::ContinueAction)
         }
     }
 
@@ -227,16 +222,16 @@ mod tests {
             Ok(MiddlewareOp::BreakChain)
         }
 
-        fn after_reduce(
-            &mut self,
-            _action: &Action,
-            _old_state: &State,
-            _new_state: &State,
-            _effects: &mut Vec<Effect<Action>>,
-            _dispatcher: Arc<dyn Dispatcher<Action>>,
-        ) -> Result<MiddlewareOp, StoreError> {
-            Ok(MiddlewareOp::ContinueAction)
-        }
+        // fn after_reduce(
+        //     &mut self,
+        //     _action: &Action,
+        //     _old_state: &State,
+        //     _new_state: &State,
+        //     _effects: &mut Vec<Effect<Action>>,
+        //     _dispatcher: Arc<dyn Dispatcher<Action>>,
+        // ) -> Result<MiddlewareOp, StoreError> {
+        //     Ok(MiddlewareOp::ContinueAction)
+        // }
     }
 
     #[test]
@@ -339,16 +334,6 @@ mod tests {
             Ok(MiddlewareOp::ContinueAction)
         }
 
-        fn after_reduce(
-            &mut self,
-            _action: &MiddlewareAction,
-            _old_state: &State,
-            _new_state: &State,
-            _effects: &mut Vec<Effect<MiddlewareAction>>,
-            _dispatcher: Arc<dyn Dispatcher<MiddlewareAction>>,
-        ) -> Result<MiddlewareOp, StoreError> {
-            Ok(MiddlewareOp::ContinueAction)
-        }
     }
 
     #[test]
@@ -437,60 +422,47 @@ mod tests {
         }
     }
     impl Middleware<EffectState, EffectAction> for EffectMiddleware {
-        fn before_reduce(
-            &mut self,
-            _action: &EffectAction,
-            _state: &EffectState,
-            _dispatcher: Arc<dyn Dispatcher<EffectAction>>,
-        ) -> Result<MiddlewareOp, StoreError> {
-            Ok(MiddlewareOp::ContinueAction)
-        }
 
         // after_reduce is called after the effect is produced
         fn after_reduce(
             &mut self,
-            action: &EffectAction,
+            _action: &EffectAction,
             _old_state: &EffectState,
             _new_state: &EffectState,
             effects: &mut Vec<Effect<EffectAction>>,
             dispatcher: Arc<dyn Dispatcher<EffectAction>>,
         ) -> Result<MiddlewareOp, StoreError> {
-            match action {
-                EffectAction::ActionProduceEffectFunction(_) => {
-                    while effects.len() > 0 {
-                        let effect = effects.remove(0);
-                        match effect {
-                            Effect::Function(tok, effect_fn) => {
-                                // do async
-                                dispatcher.dispatch_thunk(Box::new(move |dispatcher| {
-                                    // do side effect
-                                    let result = effect_fn();
+            while effects.len() > 0 {
+                let effect = effects.remove(0);
+                match effect {
+                    Effect::Function(tok, effect_fn) => {
+                        // do async
+                        dispatcher.dispatch_thunk(Box::new(move |dispatcher| {
+                            // do side effect
+                            let result = effect_fn();
 
-                                    // send response
-                                    match result {
-                                        Ok(new_value) => {
-                                            // ensure the result type is i32
-                                            assert_eq!(tok, "key1");
-                                            // it is almost safe to cast.
-                                            let new_result = new_value.downcast::<i32>().unwrap();
-                                            // and can determine which action can be dispatched
-                                            dispatcher.dispatch(EffectAction::ResponseForTheEffect(
-                                                *new_result,
-                                            ));
-                                        }
-                                        Err(e) => {
-                                            println!("Error: {:?}", e);
-                                        }
-                                    }
-                                }));
+                            // send response
+                            match result {
+                                Ok(new_value) => {
+                                    // ensure the result type is i32
+                                    assert_eq!(tok, "key1");
+                                    // it is almost safe to cast.
+                                    let new_result = new_value.downcast::<i32>().unwrap();
+                                    // and can determine which action can be dispatched
+                                    dispatcher.dispatch(EffectAction::ResponseForTheEffect(
+                                        *new_result,
+                                    ));
+                                }
+                                Err(e) => {
+                                    println!("Error: {:?}", e);
+                                }
                             }
-                            _ => {
-                                assert!(false);
-                            }
-                        }
+                        }));
+                    }
+                    _ => {
+                        assert!(false);
                     }
                 }
-                _ => {}
             }
             Ok(MiddlewareOp::ContinueAction)
         }

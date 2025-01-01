@@ -73,13 +73,13 @@ impl Subscriber<CalcState, CalcAction> for CalcSubscriber {
         match action {
             CalcAction::Add(_i, _) => {
                 println!(
-                    "CalcSubscriber::on_notify: id:{}, state: {:?} <- last: {:?} + action: {}",
+                    "CalcSubscriber::on_notify: id:{}, state: {:?} <- last: {:?} + action: {:?}",
                     self.id, state, self.last.lock().unwrap(), action,
                 );
             }
             CalcAction::Subtract(_i, _) => {
                 println!(
-                    "CalcSubscriber::on_notify: id:{}, state: {:?} <- last: {:?} + action: {}",
+                    "CalcSubscriber::on_notify: id:{}, state: {:?} <- last: {:?} + action: {:?}",
                     self.id, state, self.last.lock().unwrap(), action,
                 );
             }
