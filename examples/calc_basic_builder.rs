@@ -68,26 +68,25 @@ impl Default for CalcSubscriber {
 
 impl Subscriber<CalcState, CalcAction> for CalcSubscriber {
     fn on_notify(&self, state: &CalcState, action: &CalcAction) {
-        if self.last.lock().unwrap().count != state.count {
-            match action {
-                CalcAction::Add(i) => {
-                    println!(
-                        "CalcSubscriber::on_notify: state:{:?} <- last {:?} + action:{}",
-                        state, self.last, i
-                    );
-                }
-                CalcAction::Subtract(i) => {
-                    println!(
-                        "CalcSubscriber::on_notify: state:{:?} <- last {:?} - action:{}",
-                        state, self.last, i
-                    );
-                }
+        match action {
+            CalcAction::Add(_i) => {
+                println!(
+                    "CalcSubscriber::on_notify: state:{:?} <- last {:?} + action:{:?}",
+                    state, self.last.lock().unwrap(), action
+                );
+            }
+            CalcAction::Subtract(_i) => {
+                println!(
+                    "CalcSubscriber::on_notify: state:{:?} <- last {:?} + action:{:?}",
+                    state, self.last.lock().unwrap(), action
+                );
             }
         }
         //
         *self.last.lock().unwrap() = state.clone();
     }
 }
+
 
 pub fn main() {
     println!("Hello, Builder!");
@@ -96,10 +95,12 @@ pub fn main() {
         .with_name("calc".to_string())
         .build()
         .unwrap();
+    println!("add subscriber");
     store.add_subscriber(Arc::new(CalcSubscriber::default()));
     store.dispatch(CalcAction::Add(1));
 
     thread::sleep(std::time::Duration::from_secs(1));
+    println!("add more subscriber");
     store.add_subscriber(Arc::new(CalcSubscriber::default()));
     store.dispatch(CalcAction::Subtract(1));
 

@@ -70,22 +70,17 @@ impl Default for CalcSubscriber {
 
 impl Subscriber<CalcState, CalcAction> for CalcSubscriber {
     fn on_notify(&self, state: &CalcState, action: &CalcAction) {
-        println!(
-            "CalcSubscriber::on_notify: id:{}, action: {:?}",
-            self.id, action
-        );
-
         match action {
             CalcAction::Add(_i, _) => {
                 println!(
-                    "CalcSubscriber::on_notify: id:{}, state: {:?} <- old: {:?}",
-                    self.id, state, self.last
+                    "CalcSubscriber::on_notify: id:{}, state: {:?} <- last: {:?} + action: {}",
+                    self.id, state, self.last.lock().unwrap(), action,
                 );
             }
             CalcAction::Subtract(_i, _) => {
                 println!(
-                    "CalcSubscriber::on_notify: id:{}, state: {:?} <- old: {:?}",
-                    self.id, state, self.last
+                    "CalcSubscriber::on_notify: id:{}, state: {:?} <- last: {:?} + action: {}",
+                    self.id, state, self.last.lock().unwrap(), action,
                 );
             }
         }
@@ -120,7 +115,7 @@ fn subtract_effect_fn(
 }
 
 pub fn main() {
-    println!("Hello, Calc!");
+    println!("Hello, Effect!");
 
     let store = Store::<CalcState, CalcAction>::new_with_name(
         Box::new(CalcReducer::default()),

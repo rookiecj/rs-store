@@ -51,7 +51,7 @@ fn calc_subscriber(state: &CalcState, action: &CalcAction) {
         }
         CalcAction::Subtract(i) => {
             println!(
-                "CalcSubscriber::on_notify: state:{:?}, action: -{}",
+                "CalcSubscriber::on_notify: state:{:?}, action:{}",
                 state, i
             );
         }

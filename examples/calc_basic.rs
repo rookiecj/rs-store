@@ -1,6 +1,5 @@
 use std::sync::{Arc, Mutex};
 use std::thread;
-
 use rs_store::{DispatchOp, Dispatcher};
 use rs_store::{Reducer, Store, Subscriber};
 
@@ -54,6 +53,7 @@ impl Reducer<CalcState, CalcAction> for CalcReducer {
     }
 }
 
+#[derive(Debug)]
 struct CalcSubscriber {
     last: Mutex<CalcState>,
 }
@@ -68,20 +68,18 @@ impl Default for CalcSubscriber {
 
 impl Subscriber<CalcState, CalcAction> for CalcSubscriber {
     fn on_notify(&self, state: &CalcState, action: &CalcAction) {
-        if self.last.lock().unwrap().count != state.count {
-            match action {
-                CalcAction::Add(i) => {
-                    println!(
-                        "CalcSubscriber::on_notify: state:{:?} <- last {:?} + action:{}",
-                        state, self.last, i
-                    );
-                }
-                CalcAction::Subtract(i) => {
-                    println!(
-                        "CalcSubscriber::on_notify: state:{:?} <- last {:?} - action:{}",
-                        state, self.last, i
-                    );
-                }
+        match action {
+            CalcAction::Add(_i) => {
+                println!(
+                    "CalcSubscriber::on_notify: state:{:?} <- last {:?} + action:{:?}",
+                    state, self.last.lock().unwrap(), action
+                );
+            }
+            CalcAction::Subtract(_i) => {
+                println!(
+                    "CalcSubscriber::on_notify: state:{:?} <- last {:?} + action:{:?}",
+                    state, self.last.lock().unwrap(), action
+                );
             }
         }
         //
@@ -90,15 +88,17 @@ impl Subscriber<CalcState, CalcAction> for CalcSubscriber {
 }
 
 pub fn main() {
-    println!("Hello, Calc!");
+    println!("Hello, Basic!");
 
     let store = Store::<CalcState, CalcAction>::new(Box::new(CalcReducer::default()));
 
+    println!("add subscriber");
     store.add_subscriber(Arc::new(CalcSubscriber::default()));
     store.dispatch(CalcAction::Add(1));
 
     thread::sleep(std::time::Duration::from_secs(1));
-    store.add_subscriber(Arc::new(CalcSubscriber::default()));
+    // println!("add more subscriber");
+    // store.add_subscriber(Arc::new(CalcSubscriber::default()));
     store.dispatch(CalcAction::Subtract(1));
 
     // stop the store
