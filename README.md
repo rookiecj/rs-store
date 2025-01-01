@@ -26,7 +26,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-rs-store = "0.13.2"
+rs-store = "0.15.0"
 ```
 
 ## Quick Start
@@ -36,15 +36,25 @@ use rs_store::{Store, CalcState, CalcAction, CalcReducer, CalcSubscriber};
 use std::{thread, sync::Arc};
 
 impl Reducer<CalcState> for CalcReducer {
-    fn reduce(&self, state: &CalcState, action: &CalcAction) -> Option<CalcState> {
+    fn reduce(&self, state: &CalcState, action: &CalcAction) -> DispatchOp<CalcState, CalcAction> {
         match action {
             CalcAction::Add(value) => {
                 println!("Adding value: {}", value);
-                Some(CalcState { value: state.value + value })
+                DispatchOp::Dispatch(
+                    CalcState {
+                        value: state.value + value,
+                    },
+                    None,
+                )
             }
             CalcAction::Subtract(value) => {
                 println!("Subtracting value: {}", value);
-                Some(CalcState { value: state.value - value })
+                DispatchOp::Dispatch(
+                    CalcState {
+                        value: state.value - value,
+                    },
+                    None,
+                )
             }
         }
     }
@@ -56,12 +66,15 @@ fn main() {
 
     // Add subscriber
     store.add_subscriber(Arc::new(CalcSubscriber::default()));
-    
-    // Dispatch actions
+
+    // Dispatch action
     store.dispatch(CalcAction::Add(1));
 
     thread::sleep(std::time::Duration::from_secs(1));
+    // add more subscriber
     store.add_subscriber(Arc::new(CalcSubscriber::default()));
+
+    // Dispatch action
     store.dispatch(CalcAction::Subtract(1));
 
     // Clean up

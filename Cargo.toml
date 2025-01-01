@@ -1,7 +1,7 @@
 [package]
 name = "rs-store"
-# 0.13.2 effect can return
-version = "0.13.2"
+# 0.15.0 add effect function
+version = "0.15.0"
 edition = "2021"
 authors = ["Changju Lee", "Changju Lee<rookiecj@gmail.com>"]
 description = "Redux Store for Rust"
