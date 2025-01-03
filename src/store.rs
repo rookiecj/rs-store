@@ -51,6 +51,7 @@ where
     // reduce and dispatch thread
     dispatch_thread: Mutex<Option<thread::JoinHandle<()>>>,
     middlewares: Mutex<Vec<Arc<Mutex<dyn Middleware<State, Action> + Send + Sync>>>>,
+    epoch: Mutex<u64>,
 }
 
 impl<State, Action> Default for Store<State, Action>
@@ -67,6 +68,7 @@ where
             tx: Mutex::new(None),
             dispatch_thread: Mutex::new(None),
             middlewares: Mutex::new(Vec::default()),
+            epoch: Mutex::new(0),
         }
     }
 }
@@ -114,6 +116,7 @@ where
             DEFAULT_CAPACITY,
             BackpressurePolicy::default(),
             vec![],
+            0,
         )
     }
 
@@ -125,6 +128,7 @@ where
         capacity: usize,
         policy: BackpressurePolicy,
         middleware: Vec<Arc<Mutex<dyn Middleware<State, Action> + Send + Sync>>>,
+        initial_epoch: u64,
     ) -> Result<Arc<Store<State, Action>>, StoreError> {
         let (tx, rx) = BackpressureChannel::<ActionOp<Action>>::new(capacity, policy);
         let store = Store {
@@ -135,6 +139,7 @@ where
             middlewares: Mutex::new(middleware),
             tx: Mutex::new(Some(tx)),
             dispatch_thread: Mutex::new(None),
+            epoch: Mutex::new(initial_epoch),
         };
 
         // start a thread in which the store will listen for actions
@@ -351,11 +356,16 @@ where
     }
 
     pub(crate) fn do_notify(&self, action: &Action) {
-        // TODO thread pool
         let subscribers = self.subscribers.lock().unwrap().clone();
         let next_state = self.state.lock().unwrap().clone();
+        let current_epoch = {
+            let mut epoch = self.epoch.lock().unwrap();
+            *epoch += 1;
+            *epoch
+        };
+
         for subscriber in subscribers.iter() {
-            subscriber.on_notify(&next_state, action)
+            subscriber.on_notify(&next_state, action, current_epoch)
         }
     }
 
@@ -434,8 +444,11 @@ mod tests {
     struct TestSubscriber;
 
     impl Subscriber<i32, i32> for TestSubscriber {
-        fn on_notify(&self, state: &i32, action: &i32) {
-            println!("on_notify: State {:}, Action: {:}", state, action);
+        fn on_notify(&self, state: &i32, action: &i32, epoch: u64) {
+            println!(
+                "on_notify: State {:}, Action: {:}, epoch: {}",
+                state, action, epoch
+            );
         }
     }
 
@@ -498,6 +511,7 @@ mod tests {
             5,
             BackpressurePolicy::DropOldest,
             vec![],
+            0,
         )
         .unwrap();
 
@@ -540,8 +554,11 @@ mod tests {
     }
     impl Subscriber<i32, i32> for PanicSubscriber {
         #[allow(unreachable_code)]
-        fn on_notify(&self, state: &i32, action: &i32) {
-            panic!("on_notify: State: {}, Action: {}", *state, *action);
+        fn on_notify(&self, state: &i32, action: &i32, epoch: u64) {
+            panic!(
+                "on_notify: State: {}, Action: {}, Epoch: {}",
+                *state, *action, epoch
+            );
             *self.state.lock().unwrap() = *state;
         }
     }
