@@ -27,7 +27,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-rs-store = "0.15.0"
+rs-store = "0.16.0"
 ```
 
 ## Quick Start
