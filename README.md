@@ -27,7 +27,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-rs-store = "0.16.0"
+rs-store = "0.17.0"
 ```
 
 ## Quick Start
@@ -105,6 +105,7 @@ For detailed documentation, visit:
 - Thunk action support
 - Backpressure policy (drop oldest)
 - Bounded channel size implementation
+- Selector support
 - Test coverage
 
 ### In Progress 🚧
