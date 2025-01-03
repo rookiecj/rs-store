@@ -54,7 +54,7 @@ where
     }
 }
 
-/// 셀렉터를 사용하는 구독자 구현
+/// SelectorSubscriber is a subscriber that is created from a selector.
 pub struct SelectorSubscriber<State, Action, Select, Output>
 where
     State: Default + Send + Sync + Clone,
@@ -88,7 +88,7 @@ where
 }
 
 impl<State, Action, Select, Output> Subscriber<State, Action>
-for SelectorSubscriber<State, Action, Select, Output>
+    for SelectorSubscriber<State, Action, Select, Output>
 where
     State: Default + Send + Sync + Clone,
     Action: Send + Sync + Clone,

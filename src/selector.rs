@@ -1,7 +1,9 @@
+/// Selector is a function that selects a part of the state.
 pub trait Selector<State, Output> {
     fn select(&self, state: &State) -> Output;
 }
 
+/// FnSelector is a selector that is a function.
 pub struct FnSelector<F, State, Output>
 where
     F: Fn(&State) -> Output,

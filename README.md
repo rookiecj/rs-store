@@ -19,6 +19,7 @@ rs-store provides a predictable state container inspired by Redux, featuring thr
 - 📊 Backpressure handling with configurable policies
 - 🎯 Bounded channel size with sync channels
 - 🧪 Comprehensive test coverage
+- 📚 Selector support
 
 ## Installation
 
