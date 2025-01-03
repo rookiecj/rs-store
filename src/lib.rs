@@ -21,3 +21,6 @@ pub use subscriber::*;
 
 pub mod effect;
 pub use effect::*;
+
+pub mod selector;
+pub use selector::*;

@@ -3,7 +3,7 @@ use crate::{store, Store};
 use std::sync::Arc;
 
 /// Dispatcher dispatches actions to the store
-pub trait Dispatcher<Action: Send> {
+pub trait Dispatcher<Action: Send + Clone> {
     /// dispatch is used to dispatch an action to the store
     /// the caller can be blocked by the channel
     fn dispatch(&self, action: Action);
@@ -20,7 +20,7 @@ pub trait Dispatcher<Action: Send> {
 impl<State, Action> Dispatcher<Action> for Arc<Store<State, Action>>
 where
     State: Default + Send + Sync + Clone + 'static,
-    Action: Send + Sync + 'static,
+    Action: Send + Sync + Clone + 'static,
 {
     fn dispatch(&self, action: Action) {
         let sender = self.tx.lock().unwrap();

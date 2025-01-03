@@ -72,9 +72,9 @@ publish: check_version_tag build publish_cargo add_tag	## publish
 	@echo "published v$(VERSION)"
 	@echo push tag v$(VERSION) to origin
 	@git push origin v$(VERSION)
+	@git push origin main
 
 .PHONY: publish_cargo
 publish_cargo:	## publish to cargo
 	cargo login
 	cargo publish
-

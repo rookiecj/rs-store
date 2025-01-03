@@ -1,7 +1,10 @@
 use crate::channel::{BackpressureChannel, BackpressurePolicy, SenderChannel};
 use crate::dispatcher::Dispatcher;
 use crate::middleware::Middleware;
-use crate::{DispatchOp, Effect, MiddlewareOp, Reducer, Subscriber, Subscription};
+use crate::{
+    DispatchOp, Effect, MiddlewareOp, Reducer, Selector, SelectorSubscriber, Subscriber,
+    Subscription,
+};
 use fmt::Debug;
 use lazy_static::lazy_static;
 use rusty_pool::ThreadPool;
@@ -27,7 +30,7 @@ pub enum StoreError {
 
 pub(crate) enum ActionOp<Action>
 where
-    Action: Send + Sync + 'static,
+    Action: Send + Sync + Clone + 'static,
 {
     Action(Action),
     Exit,
@@ -37,7 +40,7 @@ where
 pub struct Store<State, Action>
 where
     State: Default + Send + Sync + Clone + 'static,
-    Action: Send + Sync + 'static,
+    Action: Send + Sync + Clone + 'static,
 {
     #[allow(dead_code)]
     name: String,
@@ -53,7 +56,7 @@ where
 impl<State, Action> Default for Store<State, Action>
 where
     State: Default + Send + Sync + Clone + 'static,
-    Action: Send + Sync + 'static,
+    Action: Send + Sync + Clone + 'static,
 {
     fn default() -> Store<State, Action> {
         Store {
@@ -81,7 +84,7 @@ impl Subscription for SubscriptionImpl {
 impl<State, Action> Store<State, Action>
 where
     State: Default + Send + Sync + Clone + 'static,
-    Action: Send + Sync + 'static,
+    Action: Send + Sync + Clone + 'static,
 {
     /// create a new store with a reducer
     pub fn new(
@@ -221,6 +224,23 @@ where
                 subscribers.retain(|s| !Arc::ptr_eq(s, &subscriber));
             }),
         })
+    }
+
+    /// 셀렉터를 사용하여 상태 변경을 구독
+    pub fn subscribe_with_selector<Select, Output, F>(
+        &self,
+        selector: Select,
+        on_change: F,
+    ) -> Box<dyn Subscription>
+    where
+        State: Default + Send + Sync + Clone,
+        Action: Send + Sync + Clone,
+        Select: Selector<State, Output> + Send + Sync + 'static,
+        Output: PartialEq + Clone + Send + Sync + 'static,
+        F: Fn(Output, Action) + Send + Sync + 'static,
+    {
+        let subscriber = SelectorSubscriber::new(selector, on_change);
+        self.add_subscriber(Arc::new(subscriber))
     }
 
     /// clear all subscribers
@@ -389,7 +409,7 @@ where
 impl<State, Action> Drop for Store<State, Action>
 where
     State: Default + Send + Sync + Clone + 'static,
-    Action: Send + Sync + 'static,
+    Action: Send + Sync + Clone + 'static,
 {
     fn drop(&mut self) {
         //self.stop();
@@ -549,6 +569,7 @@ mod tests {
         assert_eq!(*state, 0);
     }
 
+    #[derive(Debug, Clone)]
     enum EffectAction {
         ActionProduceEffect(i32),
         ResponseForTheEffect(i32),

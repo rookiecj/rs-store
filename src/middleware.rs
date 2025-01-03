@@ -271,7 +271,7 @@ mod tests {
         assert_eq!(store.get_state(), 1);
     }
 
-    #[derive(Debug)]
+    #[derive(Debug, Clone)]
     enum MiddlewareAction {
         ReqThisAction(i32),
         ResponseAsThis(i32),
@@ -333,7 +333,6 @@ mod tests {
 
             Ok(MiddlewareOp::ContinueAction)
         }
-
     }
 
     #[test]
@@ -370,7 +369,7 @@ mod tests {
         }
     }
 
-    #[derive(Debug)]
+    #[derive(Debug, Clone)]
     enum EffectAction {
         ActionProduceEffectFunction(i32),
         ResponseForTheEffect(i32),
@@ -389,22 +388,24 @@ mod tests {
         ) -> DispatchOp<EffectState, EffectAction> {
             match action {
                 EffectAction::ActionProduceEffectFunction(value) => {
-
                     let new_state = EffectState {
                         value: value.clone(),
                     };
 
                     // produce an effect function
                     let value_clone = value.clone();
-                    let effect = Effect::Function("key1".to_string(), Box::new(move || {
-                        println!("effect: {:?}", value_clone);
+                    let effect = Effect::Function(
+                        "key1".to_string(),
+                        Box::new(move || {
+                            println!("effect: {:?}", value_clone);
 
-                        // do long running task
+                            // do long running task
 
-                        // and return result of the task
-                        let new_result = Box::new(value_clone + 1);
-                        Ok(new_result)
-                    }));
+                            // and return result of the task
+                            let new_result = Box::new(value_clone + 1);
+                            Ok(new_result)
+                        }),
+                    );
                     DispatchOp::Dispatch(new_state, Some(effect))
                 }
                 EffectAction::ResponseForTheEffect(value) => {
@@ -422,7 +423,6 @@ mod tests {
         }
     }
     impl Middleware<EffectState, EffectAction> for EffectMiddleware {
-
         // after_reduce is called after the effect is produced
         fn after_reduce(
             &mut self,
@@ -449,9 +449,8 @@ mod tests {
                                     // it is almost safe to cast.
                                     let new_result = new_value.downcast::<i32>().unwrap();
                                     // and can determine which action can be dispatched
-                                    dispatcher.dispatch(EffectAction::ResponseForTheEffect(
-                                        *new_result,
-                                    ));
+                                    dispatcher
+                                        .dispatch(EffectAction::ResponseForTheEffect(*new_result));
                                 }
                                 Err(e) => {
                                     println!("Error: {:?}", e);

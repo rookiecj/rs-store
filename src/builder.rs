@@ -11,7 +11,7 @@ use std::sync::Mutex;
 pub struct StoreBuilder<State, Action>
 where
     State: Default + Send + Sync + Clone + 'static,
-    Action: Send + Sync + 'static,
+    Action: Send + Sync + Clone + 'static,
 {
     name: String,
     state: State,
@@ -24,7 +24,7 @@ where
 impl<State, Action> Default for StoreBuilder<State, Action>
 where
     State: Default + Send + Sync + Clone + 'static,
-    Action: Send + Sync + 'static,
+    Action: Send + Sync + Clone + 'static,
 {
     fn default() -> Self {
         StoreBuilder {
@@ -41,7 +41,7 @@ where
 impl<State, Action> StoreBuilder<State, Action>
 where
     State: Default + Send + Sync + Clone + 'static,
-    Action: Send + Sync + 'static,
+    Action: Send + Sync + Clone + 'static,
 {
     pub fn new(reducer: Box<dyn Reducer<State, Action> + Send + Sync>) -> Self {
         StoreBuilder {

@@ -14,10 +14,11 @@ pub enum Effect<Action> {
     /// A function which has a result.
     /// the result is an Any type which can be downcasted to the expected type,
     /// you should know the type and the String key can help.
-    Function(String, Box<dyn FnOnce() -> EffectResult + Send>),
+    Function(String, EffectFunction),
 }
 
 pub type EffectResult = Result<Box<dyn std::any::Any + Send>, Box<dyn std::error::Error + Send>>;
+pub type EffectFunction = Box<dyn FnOnce() -> EffectResult + Send>;
 
 /// EffectResultReceiver is a trait that can receive the result of an effect function.
 pub trait EffectResultReceiver {
