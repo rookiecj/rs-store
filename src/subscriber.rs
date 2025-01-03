@@ -54,7 +54,7 @@ where
     }
 }
 
-/// SelectorSubscriber is a subscriber that is created from a selector.
+/// SelectorSubscriber is a subscriber that has a selector.
 pub struct SelectorSubscriber<State, Action, Select, Output>
 where
     State: Default + Send + Sync + Clone,
@@ -126,6 +126,7 @@ mod tests {
     #[derive(Clone)]
     enum TestAction {
         IncrementCounter,
+        #[allow(dead_code)]
         SetName(String),
     }
 
