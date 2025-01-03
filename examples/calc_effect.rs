@@ -4,7 +4,7 @@ use std::thread;
 use rs_store::{DispatchOp, Dispatcher, Effect, EffectResult};
 use rs_store::{Reducer, Store, Subscriber};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 enum CalcAction {
     Add(i32, Arc<Condvar>),
     Subtract(i32, Arc<Condvar>),
@@ -47,7 +47,10 @@ impl Reducer<CalcState, CalcAction> for CalcReducer {
                     CalcState {
                         count: state.count - i,
                     },
-                    Some(Effect::Function("subtract".to_string(), subtract_effect_fn(*i, cond.clone()))),
+                    Some(Effect::Function(
+                        "subtract".to_string(),
+                        subtract_effect_fn(*i, cond.clone()),
+                    )),
                 )
             }
         }
@@ -74,13 +77,19 @@ impl Subscriber<CalcState, CalcAction> for CalcSubscriber {
             CalcAction::Add(_i, _) => {
                 println!(
                     "CalcSubscriber::on_notify: id:{}, state: {:?} <- last: {:?} + action: {:?}",
-                    self.id, state, self.last.lock().unwrap(), action,
+                    self.id,
+                    state,
+                    self.last.lock().unwrap(),
+                    action,
                 );
             }
             CalcAction::Subtract(_i, _) => {
                 println!(
                     "CalcSubscriber::on_notify: id:{}, state: {:?} <- last: {:?} + action: {:?}",
-                    self.id, state, self.last.lock().unwrap(), action,
+                    self.id,
+                    state,
+                    self.last.lock().unwrap(),
+                    action,
                 );
             }
         }
@@ -102,10 +111,7 @@ fn subtract_effect_thunk(
     })
 }
 
-fn subtract_effect_fn(
-    _i: i32,
-    cond: Arc<Condvar>,
-) -> Box<dyn FnOnce() -> EffectResult + Send> {
+fn subtract_effect_fn(_i: i32, cond: Arc<Condvar>) -> Box<dyn FnOnce() -> EffectResult + Send> {
     Box::new(move || {
         println!("effect: set done");
         // set done signal

@@ -4,7 +4,7 @@ use std::thread;
 use rs_store::{DispatchOp, Dispatcher};
 use rs_store::{Reducer, Store, Subscriber};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 enum CalcAction {
     Add(i32),
     Subtract(i32),
@@ -83,13 +83,19 @@ impl Subscriber<CalcState, CalcAction> for CalcSubscriber {
             CalcAction::Add(_i) => {
                 println!(
                     "CalcSubscriber::on_notify: id:{}, state: {:?} <- last: {:?} + action: {:?}",
-                    self.id, state, self.last.lock().unwrap(), action,
+                    self.id,
+                    state,
+                    self.last.lock().unwrap(),
+                    action,
                 );
             }
             CalcAction::Subtract(_i) => {
                 println!(
                     "CalcSubscriber::on_notify: id:{}, state: {:?} <- last: {:?} + action: {:?}",
-                    self.id, state, self.last.lock().unwrap(), action,
+                    self.id,
+                    state,
+                    self.last.lock().unwrap(),
+                    action,
                 );
             }
         }

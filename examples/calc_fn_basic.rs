@@ -4,7 +4,7 @@ use std::thread;
 use rs_store::{DispatchOp, Dispatcher};
 use rs_store::{FnReducer, FnSubscriber, Store};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 enum CalcAction {
     Add(i32),
     Subtract(i32),
