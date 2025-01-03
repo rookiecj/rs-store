@@ -19,6 +19,7 @@ where
     capacity: usize,
     policy: BackpressurePolicy,
     middlewares: Vec<Arc<Mutex<dyn Middleware<State, Action> + Send + Sync>>>,
+    epoch: u64,
 }
 
 impl<State, Action> Default for StoreBuilder<State, Action>
@@ -34,6 +35,7 @@ where
             capacity: DEFAULT_CAPACITY,
             policy: Default::default(),
             middlewares: Vec::new(),
+            epoch: 0,
         }
     }
 }
@@ -51,6 +53,7 @@ where
             capacity: DEFAULT_CAPACITY,
             policy: Default::default(),
             middlewares: Vec::new(),
+            epoch: 0,
         }
     }
 
@@ -134,6 +137,7 @@ where
             self.capacity,
             self.policy,
             self.middlewares,
+            self.epoch,
         )
     }
 }

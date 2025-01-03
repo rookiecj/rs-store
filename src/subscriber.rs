@@ -9,7 +9,7 @@ where
     Action: Send + Sync + Clone,
 {
     /// on_notify is called when the store is notified of an action.
-    fn on_notify(&self, state: &State, action: &Action);
+    fn on_notify(&self, state: &State, action: &Action, epoch: u64);
 }
 
 /// Subscription is a handle to unsubscribe from the store.
@@ -20,7 +20,7 @@ pub trait Subscription: Send {
 /// FnSubscriber is a subscriber that is created from a function.
 pub struct FnSubscriber<F, State, Action>
 where
-    F: Fn(&State, &Action),
+    F: Fn(&State, &Action, u64),
     State: Default + Send + Sync + Clone,
     Action: Send + Sync + Clone,
 {
@@ -31,18 +31,18 @@ where
 
 impl<F, State, Action> Subscriber<State, Action> for FnSubscriber<F, State, Action>
 where
-    F: Fn(&State, &Action),
+    F: Fn(&State, &Action, u64),
     State: Default + Send + Sync + Clone,
     Action: Send + Sync + Clone,
 {
-    fn on_notify(&self, state: &State, action: &Action) {
-        (self.func)(state, action)
+    fn on_notify(&self, state: &State, action: &Action, epoch: u64) {
+        (self.func)(state, action, epoch)
     }
 }
 
 impl<F, State, Action> From<F> for FnSubscriber<F, State, Action>
 where
-    F: Fn(&State, &Action),
+    F: Fn(&State, &Action, u64),
     State: Default + Send + Sync + Clone,
     Action: Send + Sync + Clone,
 {
@@ -95,7 +95,7 @@ where
     Select: Selector<State, Output>,
     Output: PartialEq + Clone,
 {
-    fn on_notify(&self, state: &State, action: &Action) {
+    fn on_notify(&self, state: &State, action: &Action, _epoch: u64) {
         let selected: Output = self.selector.select(state);
         let mut last_value = self.last_value.lock().unwrap();
 
@@ -164,7 +164,7 @@ mod tests {
             name: "initial".to_string(),
         };
 
-        subscriber.on_notify(&initial_state, &TestAction::IncrementCounter);
+        subscriber.on_notify(&initial_state, &TestAction::IncrementCounter, 0);
         assert_eq!(change_counter.load(Ordering::SeqCst), 1);
 
         // 상태가 변경된 경우
@@ -172,11 +172,11 @@ mod tests {
             counter: 1,
             name: "initial".to_string(),
         };
-        subscriber.on_notify(&new_state, &TestAction::IncrementCounter);
+        subscriber.on_notify(&new_state, &TestAction::IncrementCounter, 0);
         assert_eq!(change_counter.load(Ordering::SeqCst), 2);
 
         // 동일한 값으로 변경된 경우 (콜백이 호출되지 않아야 함)
-        subscriber.on_notify(&new_state, &TestAction::IncrementCounter);
+        subscriber.on_notify(&new_state, &TestAction::IncrementCounter, 0);
         assert_eq!(change_counter.load(Ordering::SeqCst), 2);
     }
 
@@ -204,9 +204,13 @@ mod tests {
         };
 
         // 상태 변경 알림
-        subscriber.on_notify(&initial_state, &TestAction::SetName("initial".to_string()));
-        subscriber.on_notify(&new_state, &TestAction::SetName("updated".to_string()));
-        subscriber.on_notify(&new_state, &TestAction::SetName("updated".to_string())); // 동일한 값
+        subscriber.on_notify(
+            &initial_state,
+            &TestAction::SetName("initial".to_string()),
+            0,
+        );
+        subscriber.on_notify(&new_state, &TestAction::SetName("updated".to_string()), 0);
+        subscriber.on_notify(&new_state, &TestAction::SetName("updated".to_string()), 0); // 동일한 값
 
         // 결과 확인
         let received = received_values.lock().unwrap();
@@ -254,8 +258,8 @@ mod tests {
 
         // 각 상태 변경에 대해 두 구독자 모두에게 알림
         for state in states {
-            counter_subscriber.on_notify(&state, &TestAction::IncrementCounter);
-            name_subscriber.on_notify(&state, &TestAction::SetName(state.name.clone()));
+            counter_subscriber.on_notify(&state, &TestAction::IncrementCounter, 0);
+            name_subscriber.on_notify(&state, &TestAction::SetName(state.name.clone()), 0);
         }
 
         // 결과 확인

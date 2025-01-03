@@ -44,15 +44,18 @@ fn calc_reducer(state: &CalcState, action: &CalcAction) -> DispatchOp<CalcState,
     }
 }
 
-fn calc_subscriber(state: &CalcState, action: &CalcAction) {
+fn calc_subscriber(state: &CalcState, action: &CalcAction, epoch: u64) {
     match action {
         CalcAction::Add(i) => {
-            println!("CalcSubscriber::on_notify: state:{:?}, action:{}", state, i);
+            println!(
+                "CalcSubscriber::on_notify: state:{:?}, action:{}, epoch: {}",
+                state, i, epoch
+            );
         }
         CalcAction::Subtract(i) => {
             println!(
-                "CalcSubscriber::on_notify: state:{:?}, action:{}",
-                state, i
+                "CalcSubscriber::on_notify: state:{:?}, action:{}, epoch: {}",
+                state, i, epoch
             );
         }
     }
