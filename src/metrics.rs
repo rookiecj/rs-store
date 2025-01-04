@@ -46,7 +46,6 @@ where
     /// error_occurred is called when an error occurs.
     fn error_occurred(&self, error: &StoreError) {}
 
-    fn as_any(&self) -> &dyn Any;
 }
 
 /// NoOpMetrics is a no-op implementation of StoreMetrics.
@@ -57,9 +56,6 @@ where
     State: Send + Sync + 'static,
     Action: Send + Sync + Clone + 'static,
 {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
 }
 
 pub struct CountMetrics {
@@ -317,10 +313,6 @@ where
     fn error_occurred(&self, error: &StoreError) {
         self.error_occurred.fetch_add(1, Ordering::SeqCst);
     }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
 }
 
 #[cfg(test)]
@@ -440,13 +432,10 @@ mod tests {
 
     #[test]
     fn test_count_metrics_with_middleware() {
-        // let metrics = Arc::new(Box::new(CountMetrics::default()));
-        // let metrics: Arc<Box<dyn StoreMetrics<i32, i32> + Send + Sync>> =
-        //     Arc::new(Box::new(CountMetrics::default()));
+
+        // given
         let metrics = CountMetrics::new();
-
         let middleware = Arc::new(Mutex::new(TestMiddleware::new("test")));
-
         let store = StoreBuilder::new(Box::new(TestReducer))
             .with_capacity(5)
             .with_middleware(middleware)
@@ -454,16 +443,18 @@ mod tests {
             .build()
             .unwrap();
 
+        // when
         store.dispatch(1);
-        thread::sleep(Duration::from_millis(100));
-
-        // if let Some(count_metrics) = metrics.as_any().downcast_ref::<CountMetrics>() {
-        //     assert!(count_metrics.middleware_execution_time.load(Ordering::SeqCst) > 0);
-        //     assert!(count_metrics.middleware_time_max.load(Ordering::SeqCst) > 0);
-        //     println!("Middleware metrics: {}", count_metrics.display());
-        // }
-
         store.stop();
+
+        assert_eq!(metrics.action_received.load(Ordering::SeqCst), 1);
+        assert_eq!(metrics.action_reduced.load(Ordering::SeqCst), 1);
+        assert_eq!(metrics.subscriber_notified.load(Ordering::SeqCst), 1);
+        // Middleware should be executed
+        assert!(metrics.middleware_execution_time.load(Ordering::SeqCst) > 0);
+        assert!(metrics.reducer_execution_time.load(Ordering::SeqCst) > 0);
+        // Middleware should take longer than reducer
+        assert!(metrics.middleware_execution_time.load(Ordering::SeqCst) > metrics.reducer_execution_time.load(Ordering::SeqCst));
     }
 
     #[test]

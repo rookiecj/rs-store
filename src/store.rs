@@ -757,10 +757,6 @@ mod tests {
         fn subscriber_notified(&self, _action: &Action, _count: usize, _duration: Duration) {
             self.notifications.fetch_add(1, Ordering::SeqCst);
         }
-
-        fn as_any(&self) -> &dyn Any {
-            self
-        }
     }
 
     #[test]
