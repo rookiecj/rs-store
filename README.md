@@ -14,12 +14,14 @@ rs-store provides a predictable state container inspired by Redux, featuring thr
 
 - 🔒 Thread-safe state management
 - 📢 Publisher/Subscriber pattern for state changes
-- 🔄 Support for async operations via Thunk actions
+- 🔄 Support for asynchronous operations via Thunk actions
 - 📊 Side effect handling in reducers
+- 📊 Middleware handles actions and effects
 - 📊 Backpressure handling with configurable policies
 - 🎯 Bounded channel size with sync channels
 - 🧪 Comprehensive test coverage
 - 📚 Selector support
+- 📊 Metrics support
 
 ## Installation
 
@@ -27,7 +29,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-rs-store = "0.17.0"
+rs-store = "0.18.0"
 ```
 
 ## Quick Start
@@ -97,22 +99,10 @@ For detailed documentation, visit:
 
 ## Implementation Status
 
-### Completed ✅
-- Reducer with side effects support
-- Thread naming support
-- Subscription management (subscribe/unsubscribe)
-- Subscriber clearing functionality
-- Thunk action support
-- Backpressure policy (drop oldest)
-- Bounded channel size implementation
-- Selector support
-- Test coverage
-
 ### In Progress 🚧
 - Latest state notification for new subscribers
 - Notification scheduler (CurrentThread, ThreadPool)
 - Stream-based pull model
-- Stats middleware for state change logging
 
 ## Contributing
 
