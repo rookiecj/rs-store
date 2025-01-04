@@ -606,9 +606,6 @@ mod tests {
 
         store.dispatch(EffectAction::ActionProduceEffect(42));
 
-        // at this point, the state probably not be changed
-        //assert_eq!(store.get_state(), 42);
-
         // give time to the effect
         thread::sleep(Duration::from_secs(1));
         store.stop();
