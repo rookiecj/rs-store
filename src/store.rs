@@ -1,5 +1,6 @@
 use crate::channel::{BackpressureChannel, BackpressurePolicy, SenderChannel};
 use crate::dispatcher::Dispatcher;
+use crate::metrics::StoreMetrics;
 use crate::middleware::Middleware;
 use crate::{
     DispatchOp, Effect, MiddlewareOp, Reducer, Selector, SelectorSubscriber, Subscriber,
@@ -9,6 +10,7 @@ use fmt::Debug;
 use lazy_static::lazy_static;
 use rusty_pool::ThreadPool;
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 use std::{fmt, thread};
 
 /// Default capacity for the channel
@@ -18,7 +20,7 @@ lazy_static! {
 }
 
 /// StoreError represents an error that occurred in the store
-#[derive(Debug, Clone, thiserror::Error)]
+#[derive(Debug, thiserror::Error)]
 pub enum StoreError {
     #[error("dispatch error: {0}")]
     DispatchError(String),
@@ -26,8 +28,19 @@ pub enum StoreError {
     ReducerError(String),
     #[error("subscription error: {0}")]
     SubscriptionError(String),
+    #[error("middleware error: {0}")]
+    MiddlewareError(String),
+    #[error("initialization error: {0}")]
+    InitError(String),
+    /// state update failed with context and source
+    #[error("state update failed: {context}, cause: {source}")]
+    StateUpdateError {
+        context: String,
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
 }
 
+#[derive(Debug)]
 pub(crate) enum ActionOp<Action>
 where
     Action: Send + Sync + Clone + 'static,
@@ -47,10 +60,11 @@ where
     state: Mutex<State>,
     pub(crate) reducers: Mutex<Vec<Box<dyn Reducer<State, Action> + Send + Sync>>>,
     pub(crate) subscribers: Arc<Mutex<Vec<Arc<dyn Subscriber<State, Action> + Send + Sync>>>>,
-    pub(crate) tx: Mutex<Option<SenderChannel<ActionOp<Action>>>>,
+    pub(crate) tx: Mutex<Option<SenderChannel<State, Action>>>,
     // reduce and dispatch thread
     dispatch_thread: Mutex<Option<thread::JoinHandle<()>>>,
     middlewares: Mutex<Vec<Arc<Mutex<dyn Middleware<State, Action> + Send + Sync>>>>,
+    metrics: Option<Arc<dyn StoreMetrics<State, Action> + Send + Sync>>,
 }
 
 impl<State, Action> Default for Store<State, Action>
@@ -67,6 +81,7 @@ where
             tx: Mutex::new(None),
             dispatch_thread: Mutex::new(None),
             middlewares: Mutex::new(Vec::default()),
+            metrics: None,
         }
     }
 }
@@ -114,6 +129,7 @@ where
             DEFAULT_CAPACITY,
             BackpressurePolicy::default(),
             vec![],
+            None,
         )
     }
 
@@ -124,17 +140,19 @@ where
         name: String,
         capacity: usize,
         policy: BackpressurePolicy,
-        middleware: Vec<Arc<Mutex<dyn Middleware<State, Action> + Send + Sync>>>,
+        middlewares: Vec<Arc<Mutex<dyn Middleware<State, Action> + Send + Sync>>>,
+        metrics: Option<Arc<dyn StoreMetrics<State, Action> + Send + Sync>>,
     ) -> Result<Arc<Store<State, Action>>, StoreError> {
-        let (tx, rx) = BackpressureChannel::<ActionOp<Action>>::new(capacity, policy);
+        let (tx, rx) = BackpressureChannel::<State, Action>::new(capacity, policy, metrics.clone());
         let store = Store {
             name: name.clone(),
             state: Mutex::new(state),
             reducers: Mutex::new(reducers),
             subscribers: Arc::new(Mutex::new(Vec::default())),
-            middlewares: Mutex::new(middleware),
+            middlewares: Mutex::new(middlewares),
             tx: Mutex::new(Some(tx)),
             dispatch_thread: Mutex::new(None),
+            metrics: metrics.clone(),
         };
 
         // start a thread in which the store will listen for actions
@@ -153,30 +171,7 @@ where
 
                         // do effect remains
                         if let Some(mut effects) = effects {
-                            while effects.len() > 0 {
-                                let effect = effects.remove(0);
-                                match effect {
-                                    Effect::Action(a) => {
-                                        the_dispatcher.dispatch_thunk(Box::new(
-                                            move |dispatcher| {
-                                                dispatcher.dispatch(a);
-                                            },
-                                        ));
-                                    }
-                                    Effect::Task(task) => {
-                                        the_dispatcher.dispatch_task(task);
-                                    }
-                                    Effect::Thunk(thunk) => {
-                                        the_dispatcher.dispatch_thunk(thunk);
-                                    }
-                                    Effect::Function(_tok, func) => {
-                                        the_dispatcher.dispatch_task(Box::new(move || {
-                                            // when the result of the function needs to be handled, it should be done in middleware
-                                            let _ = func();
-                                        }));
-                                    }
-                                };
-                            }
+                            rx_store.do_effect(&action, &mut effects, the_dispatcher.clone());
                         }
 
                         // do notify subscribers
@@ -259,6 +254,11 @@ where
         action: &Action,
         dispatcher: Arc<dyn Dispatcher<Action>>,
     ) -> (bool, Option<Vec<Effect<Action>>>) {
+        let middleware_start = Instant::now();
+        if let Some(metrics) = &self.metrics {
+            metrics.action_received(action);
+        }
+
         let current_state = self.state.lock().unwrap().clone();
 
         // Execute before_dispatch for all middlewares
@@ -295,6 +295,9 @@ where
         let mut next_state = current_state.clone();
         let mut need_dispatch = true;
         if reduce_action {
+            // 여기서 reducer 실행 시간 측정 시작
+            let reducer_start = Instant::now();
+
             for reducer in self.reducers.lock().unwrap().iter() {
                 match reducer.reduce(&next_state, action) {
                     DispatchOp::Dispatch(new_state, effect) => {
@@ -313,6 +316,12 @@ where
                         need_dispatch = false;
                     }
                 }
+            }
+
+            // reducer 실행 시간 측정 종료 및 기록
+            if let Some(metrics) = &self.metrics {
+                let reducer_duration = reducer_start.elapsed();
+                metrics.action_reduced(action, &current_state, &next_state, reducer_duration);
             }
         }
 
@@ -346,16 +355,68 @@ where
             }
         }
 
+        if let Some(metrics) = &self.metrics {
+            let middleware_duration = middleware_start.elapsed();
+            metrics.middleware_executed(action, "after_reduce", middleware_duration);
+        }
+
         *self.state.lock().unwrap() = next_state;
         (need_dispatch, Some(effects))
     }
 
+    pub(crate) fn do_effect(
+        &self,
+        _action: &Action,
+        effects: &mut Vec<Effect<Action>>,
+        dispatcher: Arc<dyn Dispatcher<Action>>,
+    ) {
+        let start = Instant::now();
+        if let Some(metrics) = &self.metrics {
+            metrics.effect_issued(effects.len());
+        }
+
+        while effects.len() > 0 {
+            let effect = effects.remove(0);
+            match effect {
+                Effect::Action(a) => {
+                    dispatcher.dispatch_thunk(Box::new(move |dispatcher| {
+                        dispatcher.dispatch(a);
+                    }));
+                }
+                Effect::Task(task) => {
+                    dispatcher.dispatch_task(task);
+                }
+                Effect::Thunk(thunk) => {
+                    dispatcher.dispatch_thunk(thunk);
+                }
+                Effect::Function(_tok, func) => {
+                    dispatcher.dispatch_task(Box::new(move || {
+                        // when the result of the function needs to be handled, it should be done in middleware
+                        let _ = func();
+                    }));
+                }
+            };
+        }
+
+        let duration = start.elapsed();
+        if let Some(metrics) = &self.metrics {
+            metrics.effect_executed(effects.len(), duration);
+        }
+    }
+
     pub(crate) fn do_notify(&self, action: &Action) {
+        let start = Instant::now();
+
         // TODO thread pool
         let subscribers = self.subscribers.lock().unwrap().clone();
         let next_state = self.state.lock().unwrap().clone();
         for subscriber in subscribers.iter() {
             subscriber.on_notify(&next_state, action)
+        }
+
+        if let Some(metrics) = &self.metrics {
+            let duration = start.elapsed();
+            metrics.subscriber_notified(action, subscribers.len(), duration);
         }
     }
 
@@ -389,12 +450,19 @@ where
     pub fn dispatch(&self, action: Action) -> Result<i64, StoreError> {
         let sender = self.tx.lock().unwrap();
         if let Some(tx) = sender.as_ref() {
-            let remains = tx.send(ActionOp::Action(action)).unwrap_or(0);
+            let remains = tx.send(ActionOp::Action(action.clone())).unwrap_or(0);
+
+            if let Some(metrics) = &self.metrics {
+                metrics.queue_size(remains as usize);
+            }
+
             Ok(remains)
         } else {
-            Err(StoreError::DispatchError(
-                "Dispatch channel is closed".to_string(),
-            ))
+            let err = StoreError::DispatchError("Dispatch channel is closed".to_string());
+            if let Some(metrics) = &self.metrics {
+                metrics.error_occurred(&err);
+            }
+            Err(err)
         }
     }
 
@@ -420,6 +488,9 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use fmt::{Display, Formatter};
+    use std::any::Any;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Duration;
 
     struct TestReducer;
@@ -498,6 +569,7 @@ mod tests {
             5,
             BackpressurePolicy::DropOldest,
             vec![],
+            None,
         )
         .unwrap();
 
@@ -519,16 +591,16 @@ mod tests {
     #[should_panic]
     fn test_panic_on_reducer() {
         // given
-        let reducer = Box::new(PanicReducer);
+        let reducer: Box<PanicReducer> = Box::new(PanicReducer);
         let store = Store::new_with_state(reducer, 42);
 
         // when
         // if the panic occurs in a different thread created within the test function, the #[should_panic] attribute will not catch it
         // you can use the std::panic::catch_unwind function to catch the panic and then propagate it to the main thread.
-        let result = std::panic::catch_unwind(|| {
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             store.dispatch(1);
             store.stop();
-        });
+        }));
 
         // then
         assert!(result.is_err());
@@ -606,13 +678,109 @@ mod tests {
 
         store.dispatch(EffectAction::ActionProduceEffect(42));
 
-        // at this point, the state probably not be changed
-        //assert_eq!(store.get_state(), 42);
-
         // give time to the effect
         thread::sleep(Duration::from_secs(1));
         store.stop();
 
         assert_eq!(store.get_state(), 43);
+    }
+
+    struct TestMetrics {
+        pub action_count: AtomicUsize,
+        pub state_changes: AtomicUsize,
+        pub notifications: AtomicUsize,
+    }
+
+    impl TestMetrics {
+        fn new() -> Arc<Self> {
+            Arc::new(Self {
+                action_count: AtomicUsize::new(0),
+                state_changes: AtomicUsize::new(0),
+                notifications: AtomicUsize::new(0),
+            })
+        }
+    }
+
+    impl Display for TestMetrics {
+        fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+            write!(
+                f,
+                "action_count: {:?}",
+                self.action_count.load(Ordering::SeqCst)
+            )?;
+            write!(
+                f,
+                ",state_changes: {:?}",
+                self.state_changes.load(Ordering::SeqCst)
+            )?;
+            write!(
+                f,
+                ",notifications: {:?}",
+                self.notifications.load(Ordering::SeqCst)
+            )?;
+            Ok(())
+        }
+    }
+
+    impl<State, Action> StoreMetrics<State, Action> for TestMetrics
+    where
+        State: Send + Sync + 'static,
+        Action: Send + Sync + Clone + 'static,
+    {
+        fn action_received(&self, _action: &Action) {
+            self.action_count.fetch_add(1, Ordering::SeqCst);
+        }
+
+        fn action_dropped(&self, _action: &Action) {
+            // Implementation for dropped actions
+        }
+
+        fn middleware_executed(
+            &self,
+            _action: &Action,
+            _middleware_name: &str,
+            _duration: Duration,
+        ) {
+            // Implementation for middleware execution
+        }
+
+        fn action_reduced(
+            &self,
+            _action: &Action,
+            _old_state: &State,
+            _new_state: &State,
+            _duration: Duration,
+        ) {
+            self.state_changes.fetch_add(1, Ordering::SeqCst);
+        }
+
+        fn subscriber_notified(&self, _action: &Action, _count: usize, _duration: Duration) {
+            self.notifications.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    #[test]
+    fn test_store_metrics() {
+        // let metrics = Arc::new(Box::new(TestMetrics::new()));
+        // let metrics: Arc<dyn StoreMetrics<i32, i32> + Send + Sync> = TestMetrics::new();
+        let metrics = TestMetrics::new();
+        let store = Store::new_with(
+            vec![Box::new(TestReducer)],
+            0,
+            "test_store".to_string(),
+            5,
+            BackpressurePolicy::DropOldest,
+            vec![],
+            Some(metrics.clone()),
+        )
+        .unwrap();
+
+        store.dispatch(1);
+        store.stop();
+
+        // Verify metrics were recorded
+        assert!(metrics.action_count.load(Ordering::SeqCst) > 0);
+        assert!(metrics.state_changes.load(Ordering::SeqCst) > 0);
+        assert!(metrics.notifications.load(Ordering::SeqCst) > 0);
     }
 }

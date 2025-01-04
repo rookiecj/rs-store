@@ -1,4 +1,5 @@
 use crate::channel;
+use crate::metrics::StoreMetrics;
 use crate::BackpressurePolicy;
 use crate::Middleware;
 use crate::Reducer;
@@ -19,6 +20,7 @@ where
     capacity: usize,
     policy: BackpressurePolicy,
     middlewares: Vec<Arc<Mutex<dyn Middleware<State, Action> + Send + Sync>>>,
+    metrics: Option<Arc<dyn StoreMetrics<State, Action> + Send + Sync>>,
 }
 
 impl<State, Action> Default for StoreBuilder<State, Action>
@@ -34,6 +36,7 @@ where
             capacity: DEFAULT_CAPACITY,
             policy: Default::default(),
             middlewares: Vec::new(),
+            metrics: None,
         }
     }
 }
@@ -51,6 +54,7 @@ where
             capacity: DEFAULT_CAPACITY,
             policy: Default::default(),
             middlewares: Vec::new(),
+            metrics: None,
         }
     }
 
@@ -116,6 +120,14 @@ where
         self
     }
 
+    pub fn with_metrics(
+        mut self,
+        metrics: Arc<dyn StoreMetrics<State, Action> + Send + Sync>,
+    ) -> Self {
+        self.metrics = Some(metrics);
+        self
+    }
+
     pub fn build(self) -> Result<Arc<Store<State, Action>>, StoreError> {
         if self.reducers.is_empty() {
             return Err(StoreError::ReducerError("reducers are empty".to_string()));
@@ -134,6 +146,7 @@ where
             self.capacity,
             self.policy,
             self.middlewares,
+            self.metrics,
         )
     }
 }
