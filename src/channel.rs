@@ -1,4 +1,6 @@
+use std::collections::VecDeque;
 use std::marker::PhantomData;
+use std::sync::Mutex;
 use std::thread;
 use std::time::Duration;
 
@@ -80,16 +82,94 @@ impl<T> SenderChannel<T> {
 
 pub(crate) struct ReceiverChannel<T> {
     receiver: Receiver<T>,
+    pending: Mutex<VecDeque<T>>,
+    capacity: usize,
+    policy: BackpressurePolicy,
 }
 
-impl<T> ReceiverChannel<T> {
-    pub fn recv(&self) -> Option<T> {
-        self.receiver.recv().ok()
+impl<T> ReceiverChannel<T>
+where
+    T: Clone + HasPriority,
+{
+    pub fn new(receiver: Receiver<T>, capacity: usize, policy: BackpressurePolicy) -> Self {
+        Self {
+            receiver,
+            pending: Mutex::new(VecDeque::with_capacity(capacity)),
+            capacity,
+            policy,
+        }
     }
 
-    #[allow(dead_code)]
-    pub fn try_recv(&self) -> Option<T> {
-        self.receiver.try_recv().ok()
+    pub fn recv(&self) -> Option<T> {
+        let mut pending = self.pending.lock().unwrap();
+
+        // 새로운 메시지들을 pending queue에 추가 (capacity 제한 적용)
+        while let Ok(item) = self.receiver.try_recv() {
+            if pending.len() >= self.capacity {
+                match self.policy {
+                    BackpressurePolicy::DropOldest => {
+                        // 가장 낮은 우선순위의 항목을 제거
+                        let mut lowest_prio_idx = 0;
+                        let mut lowest_prio = pending[0].priority();
+
+                        for (i, item) in pending.iter().enumerate().skip(1) {
+                            let prio = item.priority();
+                            if prio < lowest_prio {
+                                lowest_prio = prio;
+                                lowest_prio_idx = i;
+                            }
+                        }
+                        pending.remove(lowest_prio_idx);
+                    }
+                    BackpressurePolicy::DropLatest => {
+                        // 새로운 항목을 무시
+                        continue;
+                    }
+                    BackpressurePolicy::BlockOnFull => {
+                        // 이 경우는 발생하지 않아야 함 (sender에서 이미 처리)
+                        break;
+                    }
+                }
+            }
+            pending.push_back(item);
+        }
+
+        // pending queue가 비어있으면 blocking recv 시도
+        if pending.is_empty() {
+            match self.receiver.recv() {
+                Ok(item) => Some(item),
+                Err(_) => None,
+            }
+        } else {
+            // 가장 높은 우선순위를 가진 항목을 찾아서 처리
+            let mut highest_prio_idx = 0;
+            let mut highest_prio = pending[0].priority();
+
+            for (i, item) in pending.iter().enumerate().skip(1) {
+                let prio = item.priority();
+                if prio > highest_prio {
+                    highest_prio = prio;
+                    highest_prio_idx = i;
+                }
+            }
+
+            Some(pending.remove(highest_prio_idx).unwrap())
+        }
+    }
+}
+
+// 우선순위를 가진 타입을 위한 trait
+pub trait HasPriority {
+    fn priority(&self) -> i32;
+}
+
+// ActionOp에 대한 HasPriority 구현
+impl<Action> HasPriority for ActionOp<Action>
+where
+    Action: Send + Sync + Clone + 'static,
+{
+    fn priority(&self) -> i32 {
+        self.priority()
     }
 }
 
@@ -110,11 +190,10 @@ impl<T> BackpressureChannel<T> {
                 receiver: receiver.clone(),
                 policy,
             },
-            ReceiverChannel { receiver },
+            ReceiverChannel::new(receiver, capacity, policy),
         )
     }
 }
-
 #[allow(dead_code)]
 fn main() {
     let (sender, receiver) = BackpressureChannel::new(5, BackpressurePolicy::DropOldest);

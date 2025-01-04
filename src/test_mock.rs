@@ -54,7 +54,7 @@ where
     State: Default + Send + Sync + Clone + 'static,
     Action: Send + Sync + Clone + 'static,
 {
-    pub on_notify_fn: Arc<Mutex<Box<dyn Fn(&State, &Action) + Send + Sync + 'static>>>,
+    pub on_notify_fn: Arc<Mutex<Box<dyn Fn(&State, &Action, u64) + Send + Sync + 'static>>>,
     pub notify_call_count: Arc<Mutex<usize>>,
 }
 
@@ -65,14 +65,15 @@ where
 {
     pub fn new() -> Self {
         Self {
-            on_notify_fn: Arc::new(Mutex::new(Box::new(|_, _| ()))),
+            on_notify_fn: Arc::new(Mutex::new(Box::new(|_, _, _| ()))),
             notify_call_count: Arc::new(Mutex::new(0)),
         }
     }
 
-    pub fn with_notify_fn<F>(self, f: F) -> Self
+    #[allow(unused_mut)]
+    pub fn with_notify_fn<F>(mut self, f: F) -> Self
     where
-        F: Fn(&State, &Action) + Send + Sync + 'static,
+        F: Fn(&State, &Action, u64) + Send + Sync + 'static,
     {
         *self.on_notify_fn.lock().unwrap() = Box::new(f);
         self
@@ -84,9 +85,9 @@ where
     State: Default + Send + Sync + Clone + 'static,
     Action: Send + Sync + Clone + 'static,
 {
-    fn on_notify(&self, state: &State, action: &Action) {
+    fn on_notify(&self, state: &State, action: &Action, epoch: u64) {
         *self.notify_call_count.lock().unwrap() += 1;
-        (self.on_notify_fn.lock().unwrap())(state, action)
+        (self.on_notify_fn.lock().unwrap())(state, action, epoch)
     }
 }
 
@@ -250,7 +251,7 @@ mod tests {
         let received_state_clone = received_state.clone();
 
         let mock_subscriber = Arc::new(MockSubscriber::new().with_notify_fn(
-            move |state: &i32, _action: &i32| {
+            move |state: &i32, _action: &i32, _epoch: u64| {
                 *received_state_clone.lock().unwrap() = Some(*state);
             },
         ));
