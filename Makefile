@@ -8,12 +8,20 @@ help:  ## show this help
 build:	## build
 	cargo build --lib
 
+build-dev: ## build for development
+	cargo build --lib --features dev
+
 clean:	## clean
 	cargo clean
 
 .PHONY: test
 test:	## test
 	cargo test
+
+.PHONY: test-dev
+test-dev:	## test for development
+	RUST_TEST_THREADS=1 RUST_LOG=debug cargo test --features dev  -- --nocapture
+
 
 .PHONY: doc
 doc:	## doc
@@ -40,7 +48,6 @@ example-calc_thunk:	## example calc_thunk
 
 example-calc_basic_builder:	## example calc_basic_builder
 	cargo run --example calc_basic_builder
-
 
 examples: example-calc \
 	example-calc_fn \

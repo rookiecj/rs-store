@@ -1,5 +1,4 @@
 use crate::StoreError;
-use std::any::Any;
 use std::fmt::Formatter;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -29,7 +28,8 @@ where
         old_state: &State,
         new_state: &State,
         duration: Duration,
-    ) {}
+    ) {
+    }
 
     /// effect_issued is called when the number of effects issued.
     fn effect_issued(&self, count: usize) {}
@@ -45,7 +45,6 @@ where
 
     /// error_occurred is called when an error occurs.
     fn error_occurred(&self, error: &StoreError) {}
-
 }
 
 /// NoOpMetrics is a no-op implementation of StoreMetrics.
@@ -406,7 +405,6 @@ mod tests {
 
     #[test]
     fn test_count_metrics_with_dropped_actions() {
-
         // given
         let metrics = CountMetrics::new();
         let store = StoreBuilder::new(Box::new(TestReducer))
@@ -432,7 +430,6 @@ mod tests {
 
     #[test]
     fn test_count_metrics_with_middleware() {
-
         // given
         let metrics = CountMetrics::new();
         let middleware = Arc::new(Mutex::new(TestMiddleware::new("test")));
@@ -454,7 +451,10 @@ mod tests {
         assert!(metrics.middleware_execution_time.load(Ordering::SeqCst) > 0);
         assert!(metrics.reducer_execution_time.load(Ordering::SeqCst) > 0);
         // Middleware should take longer than reducer
-        assert!(metrics.middleware_execution_time.load(Ordering::SeqCst) > metrics.reducer_execution_time.load(Ordering::SeqCst));
+        assert!(
+            metrics.middleware_execution_time.load(Ordering::SeqCst)
+                > metrics.reducer_execution_time.load(Ordering::SeqCst)
+        );
     }
 
     #[test]

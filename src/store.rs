@@ -9,9 +9,9 @@ use crate::{
 use fmt::Debug;
 use lazy_static::lazy_static;
 use rusty_pool::ThreadPool;
-use std::sync::{Arc, Mutex};
-use std::time::Instant;
-use std::{fmt, thread};
+use std::fmt;
+use std::sync::{Arc, Condvar, Mutex};
+use std::time::{Duration, Instant};
 
 /// Default capacity for the channel
 pub const DEFAULT_CAPACITY: usize = 16;
@@ -61,8 +61,7 @@ where
     pub(crate) reducers: Mutex<Vec<Box<dyn Reducer<State, Action> + Send + Sync>>>,
     pub(crate) subscribers: Arc<Mutex<Vec<Arc<dyn Subscriber<State, Action> + Send + Sync>>>>,
     pub(crate) tx: Mutex<Option<SenderChannel<State, Action>>>,
-    // reduce and dispatch thread
-    dispatch_thread: Mutex<Option<thread::JoinHandle<()>>>,
+    closing: Arc<(Mutex<bool>, Condvar)>,
     middlewares: Mutex<Vec<Arc<Mutex<dyn Middleware<State, Action> + Send + Sync>>>>,
     metrics: Option<Arc<dyn StoreMetrics<State, Action> + Send + Sync>>,
 }
@@ -79,7 +78,7 @@ where
             reducers: Mutex::new(Vec::default()),
             subscribers: Arc::new(Mutex::new(Vec::default())),
             tx: Mutex::new(None),
-            dispatch_thread: Mutex::new(None),
+            closing: Arc::new((Mutex::new(false), Condvar::new())),
             middlewares: Mutex::new(Vec::default()),
             metrics: None,
         }
@@ -144,6 +143,8 @@ where
         metrics: Option<Arc<dyn StoreMetrics<State, Action> + Send + Sync>>,
     ) -> Result<Arc<Store<State, Action>>, StoreError> {
         let (tx, rx) = BackpressureChannel::<State, Action>::new(capacity, policy, metrics.clone());
+        // false: not closed
+        let closing = Arc::new((Mutex::new(false), Condvar::new()));
         let store = Store {
             name: name.clone(),
             state: Mutex::new(state),
@@ -151,15 +152,14 @@ where
             subscribers: Arc::new(Mutex::new(Vec::default())),
             middlewares: Mutex::new(middlewares),
             tx: Mutex::new(Some(tx)),
-            dispatch_thread: Mutex::new(None),
             metrics: metrics.clone(),
+            closing: closing.clone(),
         };
 
         // start a thread in which the store will listen for actions
         let rx_store = Arc::new(store);
         let tx_store = rx_store.clone();
-        let builder = thread::Builder::new().name(name);
-        let r = builder.spawn(move || {
+        POOL.execute(move || {
             while let Some(action) = rx.recv() {
                 match action {
                     ActionOp::Action(action) => {
@@ -180,14 +180,15 @@ where
                         }
                     }
                     ActionOp::Exit => {
+                        let mut closed = closing.0.lock().unwrap();
+                        *closed = true;
+                        closing.1.notify_one();
                         break;
                     }
                 }
             }
         });
 
-        let handle = r.map_err(|e| StoreError::DispatchError(e.to_string()))?;
-        tx_store.dispatch_thread.lock().unwrap().replace(handle);
         Ok(tx_store)
     }
 
@@ -284,8 +285,8 @@ where
                     break;
                 }
                 Err(_e) => {
-                    #[cfg(feature = "dbg")]
-                    eprintln!("Middleware error: {:?}", _e);
+                    #[cfg(feature = "dev")]
+                    eprintln!("store: Middleware error: {:?}", _e);
                     //return (false, None);
                 }
             }
@@ -349,8 +350,8 @@ where
                     break;
                 }
                 Err(_e) => {
-                    #[cfg(feature = "dbg")]
-                    eprintln!("Middleware error: {:?}", _e);
+                    #[cfg(feature = "dev")]
+                    eprintln!("store: Middleware error: {:?}", _e);
                 }
             }
         }
@@ -423,7 +424,16 @@ where
     /// close the store
     pub fn close(&self) {
         if let Some(tx) = self.tx.lock().unwrap().take() {
-            tx.send(ActionOp::Exit).unwrap_or(0);
+            match tx.send(ActionOp::Exit) {
+                Ok(_) => {
+                    #[cfg(feature = "dev")]
+                    eprintln!("store: Store closed");
+                }
+                Err(_e) => {
+                    #[cfg(feature = "dev")]
+                    eprintln!("store: Error while closing Store");
+                }
+            }
             drop(tx);
         }
     }
@@ -432,15 +442,25 @@ where
     pub fn stop(&self) {
         self.close();
 
-        // let handle = self.detach();
-        if let Some(handle) = self.detach() {
-            handle.join().unwrap_or(());
+        // wait for the dispatcher to finish
+        let mut closed = self.closing.0.lock().unwrap();
+        let mut waits = 3;
+        while !*closed {
+            // when the reducer panics, the store would not have chance to handle the exit action
+            // so we need to have timeout to avoid infinite waiting
+            let r = self.closing.1.wait_timeout(closed, Duration::from_secs(1)).unwrap();
+            if r.1.timed_out() {
+                waits -= 1;
+                #[cfg(feature = "dev")]
+                eprintln!("store: Store waiting timeouts: {}", waits);
+                if waits == 0 {
+                    break;
+                }
+            }
+            closed = r.0;
         }
-    }
-
-    /// detach the dispatcher thread from the store
-    pub fn detach(&self) -> Option<thread::JoinHandle<()>> {
-        self.dispatch_thread.lock().unwrap().take()
+        #[cfg(feature = "dev")]
+        eprintln!("store: Store stopped");
     }
 
     /// dispatch an action
@@ -489,8 +509,8 @@ where
 mod tests {
     use super::*;
     use fmt::{Display, Formatter};
-    use std::any::Any;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::thread;
     use std::time::Duration;
 
     struct TestReducer;
