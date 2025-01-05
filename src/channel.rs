@@ -55,7 +55,7 @@ where
             BackpressurePolicy::DropOldest => {
                 if let Err(TrySendError::Full(item)) = self.sender.try_send(item) {
                     // Drop the oldest item and try sending again
-                    #[cfg(feature = "dbg")]
+                    #[cfg(feature = "dev")]
                     eprintln!("store: dropping the oldest item in channel");
                     // Remove the oldest item
                     let old = self.receiver.try_recv();
@@ -80,7 +80,7 @@ where
                 match self.sender.try_send(item).map_err(SenderError::TrySendError) {
                     Ok(_) => Ok(self.receiver.len() as i64),
                     Err(e) => {
-                        #[cfg(feature = "dbg")]
+                        #[cfg(feature = "dev")]
                         eprintln!("store: dropping the latest item in channel");
                         if let Some(metrics) = &self.metrics {
                             match &e {
@@ -168,11 +168,13 @@ where
 
 #[allow(dead_code)]
 fn main() {
+    // cap == 5
     let (sender, receiver) =
         BackpressureChannel::<i32, i32>::new(5, BackpressurePolicy::DropOldest, None);
 
     let mut producers = vec![];
 
+    // Spawn 10 producers send 10 items each
     for i in 0..10 {
         let sender_channel = sender.clone();
         let producer = thread::spawn(move || {
