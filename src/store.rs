@@ -7,17 +7,13 @@ use crate::{
     Subscription,
 };
 use fmt::Debug;
-use lazy_static::lazy_static;
 use rusty_pool::ThreadPool;
 use std::fmt;
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 /// Default capacity for the channel
 pub const DEFAULT_CAPACITY: usize = 16;
-lazy_static! {
-    pub(crate) static ref POOL: ThreadPool = ThreadPool::default();
-}
 
 /// StoreError represents an error that occurred in the store
 #[derive(Debug, thiserror::Error)]
@@ -61,9 +57,9 @@ where
     pub(crate) reducers: Mutex<Vec<Box<dyn Reducer<State, Action> + Send + Sync>>>,
     pub(crate) subscribers: Arc<Mutex<Vec<Arc<dyn Subscriber<State, Action> + Send + Sync>>>>,
     pub(crate) tx: Mutex<Option<SenderChannel<State, Action>>>,
-    closing: Arc<(Mutex<bool>, Condvar)>,
     middlewares: Mutex<Vec<Arc<Mutex<dyn Middleware<State, Action> + Send + Sync>>>>,
     metrics: Option<Arc<dyn StoreMetrics<State, Action> + Send + Sync>>,
+    pub(crate) pool: Mutex<Option<ThreadPool>>,
 }
 
 impl<State, Action> Default for Store<State, Action>
@@ -78,9 +74,9 @@ where
             reducers: Mutex::new(Vec::default()),
             subscribers: Arc::new(Mutex::new(Vec::default())),
             tx: Mutex::new(None),
-            closing: Arc::new((Mutex::new(false), Condvar::new())),
             middlewares: Mutex::new(Vec::default()),
             metrics: None,
+            pool: Mutex::new(Some(rusty_pool::Builder::new().name("store-pool".to_string()).build())),
         }
     }
 }
@@ -143,8 +139,8 @@ where
         metrics: Option<Arc<dyn StoreMetrics<State, Action> + Send + Sync>>,
     ) -> Result<Arc<Store<State, Action>>, StoreError> {
         let (tx, rx) = BackpressureChannel::<State, Action>::new(capacity, policy, metrics.clone());
-        // false: not closed
-        let closing = Arc::new((Mutex::new(false), Condvar::new()));
+        let pool = rusty_pool::Builder::new().name(format!("{}-pool", name)).build();
+
         let store = Store {
             name: name.clone(),
             state: Mutex::new(state),
@@ -153,13 +149,13 @@ where
             middlewares: Mutex::new(middlewares),
             tx: Mutex::new(Some(tx)),
             metrics: metrics.clone(),
-            closing: closing.clone(),
+            pool: Mutex::new(Some(pool)),
         };
 
         // start a thread in which the store will listen for actions
         let rx_store = Arc::new(store);
         let tx_store = rx_store.clone();
-        POOL.execute(move || {
+        tx_store.pool.lock().unwrap().as_ref().unwrap().execute(move || {
             while let Some(action) = rx.recv() {
                 match action {
                     ActionOp::Action(action) => {
@@ -180,9 +176,6 @@ where
                         }
                     }
                     ActionOp::Exit => {
-                        let mut closed = closing.0.lock().unwrap();
-                        *closed = true;
-                        closing.1.notify_one();
                         break;
                     }
                 }
@@ -199,7 +192,7 @@ where
         self.state.lock().unwrap().clone()
     }
 
-    /// add a reducer to the store
+    /// add a   reducer to the store
     pub fn add_reducer(&self, reducer: Box<dyn Reducer<State, Action> + Send + Sync>) {
         self.reducers.lock().unwrap().push(reducer);
     }
@@ -442,23 +435,13 @@ where
     pub fn stop(&self) {
         self.close();
 
-        // wait for the dispatcher to finish
-        let mut closed = self.closing.0.lock().unwrap();
-        let mut waits = 3;
-        while !*closed {
-            // when the reducer panics, the store would not have chance to handle the exit action
-            // so we need to have timeout to avoid infinite waiting
-            let r = self.closing.1.wait_timeout(closed, Duration::from_secs(1)).unwrap();
-            if r.1.timed_out() {
-                waits -= 1;
-                #[cfg(feature = "dev")]
-                eprintln!("store: Store waiting timeouts: {}", waits);
-                if waits == 0 {
-                    break;
-                }
+        // Shutdown the thread pool with timeout
+        if let Ok(mut lk) = self.pool.lock() {
+            if let Some(pool) = lk.take() {
+                pool.shutdown_join_timeout(Duration::from_secs(3));
             }
-            closed = r.0;
         }
+
         #[cfg(feature = "dev")]
         eprintln!("store: Store stopped");
     }
@@ -500,8 +483,13 @@ where
     Action: Send + Sync + Clone + 'static,
 {
     fn drop(&mut self) {
-        //self.stop();
         self.close();
+        // Shutdown the thread pool with timeout
+        if let Ok(mut lk) = self.pool.lock() {
+            if let Some(pool) = lk.take() {
+                pool.shutdown_join_timeout(Duration::from_secs(3));
+            }
+        }
     }
 }
 
