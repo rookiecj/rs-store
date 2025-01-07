@@ -76,7 +76,7 @@ where
             tx: Mutex::new(None),
             middlewares: Mutex::new(Vec::default()),
             metrics: None,
-            pool: Mutex::new(Some(ThreadPool::default())),
+            pool: Mutex::new(Some(rusty_pool::Builder::new().name("store-pool".to_string()).build())),
         }
     }
 }
@@ -139,7 +139,7 @@ where
         metrics: Option<Arc<dyn StoreMetrics<State, Action> + Send + Sync>>,
     ) -> Result<Arc<Store<State, Action>>, StoreError> {
         let (tx, rx) = BackpressureChannel::<State, Action>::new(capacity, policy, metrics.clone());
-        let pool = ThreadPool::default();
+        let pool = rusty_pool::Builder::new().name(format!("{}-pool", name)).build();
 
         let store = Store {
             name: name.clone(),
@@ -435,9 +435,11 @@ where
     pub fn stop(&self) {
         self.close();
 
-        // Shutdown the thread pool with tim
-        if let Some(pool) = self.pool.lock().unwrap().take() {
-            pool.shutdown_join_timeout(Duration::from_secs(3));
+        // Shutdown the thread pool with timeout
+        if let Ok(mut lk) = self.pool.lock() {
+            if let Some(pool) = lk.take() {
+                pool.shutdown_join_timeout(Duration::from_secs(3));
+            }
         }
 
         #[cfg(feature = "dev")]
@@ -483,8 +485,10 @@ where
     fn drop(&mut self) {
         self.close();
         // Shutdown the thread pool with timeout
-        if let Some(pool) = self.pool.lock().unwrap().take() {
-            pool.shutdown_join_timeout(Duration::from_secs(3));
+        if let Ok(mut lk) = self.pool.lock() {
+            if let Some(pool) = lk.take() {
+                pool.shutdown_join_timeout(Duration::from_secs(3));
+            }
         }
     }
 }
