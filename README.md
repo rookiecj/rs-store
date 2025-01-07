@@ -29,7 +29,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-rs-store = "0.18.0"
+rs-store = "0.18.2"
 ```
 
 ## Quick Start
@@ -94,7 +94,8 @@ This design choice provides more flexibility while maintaining predictable state
 ## Documentation
 
 For detailed documentation, visit:
-- [API Documentation (docs.rs)](https://docs.rs/rs-store/0.10.1/rs_store/)
+
+- [API Documentation (docs.rs)](https://docs.rs/rs-store/0.18.2/rs_store/)
 - [Crate Page (crates.io)](https://crates.io/crates/rs-store)
 
 ## Implementation Status
