@@ -1,5 +1,5 @@
 use crate::store::ActionOp;
-use crate::{store, Store};
+use crate::Store;
 use std::sync::Arc;
 
 /// Dispatcher dispatches actions to the store
@@ -32,14 +32,32 @@ where
     fn dispatch_thunk(&self, thunk: Box<dyn FnOnce(Box<dyn Dispatcher<Action>>) + Send>) {
         let self_clone = self.clone();
         let dispatcher: Box<Arc<Store<State, Action>>> = Box::new(self_clone);
-        store::POOL.execute(move || {
-            thunk(dispatcher);
-        })
+        match self.pool.lock() {
+            Ok(pool) => {
+                if let Some(pool) = pool.as_ref() {
+                    pool.execute(move || {
+                        thunk(dispatcher);
+                    })
+                }
+            }
+            Err(e) => {
+                eprintln!("Failed to lock pool: {}", e);
+            }
+        }
     }
 
     fn dispatch_task(&self, task: Box<dyn FnOnce() + Send>) {
-        store::POOL.execute(move || {
-            task();
-        })
+        match self.pool.lock() {
+            Ok(pool) => {
+                if let Some(pool) = pool.as_ref() {
+                    pool.execute(move || {
+                        task();
+                    })
+                }
+            }
+            Err(e) => {
+                eprintln!("Failed to lock pool: {}", e);
+            }
+        }
     }
 }
