@@ -5,6 +5,9 @@ help:  ## show this help
 	@cat $(MAKEFILE_LIST) | grep -E "^[a-zA-Z0-9_-]+:.*?## .*$$" | \
     awk 'BEGIN {FS = ":.*?# "}; {printf "\033[36m%-30s\033[0m %s\n", $$1, $$2}'
 
+setup:	## setup
+	cargo install cargo-tarpaulin
+
 build:	## build
 	cargo build --lib
 
@@ -22,11 +25,32 @@ test:	## test
 test-dev:	## test for development
 	RUST_TEST_THREADS=1 RUST_LOG=debug cargo test --features dev  -- --nocapture
 
+.PHONY: test-cov
+test-cov:	## Run test coverage using tarpaulin
+	cargo tarpaulin --verbose --all-features --workspace --timeout 120 \
+		--out Html --output-dir coverage \
+		--exclude-files "examples/*"
+
+
+.PHONY: test-cov-open
+test-cov-open: test-cov	## Run test coverage and open the report
+	@if [ "$(shell uname)" = "Darwin" ]; then \
+		open coverage/tarpaulin-report.html; \
+	elif [ "$(shell uname)" = "Linux" ]; then \
+		xdg-open coverage/tarpaulin-report.html; \
+	fi
+
+.PHONY: lint
+lint:	## lint
+	cargo clippy
+
+.PHONY: fmt
+fmt: ## format
+	cargo fmt
 
 .PHONY: doc
 doc:	## doc
 	cargo doc --lib --no-deps -p rs-store
-
 
 example-calc:	## example calc_basic
 	cargo run --example calc_basic

@@ -22,34 +22,3 @@ crossbeam = "0.8"
 lazy_static = "1.4"
 rusty_pool = { version = "0.7" }
 
-# [[bin]]
-# name = "calc_basic"
-# path = "examples/calc_basic.rs"
-
-# [[bin]]
-# name = "calc_fn_basic"
-# path = "examples/calc_fn_basic.rs"
-
-# [[bin]]
-# name = "calc_concurrent"
-# path = "examples/calc_concurrent.rs"
-
-# [[bin]]
-# name = "calc_unsubscribe"
-# path = "examples/calc_unsubscribe.rs"
-
-# [[bin]]
-# name = "calc_clear_subscriber"
-# path = "examples/calc_clear_subscribers.rs"
-
-# [[bin]]
-# name = "calc_thunk"
-# path = "examples/calc_thunk.rs"
-
-# [[bin]]
-# name = "calc_effect"
-# path = "examples/calc_effect.rs"
-
-# [[bin]]
-# name = "calc_basic_builder"
-# path = "examples/calc_basic_builder.rs"

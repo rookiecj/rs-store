@@ -60,11 +60,9 @@ where
                     // Remove the oldest item
                     let old = self.receiver.try_recv();
                     if let Some(metrics) = &self.metrics {
-                        if let Ok(old) = old.as_ref() {
-                            match old {
-                                ActionOp::Action(action) => metrics.action_dropped(action),
-                                _ => {}
-                            }
+                        match old.as_ref() {
+                            Ok(ActionOp::Action(action)) => metrics.action_dropped(action),
+                            _ => {}
                         }
                     }
                     match self.sender.try_send(item).map_err(SenderError::TrySendError) {
@@ -145,7 +143,7 @@ where
     State: Send + Sync + 'static,
     Action: Send + Sync + Clone + 'static,
 {
-    pub fn new(
+    pub fn pair(
         capacity: usize,
         policy: BackpressurePolicy,
         metrics: Option<Arc<dyn StoreMetrics<State, Action> + Send + Sync>>,
@@ -170,7 +168,7 @@ where
 fn main() {
     // cap == 5
     let (sender, receiver) =
-        BackpressureChannel::<i32, i32>::new(5, BackpressurePolicy::DropOldest, None);
+        BackpressureChannel::<i32, i32>::pair(5, BackpressurePolicy::DropOldest, None);
 
     let mut producers = vec![];
 
@@ -214,7 +212,7 @@ mod tests {
     #[test]
     fn test_channel_backpressure_drop_old() {
         let (sender, receiver) =
-            BackpressureChannel::<i32, i32>::new(5, BackpressurePolicy::DropOldest, None);
+            BackpressureChannel::<i32, i32>::pair(5, BackpressurePolicy::DropOldest, None);
 
         let producer = {
             let sender_channel = sender.clone();
@@ -264,7 +262,7 @@ mod tests {
     #[test]
     fn test_channel_backpressure_drop_latest() {
         let (sender, receiver) =
-            BackpressureChannel::<i32, i32>::new(5, BackpressurePolicy::DropLatest, None);
+            BackpressureChannel::<i32, i32>::pair(5, BackpressurePolicy::DropLatest, None);
 
         let producer = {
             let sender_channel = sender.clone();

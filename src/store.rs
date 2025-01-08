@@ -76,7 +76,9 @@ where
             tx: Mutex::new(None),
             middlewares: Mutex::new(Vec::default()),
             metrics: None,
-            pool: Mutex::new(Some(rusty_pool::Builder::new().name("store-pool".to_string()).build())),
+            pool: Mutex::new(Some(
+                rusty_pool::Builder::new().name("store-pool".to_string()).build(),
+            )),
         }
     }
 }
@@ -138,7 +140,8 @@ where
         middlewares: Vec<Arc<Mutex<dyn Middleware<State, Action> + Send + Sync>>>,
         metrics: Option<Arc<dyn StoreMetrics<State, Action> + Send + Sync>>,
     ) -> Result<Arc<Store<State, Action>>, StoreError> {
-        let (tx, rx) = BackpressureChannel::<State, Action>::new(capacity, policy, metrics.clone());
+        let (tx, rx) =
+            BackpressureChannel::<State, Action>::pair(capacity, policy, metrics.clone());
         let pool = rusty_pool::Builder::new().name(format!("{}-pool", name)).build();
 
         let store = Store {
@@ -369,7 +372,7 @@ where
             metrics.effect_issued(effects.len());
         }
 
-        while effects.len() > 0 {
+        while !effects.is_empty() {
             let effect = effects.remove(0);
             match effect {
                 Effect::Action(a) => {
