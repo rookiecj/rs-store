@@ -229,7 +229,8 @@ mod tests {
     fn test_mock_subscriber() {
         // given
         let mock_subscriber = Arc::new(MockSubscriber::new());
-        let store = StoreBuilder::new(Box::new(TestReducer))
+        let store = StoreBuilder::new()
+            .with_reducer(Box::new(TestReducer))
             .with_name("test_store".to_string())
             .build()
             .unwrap();
@@ -255,7 +256,8 @@ mod tests {
             },
         ));
 
-        let store = StoreBuilder::new(Box::new(TestReducer))
+        let store = StoreBuilder::new()
+            .with_reducer(Box::new(TestReducer))
             .with_name("test_store".to_string())
             .build()
             .unwrap();
@@ -275,7 +277,8 @@ mod tests {
         // given
         let mock_middleware = Arc::new(Mutex::new(MockMiddleware::new()));
 
-        let store = StoreBuilder::new(Box::new(TestReducer))
+        let store = StoreBuilder::new()
+            .with_reducer(Box::new(TestReducer))
             .with_name("test_store".to_string())
             .with_middleware(mock_middleware.clone())
             .build()
@@ -318,7 +321,8 @@ mod tests {
             });
         }
 
-        let store = StoreBuilder::new(Box::new(TestReducer))
+        let store = StoreBuilder::new()
+            .with_reducer(Box::new(TestReducer))
             .with_name("test_store".to_string())
             .with_middleware(mock_middleware.clone())
             .build()

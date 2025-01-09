@@ -131,7 +131,7 @@ mod tests {
     #[test]
     fn test_logger_middleware() {
         let reducer = Box::new(TestReducer);
-        let store_result = StoreBuilder::new(reducer).build();
+        let store_result = StoreBuilder::new_with_reducer(reducer).build();
 
         assert!(store_result.is_ok());
 
@@ -339,7 +339,7 @@ mod tests {
     fn test_middleware_before_reduce() {
         // given
         let reducer = Box::new(MiddlewareReducer::new());
-        let store_result = StoreBuilder::new(reducer).build();
+        let store_result = StoreBuilder::new_with_reducer(reducer).build();
         assert!(store_result.is_ok());
         let store = store_result.unwrap();
 
@@ -471,7 +471,7 @@ mod tests {
     fn test_effect_middleware() {
         // given
         let reducer = Box::new(EffectReducer::new());
-        let store_result = StoreBuilder::new(reducer).build();
+        let store_result = StoreBuilder::new_with_reducer(reducer).build();
         assert!(store_result.is_ok());
 
         // when

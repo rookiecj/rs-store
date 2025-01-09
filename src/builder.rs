@@ -20,7 +20,7 @@ where
     capacity: usize,
     policy: BackpressurePolicy,
     middlewares: Vec<Arc<Mutex<dyn Middleware<State, Action> + Send + Sync>>>,
-    metrics: Option<Arc<dyn StoreMetrics<State, Action> + Send + Sync>>,
+    metrics: Option<Arc<dyn StoreMetrics<Action> + Send + Sync>>,
 }
 
 impl<State, Action> Default for StoreBuilder<State, Action>
@@ -46,7 +46,19 @@ where
     State: Default + Send + Sync + Clone + 'static,
     Action: Send + Sync + Clone + 'static,
 {
-    pub fn new(reducer: Box<dyn Reducer<State, Action> + Send + Sync>) -> Self {
+    pub fn new() -> Self {
+        StoreBuilder {
+            name: "store".to_string(),
+            state: Default::default(),
+            reducers: vec![],
+            capacity: DEFAULT_CAPACITY,
+            policy: Default::default(),
+            middlewares: Vec::new(),
+            metrics: None,
+        }
+    }
+
+    pub fn new_with_reducer(reducer: Box<dyn Reducer<State, Action> + Send + Sync>) -> Self {
         StoreBuilder {
             name: "store".to_string(),
             state: Default::default(),
@@ -120,10 +132,7 @@ where
         self
     }
 
-    pub fn with_metrics(
-        mut self,
-        metrics: Arc<dyn StoreMetrics<State, Action> + Send + Sync>,
-    ) -> Self {
+    pub fn with_metrics(mut self, metrics: Arc<dyn StoreMetrics<Action> + Send + Sync>) -> Self {
         self.metrics = Some(metrics);
         self
     }
