@@ -56,8 +56,8 @@ where
                     // Remove the oldest item
                     let _old = self.receiver.try_recv();
                     if let Some(metrics) = &self.metrics {
-                        match _old {
-                            Ok(ActionOp::Action(&action)) => metrics.action_dropped(Some(action)),
+                        match _old.as_ref() {
+                            Ok(ActionOp::Action(action)) => metrics.action_dropped(Some(action)),
                             _ => {}
                         }
                     }

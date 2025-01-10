@@ -170,45 +170,45 @@ where
         let rx_store = Arc::new(store);
         let tx_store = rx_store.clone();
 
+        // notify 스레드
         #[cfg(feature = "notify-channel")]
         {
             let notify_store = tx_store.clone();
-            tx_store.pool.lock().unwrap().as_ref().unwrap().execute(move || {
-                while let Some(msg) = notify_rx.recv() {
-                    let start = Instant::now();
-
-                    let subscribers = notify_store.subscribers.lock().unwrap().clone();
-                    match &msg {
+            tx_store.pool.lock().unwrap().as_ref().unwrap().execute(move || loop {
+                let msg_opt = notify_rx.recv();
+                if let Some(msg) = msg_opt {
+                    match msg {
                         ActionOp::Action((state, action)) => {
-                            for subscriber in subscribers.iter() {
-                                subscriber.on_notify(state, action);
-                            }
-                        }
-                        ActionOp::Exit => {
-                            break;
-                        }
-                    }
+                            let start = Instant::now();
 
-                    if let Some(metrics) = &notify_store.metrics {
-                        let duration = start.elapsed();
-                        match msg {
-                            ActionOp::Action((_, action)) => {
+                            let subscribers = notify_store.subscribers.lock().unwrap().clone();
+                            for subscriber in subscribers.iter() {
+                                subscriber.on_notify(&state, &action);
+                            }
+                            if let Some(metrics) = &notify_store.metrics {
+                                let duration = start.elapsed();
                                 metrics.subscriber_notified(
-                                    Some(&action),
+                                    Some(&state),
                                     subscribers.len(),
                                     duration,
                                 );
                             }
-                            _ => {
-                                //
-                            }
+                        }
+                        ActionOp::Exit => {
+                            #[cfg(dev)]
+                            eprintln!("store: Notify channel closed");
+                            break;
                         }
                     }
+                } else {
+                    #[cfg(dev)]
+                    eprintln!("store: Notify channel error");
+                    break;
                 }
             });
         }
 
-        // 기존의 action 처리 스레드
+        // reducer 스레드
         tx_store.pool.lock().unwrap().as_ref().unwrap().execute(move || {
             while let Some(action) = rx.recv() {
                 match action {
@@ -226,22 +226,13 @@ where
 
                         // do notify subscribers
                         if need_dispatch {
-                            #[cfg(not(feature = "notify-channel"))]
-                            {
-                                rx_store.do_notify(&action);
-                            }
-
-                            #[cfg(feature = "notify-channel")]
-                            {
-                                if let Some(notify_tx) = rx_store.notify_tx.lock().unwrap().as_ref() {
-                                    let state = rx_store.state.lock().unwrap().clone();
-                                    let _ = notify_tx.send(ActionOp::Action((state, action.clone())));
-                                }
-                            }
-
+                            rx_store.do_notify(&action);
                         }
                     }
-                    ActionOp::Exit => break,
+                    ActionOp::Exit => {
+                        rx_store.on_close();
+                        break
+                    },
                 }
             }
         });
@@ -469,24 +460,42 @@ where
         }
     }
 
-
-    #[cfg(not(feature = "notify-channel"))]
     pub(crate) fn do_notify(&self, action: &Action) {
         let _start = Instant::now();
-
-        let subscribers = self.subscribers.lock().unwrap().clone();
         let next_state = self.state.lock().unwrap().clone();
-        for subscriber in subscribers.iter() {
-            subscriber.on_notify(&next_state, action)
+        if let Some(metrics) = &self.metrics {
+            metrics.state_notified(Some(&next_state));
         }
 
-        if let Some(metrics) = &self.metrics {
-            let duration = _start.elapsed();
-            metrics.subscriber_notified(
-                Some(action),
-                subscribers.len(),
-                duration,
-            );
+        #[cfg(feature = "notify-channel")]
+        {
+            if let Some(notify_tx) = self.notify_tx.lock().unwrap().as_ref() {
+                let _ = notify_tx.send(ActionOp::Action((next_state, action.clone())));
+            }
+        }
+
+        #[cfg(not(feature = "notify-channel"))]
+        {
+            let subscribers = self.subscribers.lock().unwrap().clone();
+            for subscriber in subscribers.iter() {
+                subscriber.on_notify(&next_state, action)
+            }
+            if let Some(metrics) = &self.metrics {
+                let duration = _start.elapsed();
+                metrics.subscriber_notified(
+                    Some(action),
+                    subscribers.len(),
+                    duration,
+                );
+            }
+        }
+    }
+
+    fn on_close(&self) {
+        #[cfg(feature = "notify-channel")]
+        if let Some(notify_tx) = self.notify_tx.lock().unwrap().take() {
+            let _ = notify_tx.send(ActionOp::Exit);
+            drop(notify_tx);
         }
     }
 
@@ -504,12 +513,6 @@ where
                 }
             }
             drop(tx);
-        }
-
-        #[cfg(feature = "notify-channel")]
-        if let Some(notify_tx) = self.notify_tx.lock().unwrap().take() {
-            let _ = notify_tx.send(ActionOp::Exit);
-            drop(notify_tx);
         }
     }
 

@@ -27,6 +27,9 @@ pub trait StoreMetrics: Send + Sync {
     /// effect_executed is called when an effect is executed.
     fn effect_executed(&self, count: usize, duration: Duration) {}
 
+    /// state_notified is called when the state is notified.
+    fn state_notified(&self, data: Option<&dyn Any>) {}
+
     /// subscriber_notified is called when a subscriber is notified.
     fn subscriber_notified(&self, data: Option<&dyn Any>, count: usize, duration: Duration) {}
 
@@ -60,6 +63,8 @@ pub struct CountMetrics {
     pub middleware_time_min: AtomicUsize,
     /// total time spent in middleware
     pub middleware_execution_time: AtomicUsize,
+    /// total number of states notified
+    pub state_notified: AtomicUsize,
     /// total number of subscribers notified
     pub subscriber_notified: AtomicUsize,
     /// max time spent in subscribers
@@ -92,6 +97,7 @@ impl Default for CountMetrics {
             middleware_time_max: AtomicUsize::new(0),
             middleware_time_min: AtomicUsize::new(usize::MAX),
             middleware_execution_time: AtomicUsize::new(0),
+            state_notified: Default::default(),
             subscriber_notified: AtomicUsize::new(0),
             subscriber_time_max: AtomicUsize::new(0),
             subscriber_time_min: AtomicUsize::new(usize::MAX),
@@ -153,6 +159,11 @@ impl fmt::Display for CountMetrics {
         )?;
         write!(
             f,
+            ", state_notified: {:?}",
+            self.state_notified.load(Ordering::SeqCst)
+        )?;
+        write!(
+            f,
             ", subscriber_notified: {:?}",
             self.subscriber_notified.load(Ordering::SeqCst)
         )?;
@@ -207,6 +218,7 @@ impl CountMetrics {
         self.middleware_time_max.store(0, Ordering::SeqCst);
         self.middleware_time_min.store(0, Ordering::SeqCst);
         self.middleware_execution_time.store(0, Ordering::SeqCst);
+        self.state_notified.store(0, Ordering::SeqCst);
         self.subscriber_notified.store(0, Ordering::SeqCst);
         self.subscriber_time_max.store(0, Ordering::SeqCst);
         self.subscriber_time_min.store(0, Ordering::SeqCst);
@@ -256,6 +268,10 @@ impl StoreMetrics for CountMetrics
 
     fn effect_executed(&self, _count: usize, _duration: Duration) {
         //self.effect_executed.fetch_add(1, Ordering::SeqCst);
+    }
+
+    fn state_notified(&self, data: Option<&dyn Any>) {
+        self.state_notified.fetch_add(1, Ordering::SeqCst);
     }
 
     fn subscriber_notified(&self, data: Option<&dyn Any>, _count: usize, duration: Duration) {
@@ -420,6 +436,7 @@ mod tests {
 
         assert_eq!(metrics.action_received.load(Ordering::SeqCst), 1);
         assert_eq!(metrics.action_reduced.load(Ordering::SeqCst), 1);
+        assert_eq!(metrics.state_notified.load(Ordering::SeqCst), 1);
         assert_eq!(metrics.subscriber_notified.load(Ordering::SeqCst), 1);
         // Middleware should be executed
         assert!(metrics.middleware_execution_time.load(Ordering::SeqCst) > 0);
