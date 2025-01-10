@@ -12,25 +12,34 @@ build:	## build
 	cargo build --lib
 
 build-dev: ## build for development
-	cargo build --lib --features dev
+	cargo build --lib --profile dev
+
+build-full: ## build for release
+	cargo build --lib --features full
+
 
 clean:	## clean
 	cargo clean
 
 .PHONY: test
 test:	## test
-	cargo test
+	RUST_TEST_THREADS=1 RUST_LOG=debug cargo test
+
+test-all: test-dev test-notify-channel ## test with full features
 
 .PHONY: test-dev
-test-dev:	## test for development
-	RUST_TEST_THREADS=1 RUST_LOG=debug cargo test --features dev  -- --nocapture
+test-dev:	## test with log
+	RUST_TEST_THREADS=1 RUST_LOG=debug cargo test --profile dev  -- --nocapture
+
+.PHONY: test-notify-channel
+test-notify-channel:	## test with notify-channel
+	RUST_TEST_THREADS=1 RUST_LOG=debug cargo test --profile dev  --features notify-channel -- --nocapture
 
 .PHONY: test-cov
 test-cov:	## Run test coverage using tarpaulin
 	cargo tarpaulin --verbose --all-features --workspace --timeout 120 \
 		--out Html --output-dir coverage \
 		--exclude-files "examples/*"
-
 
 .PHONY: test-cov-open
 test-cov-open: test-cov	## Run test coverage and open the report

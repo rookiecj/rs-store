@@ -20,7 +20,7 @@ where
     capacity: usize,
     policy: BackpressurePolicy,
     middlewares: Vec<Arc<Mutex<dyn Middleware<State, Action> + Send + Sync>>>,
-    metrics: Option<Arc<dyn StoreMetrics<Action> + Send + Sync>>,
+    metrics: Option<Arc<dyn StoreMetrics + Send + Sync>>,
 }
 
 impl<State, Action> Default for StoreBuilder<State, Action>
@@ -132,7 +132,7 @@ where
         self
     }
 
-    pub fn with_metrics(mut self, metrics: Arc<dyn StoreMetrics<Action> + Send + Sync>) -> Self {
+    pub fn with_metrics(mut self, metrics: Arc<dyn StoreMetrics + Send + Sync>) -> Self {
         self.metrics = Some(metrics);
         self
     }

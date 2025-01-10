@@ -1,8 +1,6 @@
 use crossbeam::channel::{self, Receiver, Sender, TrySendError};
-use std::thread;
-use std::time::Duration;
-use std::{marker::PhantomData, sync::Arc};
-
+use std::marker::PhantomData;
+use std::sync::Arc;
 use crate::metrics::StoreMetrics;
 use crate::ActionOp;
 
@@ -35,7 +33,7 @@ where
     sender: Sender<ActionOp<Action>>,
     receiver: Receiver<ActionOp<Action>>,
     policy: BackpressurePolicy,
-    metrics: Option<Arc<dyn StoreMetrics<Action> + Send + Sync>>,
+    metrics: Option<Arc<dyn StoreMetrics + Send + Sync>>,
 }
 
 impl<Action> SenderChannel<Action>
@@ -53,13 +51,13 @@ where
             BackpressurePolicy::DropOldest => {
                 if let Err(TrySendError::Full(item)) = self.sender.try_send(item) {
                     // Drop the oldest item and try sending again
-                    #[cfg(feature = "dev")]
+                    #[cfg(dev)]
                     eprintln!("store: dropping the oldest item in channel");
                     // Remove the oldest item
-                    let old = self.receiver.try_recv();
+                    let _old = self.receiver.try_recv();
                     if let Some(metrics) = &self.metrics {
-                        match old.as_ref() {
-                            Ok(ActionOp::Action(action)) => metrics.action_dropped(Some(action)),
+                        match _old {
+                            Ok(ActionOp::Action(&action)) => metrics.action_dropped(Some(action)),
                             _ => {}
                         }
                     }
@@ -76,7 +74,7 @@ where
                 match self.sender.try_send(item).map_err(SenderError::TrySendError) {
                     Ok(_) => Ok(self.receiver.len() as i64),
                     Err(e) => {
-                        #[cfg(feature = "dev")]
+                        #[cfg(dev)]
                         eprintln!("store: dropping the latest item in channel");
                         if let Some(metrics) = &self.metrics {
                             match &e {
@@ -97,6 +95,7 @@ where
                 }
             }
         };
+
         if let Some(metrics) = &self.metrics {
             metrics.queue_size(self.receiver.len());
         }
@@ -110,7 +109,7 @@ where
     Action: Send + Sync + Clone + 'static,
 {
     receiver: Receiver<ActionOp<Action>>,
-    metrics: Option<Arc<dyn StoreMetrics<Action> + Send + Sync>>,
+    metrics: Option<Arc<dyn StoreMetrics + Send + Sync>>,
 }
 
 impl<Action> ReceiverChannel<Action>
@@ -128,23 +127,29 @@ where
 }
 
 /// Channel with back pressure
-pub(crate) struct BackpressureChannel<State, Action>
+pub(crate) struct BackpressureChannel<Action>
 where
-    State: Send + Sync + Clone + 'static,
     Action: Send + Sync + Clone + 'static,
 {
-    phantom_data: PhantomData<(State, Action)>,
+    phantom_data: PhantomData<Action>,
 }
 
-impl<State, Action> BackpressureChannel<State, Action>
+impl<Action> BackpressureChannel<Action>
 where
-    State: Send + Sync + Clone + 'static,
     Action: Send + Sync + Clone + 'static,
 {
+    #[allow(dead_code)]
     pub fn pair(
         capacity: usize,
         policy: BackpressurePolicy,
-        metrics: Option<Arc<dyn StoreMetrics<Action> + Send + Sync>>,
+    ) -> (SenderChannel<Action>, ReceiverChannel<Action>) {
+        Self::pair_with_metrics(capacity, policy, None)
+    }
+
+    pub fn pair_with_metrics(
+        capacity: usize,
+        policy: BackpressurePolicy,
+        metrics: Option<Arc<dyn StoreMetrics + Send + Sync>>,
     ) -> (SenderChannel<Action>, ReceiverChannel<Action>) {
         let (sender, receiver) = channel::bounded(capacity);
         (
@@ -160,57 +165,19 @@ where
             },
         )
     }
-}
 
-#[allow(dead_code)]
-fn main() {
-    // cap == 5
-    let (sender, receiver) =
-        BackpressureChannel::<i32, i32>::pair(5, BackpressurePolicy::DropOldest, None);
-
-    let mut producers = vec![];
-
-    // Spawn 10 producers send 10 items each
-    for i in 0..10 {
-        let sender_channel = sender.clone();
-        let producer = thread::spawn(move || {
-            for j in 0..10 {
-                let item = i * 10 + j; // Unique value per producer
-                println!("Producer {} sending: {}", i, item);
-                if let Err(err) = sender_channel.send(ActionOp::Action(item)) {
-                    eprintln!("Producer {} failed to send: {:?}", i, err);
-                }
-                thread::sleep(Duration::from_millis(100));
-            }
-        });
-        producers.push(producer);
-    }
-
-    let consumer = {
-        thread::spawn(move || {
-            while let Some(value) = receiver.recv() {
-                println!("Received: {:?}", value);
-            }
-            println!("Channel closed, consumer thread exiting.");
-        })
-    };
-
-    for producer in producers {
-        producer.join().unwrap();
-    }
-
-    drop(sender); // Close the channel after all producers are done
-    consumer.join().unwrap();
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::thread;
+    use std::time::Duration;
 
     #[test]
     fn test_channel_backpressure_drop_old() {
         let (sender, receiver) =
-            BackpressureChannel::<i32, i32>::pair(5, BackpressurePolicy::DropOldest, None);
+            BackpressureChannel::<i32>::pair(5, BackpressurePolicy::DropOldest);
 
         let producer = {
             let sender_channel = sender.clone();
@@ -260,7 +227,7 @@ mod tests {
     #[test]
     fn test_channel_backpressure_drop_latest() {
         let (sender, receiver) =
-            BackpressureChannel::<i32, i32>::pair(5, BackpressurePolicy::DropLatest, None);
+            BackpressureChannel::<i32>::pair(5, BackpressurePolicy::DropLatest);
 
         let producer = {
             let sender_channel = sender.clone();

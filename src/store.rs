@@ -56,9 +56,9 @@ where
     state: Mutex<State>,
     pub(crate) reducers: Mutex<Vec<Box<dyn Reducer<State, Action> + Send + Sync>>>,
     pub(crate) subscribers: Arc<Mutex<Vec<Arc<dyn Subscriber<State, Action> + Send + Sync>>>>,
-    pub(crate) tx: Mutex<Option<SenderChannel<Action>>>,
+    pub(crate) dispatch_tx: Mutex<Option<SenderChannel<Action>>>,
     middlewares: Mutex<Vec<Arc<Mutex<dyn Middleware<State, Action> + Send + Sync>>>>,
-    metrics: Option<Arc<dyn StoreMetrics<Action> + Send + Sync>>,
+    metrics: Option<Arc<dyn StoreMetrics + Send + Sync>>,
     pub(crate) pool: Mutex<Option<ThreadPool>>,
     #[cfg(feature = "notify-channel")]
     notify_tx: Mutex<Option<SenderChannel<(State, Action)>>>,
@@ -75,7 +75,7 @@ where
             state: Default::default(),
             reducers: Mutex::new(Vec::default()),
             subscribers: Arc::new(Mutex::new(Vec::default())),
-            tx: Mutex::new(None),
+            dispatch_tx: Mutex::new(None),
             middlewares: Mutex::new(Vec::default()),
             metrics: None,
             pool: Mutex::new(Some(
@@ -142,14 +142,14 @@ where
         capacity: usize,
         policy: BackpressurePolicy,
         middlewares: Vec<Arc<Mutex<dyn Middleware<State, Action> + Send + Sync>>>,
-        metrics: Option<Arc<dyn StoreMetrics<Action> + Send + Sync>>,
+        metrics: Option<Arc<dyn StoreMetrics + Send + Sync>>,
     ) -> Result<Arc<Store<State, Action>>, StoreError> {
         let (tx, rx) =
-            BackpressureChannel::<State, Action>::pair(capacity, policy.clone(), metrics.clone());
+            BackpressureChannel::<Action>::pair_with_metrics(capacity, policy.clone(), metrics.clone());
 
         #[cfg(feature = "notify-channel")]
         let (notify_tx, notify_rx) =
-            BackpressureChannel::<State, Action>::pair_with_state::<State>(capacity, policy.clone(), metrics.clone());
+            BackpressureChannel::<(State, Action)>::pair_with_metrics(capacity, policy.clone(), metrics.clone());
 
         let store = Store {
             name: name.clone(),
@@ -157,7 +157,7 @@ where
             reducers: Mutex::new(reducers),
             subscribers: Arc::new(Mutex::new(Vec::default())),
             middlewares: Mutex::new(middlewares),
-            tx: Mutex::new(Some(tx)),
+            dispatch_tx: Mutex::new(Some(tx)),
             metrics: metrics.clone(),
             pool: Mutex::new(Some(
                 rusty_pool::Builder::new().name(format!("{}-pool", name)).build(),
@@ -178,10 +178,10 @@ where
                     let start = Instant::now();
 
                     let subscribers = notify_store.subscribers.lock().unwrap().clone();
-                    match msg.as_ref() {
+                    match &msg {
                         ActionOp::Action((state, action)) => {
                             for subscriber in subscribers.iter() {
-                                subscriber.on_notify(&state, action);
+                                subscriber.on_notify(state, action);
                             }
                         }
                         ActionOp::Exit => {
@@ -191,13 +191,16 @@ where
 
                     if let Some(metrics) = &notify_store.metrics {
                         let duration = start.elapsed();
-                        match msg.as_ref() {
+                        match msg {
                             ActionOp::Action((_, action)) => {
                                 metrics.subscriber_notified(
-                                    Some(action),
+                                    Some(&action),
                                     subscribers.len(),
                                     duration,
                                 );
+                            }
+                            _ => {
+                                //
                             }
                         }
                     }
@@ -223,16 +226,19 @@ where
 
                         // do notify subscribers
                         if need_dispatch {
+                            #[cfg(not(feature = "notify-channel"))]
+                            {
+                                rx_store.do_notify(&action);
+                            }
+
                             #[cfg(feature = "notify-channel")]
                             {
-                                if let Some(tx) = rx_store.notify_tx.lock().unwrap().as_ref() {
+                                if let Some(notify_tx) = rx_store.notify_tx.lock().unwrap().as_ref() {
                                     let state = rx_store.state.lock().unwrap().clone();
-                                    let _ = tx.send(ActionOp::Action((state, action.clone())));
+                                    let _ = notify_tx.send(ActionOp::Action((state, action.clone())));
                                 }
                             }
 
-                            #[cfg(not(feature = "notify-channel"))]
-                            rx_store.do_notify(&action);
                         }
                     }
                     ActionOp::Exit => break,
@@ -336,7 +342,7 @@ where
                     break;
                 }
                 Err(_e) => {
-                    #[cfg(feature = "dev")]
+                    #[cfg(dev)]
                     eprintln!("store: Middleware error: {:?}", _e);
                     //return (false, None);
                 }
@@ -404,7 +410,7 @@ where
                     break;
                 }
                 Err(_e) => {
-                    #[cfg(feature = "dev")]
+                    #[cfg(dev)]
                     eprintln!("store: Middleware error: {:?}", _e);
                 }
             }
@@ -429,7 +435,7 @@ where
         effects: &mut Vec<Effect<Action>>,
         dispatcher: Arc<dyn Dispatcher<Action>>,
     ) {
-        let start = Instant::now();
+        let _start = Instant::now();
         if let Some(metrics) = &self.metrics {
             metrics.effect_issued(effects.len());
         }
@@ -457,16 +463,17 @@ where
             };
         }
 
-        let duration = start.elapsed();
         if let Some(metrics) = &self.metrics {
+            let duration = _start.elapsed();
             metrics.effect_executed(effects.len(), duration);
         }
     }
 
-    pub(crate) fn do_notify(&self, action: &Action) {
-        let start = Instant::now();
 
-        // TODO thread pool
+    #[cfg(not(feature = "notify-channel"))]
+    pub(crate) fn do_notify(&self, action: &Action) {
+        let _start = Instant::now();
+
         let subscribers = self.subscribers.lock().unwrap().clone();
         let next_state = self.state.lock().unwrap().clone();
         for subscriber in subscribers.iter() {
@@ -474,7 +481,7 @@ where
         }
 
         if let Some(metrics) = &self.metrics {
-            let duration = start.elapsed();
+            let duration = _start.elapsed();
             metrics.subscriber_notified(
                 Some(action),
                 subscribers.len(),
@@ -485,14 +492,14 @@ where
 
     /// close the store
     pub fn close(&self) {
-        if let Some(tx) = self.tx.lock().unwrap().take() {
+        if let Some(tx) = self.dispatch_tx.lock().unwrap().take() {
             match tx.send(ActionOp::Exit) {
                 Ok(_) => {
-                    #[cfg(feature = "dev")]
+                    #[cfg(dev)]
                     eprintln!("store: Store closed");
                 }
                 Err(_e) => {
-                    #[cfg(feature = "dev")]
+                    #[cfg(dev)]
                     eprintln!("store: Error while closing Store");
                 }
             }
@@ -517,7 +524,7 @@ where
             }
         }
 
-        #[cfg(feature = "dev")]
+        #[cfg(dev)]
         eprintln!("store: Store stopped");
     }
 
@@ -526,11 +533,9 @@ where
     /// ### Return
     /// * Ok(remains) : the number of remaining actions in the channel
     pub fn dispatch(&self, action: Action) -> Result<i64, StoreError> {
-        let sender = self.tx.lock().unwrap();
+        let sender = self.dispatch_tx.lock().unwrap();
         if let Some(tx) = sender.as_ref() {
-            // state를 보내야함....
             let remains = tx.send(ActionOp::Action(action)).unwrap_or(0);
-
             if let Some(metrics) = &self.metrics {
                 metrics.queue_size(remains as usize);
             }
@@ -573,6 +578,7 @@ where
 mod tests {
     use super::*;
     use fmt::{Display, Formatter};
+    use std::any::Any;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::thread;
     use std::time::Duration;
@@ -806,40 +812,35 @@ mod tests {
         }
     }
 
-    impl<T> StoreMetrics<T> for TestMetrics
-    where
-        T: Send + Sync + Clone + 'static,
-    {
-        fn action_received(&self, _data: Option<&T>) {
+    impl StoreMetrics for TestMetrics {
+        fn action_received(&self, _data: Option<&dyn Any>) {
             self.action_count.fetch_add(1, Ordering::SeqCst);
         }
 
-        fn action_dropped(&self, _data: Option<&T>) {
+        fn action_dropped(&self, _data: Option<&dyn Any>) {
             // Implementation for dropped actions
         }
 
         fn middleware_executed(
             &self,
-            _data: Option<&T>,
+            _data: Option<&dyn Any>,
             _middleware_name: &str,
             _duration: Duration,
         ) {
             // Implementation for middleware execution
         }
 
-        fn action_reduced(&self, _data: Option<&T>, _duration: Duration) {
+        fn action_reduced(&self, _data: Option<&dyn Any>, _duration: Duration) {
             self.state_changes.fetch_add(1, Ordering::SeqCst);
         }
 
-        fn subscriber_notified(&self, _data: Option<&T>, _count: usize, _duration: Duration) {
+        fn subscriber_notified(&self, _data: Option<&dyn Any>, _count: usize, _duration: Duration) {
             self.notifications.fetch_add(1, Ordering::SeqCst);
         }
     }
 
     #[test]
     fn test_store_metrics() {
-        // let metrics = Arc::new(Box::new(TestMetrics::new()));
-        // let metrics: Arc<dyn StoreMetrics<i32, i32> + Send + Sync> = TestMetrics::new();
         let metrics = TestMetrics::new();
         let store = Store::new_with(
             vec![Box::new(TestReducer)],

@@ -14,11 +14,10 @@ keywords = ["redux", "store", "rust", "state", "management"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
-dev = []
+notify-channel = []
 
 [dependencies]
 thiserror = "1.0.58"
 crossbeam = "0.8"
-lazy_static = "1.4"
 rusty_pool = { version = "0.7" }
 
