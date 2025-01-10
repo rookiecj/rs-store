@@ -22,6 +22,7 @@ rs-store provides a predictable state container inspired by Redux, featuring thr
 - 🧪 Comprehensive test coverage
 - 📚 Selector support
 - 📊 Metrics support
+- 🔄 Decoupling state updates from notification delivery
 
 ## Installation
 
@@ -30,6 +31,13 @@ Add this to your `Cargo.toml`:
 ```toml
 [dependencies]
 rs-store = "0.18.2"
+```
+
+with the `notify-channel` feature:
+
+```toml
+[dependencies]
+rs-store = { version = "0.18.2", features = ["notify-channel"] }
 ```
 
 ## Quick Start
@@ -91,6 +99,16 @@ Unlike traditional Redux implementations, rs-store allows reducers to produce si
 
 This design choice provides more flexibility while maintaining predictable state management.
 
+## Notification Channel feature
+
+The notification channel feature provides a dedicated channel for state notifications to subscribers, separating the concerns of state updates and notification delivery. This can help improve performance and reliability by:
+
+- Decoupling state updates from notification delivery
+- Preventing slow subscribers from blocking state updates
+- Allowing independent backpressure handling for notifications
+- Supporting different threading models for notification delivery
+
+
 ## Documentation
 
 For detailed documentation, visit:
@@ -102,7 +120,7 @@ For detailed documentation, visit:
 
 ### In Progress 🚧
 - Latest state notification for new subscribers
-- Notification scheduler (CurrentThread, ThreadPool)
+- [x] Notification scheduler (CurrentThread, ThreadPool)
 - Stream-based pull model
 
 ## Contributing

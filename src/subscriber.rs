@@ -55,6 +55,8 @@ where
 }
 
 /// SelectorSubscriber is a subscriber that has a selector.
+/// It is used to subscribe to a specific part of the state.
+/// when the state changes, the selector subscriber will notify the subscriber.
 pub struct SelectorSubscriber<State, Action, Select, Output>
 where
     State: Default + Send + Sync + Clone,

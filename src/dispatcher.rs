@@ -23,7 +23,7 @@ where
     Action: Send + Sync + Clone + 'static,
 {
     fn dispatch(&self, action: Action) {
-        let sender = self.tx.lock().unwrap();
+        let sender = self.dispatch_tx.lock().unwrap();
         if let Some(tx) = sender.as_ref() {
             let _ = tx.send(ActionOp::Action(action)).unwrap_or(0);
         }

@@ -88,7 +88,7 @@ mod tests {
 
         // Create store with our test reducer
         let reducer = Box::new(PanicOnValueReducer { panic_on: 42 });
-        let store = StoreBuilder::new(reducer).build().unwrap();
+        let store = StoreBuilder::new_with_reducer(reducer).build().unwrap();
 
         // Track state changes
         let state_changes = Arc::new(Mutex::new(Vec::new()));
@@ -150,7 +150,8 @@ mod tests {
         }
 
         // Create store with both reducers
-        let store = StoreBuilder::new(Box::new(PanicReducer))
+        let store = StoreBuilder::new()
+            .with_reducer(Box::new(PanicReducer))
             .add_reducer(Box::new(NormalReducer))
             .build()
             .unwrap();

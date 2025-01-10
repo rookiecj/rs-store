@@ -1,7 +1,7 @@
-use std::sync::{Arc, Mutex};
-use std::thread;
 use rs_store::{DispatchOp, Dispatcher};
 use rs_store::{Reducer, Store, Subscriber};
+use std::sync::{Arc, Mutex};
+use std::thread;
 
 #[derive(Debug, Clone)]
 enum CalcAction {
@@ -72,13 +72,17 @@ impl Subscriber<CalcState, CalcAction> for CalcSubscriber {
             CalcAction::Add(_i) => {
                 println!(
                     "CalcSubscriber::on_notify: state:{:?} <- last {:?} + action:{:?}",
-                    state, self.last.lock().unwrap(), action
+                    state,
+                    self.last.lock().unwrap(),
+                    action
                 );
             }
             CalcAction::Subtract(_i) => {
                 println!(
                     "CalcSubscriber::on_notify: state:{:?} <- last {:?} + action:{:?}",
-                    state, self.last.lock().unwrap(), action
+                    state,
+                    self.last.lock().unwrap(),
+                    action
                 );
             }
         }

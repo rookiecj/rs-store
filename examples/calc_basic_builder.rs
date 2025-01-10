@@ -94,7 +94,7 @@ impl Subscriber<CalcState, CalcAction> for CalcSubscriber {
 pub fn main() {
     println!("Hello, Builder!");
 
-    let store = StoreBuilder::new(Box::new(CalcReducer::default()))
+    let store = StoreBuilder::new_with_reducer(Box::new(CalcReducer::default()))
         .with_name("calc".to_string())
         .build()
         .unwrap();

@@ -3,33 +3,23 @@ use std::fmt::Formatter;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::{fmt, sync::atomic::AtomicUsize, time::Duration};
+use std::any::Any;
 
 /// StoreMetrics is a trait for metrics that can be used to track the state of the store.
 #[allow(dead_code)]
 #[allow(unused_variables)]
-pub trait StoreMetrics<State, Action>: Send + Sync
-where
-    State: Send + Sync + 'static,
-    Action: Send + Sync + Clone + 'static,
-{
+pub trait StoreMetrics: Send + Sync {
     /// action_received is called when an action is received.
-    fn action_received(&self, action: &Action) {}
+    fn action_received(&self, data: Option<&dyn Any>) {}
     /// action_dropped is called when an action is dropped.
-    fn action_dropped(&self, action: &Action) {}
+    fn action_dropped(&self, data: Option<&dyn Any>) {}
 
     /// middleware_execution_time is called when a middleware is executed,
     /// it includes the time spent of reducing the action and the time spent in the middleware
-    fn middleware_executed(&self, action: &Action, middleware_name: &str, duration: Duration) {}
+    fn middleware_executed(&self, data: Option<&dyn Any>, middleware_name: &str, duration: Duration) {}
 
     /// action_reduced is called when an action is reduced.
-    fn action_reduced(
-        &self,
-        action: &Action,
-        old_state: &State,
-        new_state: &State,
-        duration: Duration,
-    ) {
-    }
+    fn action_reduced(&self, data: Option<&dyn Any>, duration: Duration) {}
 
     /// effect_issued is called when the number of effects issued.
     fn effect_issued(&self, count: usize) {}
@@ -37,24 +27,17 @@ where
     /// effect_executed is called when an effect is executed.
     fn effect_executed(&self, count: usize, duration: Duration) {}
 
+    /// state_notified is called when the state is notified.
+    fn state_notified(&self, data: Option<&dyn Any>) {}
+
     /// subscriber_notified is called when a subscriber is notified.
-    fn subscriber_notified(&self, action: &Action, count: usize, duration: Duration) {}
+    fn subscriber_notified(&self, data: Option<&dyn Any>, count: usize, duration: Duration) {}
 
     /// queue_size is called when the remaining queue is changed.
     fn queue_size(&self, current_size: usize) {}
 
     /// error_occurred is called when an error occurs.
     fn error_occurred(&self, error: &StoreError) {}
-}
-
-/// NoOpMetrics is a no-op implementation of StoreMetrics.
-pub struct NoOpMetrics;
-
-impl<State, Action> StoreMetrics<State, Action> for NoOpMetrics
-where
-    State: Send + Sync + 'static,
-    Action: Send + Sync + Clone + 'static,
-{
 }
 
 pub struct CountMetrics {
@@ -80,6 +63,8 @@ pub struct CountMetrics {
     pub middleware_time_min: AtomicUsize,
     /// total time spent in middleware
     pub middleware_execution_time: AtomicUsize,
+    /// total number of states notified
+    pub state_notified: AtomicUsize,
     /// total number of subscribers notified
     pub subscriber_notified: AtomicUsize,
     /// max time spent in subscribers
@@ -112,6 +97,7 @@ impl Default for CountMetrics {
             middleware_time_max: AtomicUsize::new(0),
             middleware_time_min: AtomicUsize::new(usize::MAX),
             middleware_execution_time: AtomicUsize::new(0),
+            state_notified: Default::default(),
             subscriber_notified: AtomicUsize::new(0),
             subscriber_time_max: AtomicUsize::new(0),
             subscriber_time_min: AtomicUsize::new(usize::MAX),
@@ -173,6 +159,11 @@ impl fmt::Display for CountMetrics {
         )?;
         write!(
             f,
+            ", state_notified: {:?}",
+            self.state_notified.load(Ordering::SeqCst)
+        )?;
+        write!(
+            f,
             ", subscriber_notified: {:?}",
             self.subscriber_notified.load(Ordering::SeqCst)
         )?;
@@ -227,6 +218,7 @@ impl CountMetrics {
         self.middleware_time_max.store(0, Ordering::SeqCst);
         self.middleware_time_min.store(0, Ordering::SeqCst);
         self.middleware_execution_time.store(0, Ordering::SeqCst);
+        self.state_notified.store(0, Ordering::SeqCst);
         self.subscriber_notified.store(0, Ordering::SeqCst);
         self.subscriber_time_max.store(0, Ordering::SeqCst);
         self.subscriber_time_min.store(0, Ordering::SeqCst);
@@ -238,19 +230,16 @@ impl CountMetrics {
 }
 
 #[allow(unused_variables)]
-impl<State, Action> StoreMetrics<State, Action> for CountMetrics
-where
-    State: Send + Sync + 'static,
-    Action: Send + Sync + Clone + 'static,
+impl StoreMetrics for CountMetrics
 {
-    fn action_received(&self, _action: &Action) {
+    fn action_received(&self, data: Option<&dyn Any>) {
         self.action_received.fetch_add(1, Ordering::SeqCst);
     }
-    fn action_dropped(&self, _action: &Action) {
+    fn action_dropped(&self, data: Option<&dyn Any>) {
         self.action_dropped.fetch_add(1, Ordering::SeqCst);
     }
 
-    fn middleware_executed(&self, _action: &Action, _middleware_name: &str, duration: Duration) {
+    fn middleware_executed(&self, data: Option<&dyn Any>, _middleware_name: &str, duration: Duration) {
         let duration_ms = duration.as_millis() as usize;
         if duration_ms > self.middleware_time_max.load(Ordering::SeqCst) {
             self.middleware_time_max.store(duration_ms, Ordering::SeqCst);
@@ -261,13 +250,7 @@ where
         self.middleware_execution_time.fetch_add(duration_ms, Ordering::SeqCst);
     }
 
-    fn action_reduced(
-        &self,
-        _action: &Action,
-        _old_state: &State,
-        _new_state: &State,
-        duration: Duration,
-    ) {
+    fn action_reduced(&self, data: Option<&dyn Any>, duration: Duration) {
         self.action_reduced.fetch_add(1, Ordering::SeqCst);
         let duration_ms = duration.as_millis() as usize;
         if duration_ms > self.reducer_time_max.load(Ordering::SeqCst) {
@@ -287,7 +270,11 @@ where
         //self.effect_executed.fetch_add(1, Ordering::SeqCst);
     }
 
-    fn subscriber_notified(&self, _action: &Action, _count: usize, duration: Duration) {
+    fn state_notified(&self, data: Option<&dyn Any>) {
+        self.state_notified.fetch_add(1, Ordering::SeqCst);
+    }
+
+    fn subscriber_notified(&self, data: Option<&dyn Any>, _count: usize, duration: Duration) {
         self.subscriber_notified.fetch_add(1, Ordering::SeqCst);
         let duration_ms = duration.as_millis() as usize;
         if duration_ms > self.subscriber_time_max.load(Ordering::SeqCst) {
@@ -379,7 +366,8 @@ mod tests {
         // let metrics: Arc<Box<dyn StoreMetrics<i32, i32> + Send + Sync>> =
         //     Arc::new(Box::new(CountMetrics::default()));
         let metrics = CountMetrics::new();
-        let store = StoreBuilder::new(Box::new(TestReducer))
+        let store = StoreBuilder::new()
+            .with_reducer(Box::new(TestReducer))
             .with_capacity(5)
             .with_policy(BackpressurePolicy::DropOldest)
             .with_metrics(metrics.clone())
@@ -407,7 +395,8 @@ mod tests {
     fn test_count_metrics_with_dropped_actions() {
         // given
         let metrics = CountMetrics::new();
-        let store = StoreBuilder::new(Box::new(TestReducer))
+        let store = StoreBuilder::new()
+            .with_reducer(Box::new(TestReducer))
             .with_capacity(2)
             .with_policy(BackpressurePolicy::DropOldest)
             .with_metrics(metrics.clone())
@@ -433,7 +422,8 @@ mod tests {
         // given
         let metrics = CountMetrics::new();
         let middleware = Arc::new(Mutex::new(TestMiddleware::new("test")));
-        let store = StoreBuilder::new(Box::new(TestReducer))
+        let store = StoreBuilder::new()
+            .with_reducer(Box::new(TestReducer))
             .with_capacity(5)
             .with_middleware(middleware)
             .with_metrics(metrics.clone())
@@ -446,6 +436,7 @@ mod tests {
 
         assert_eq!(metrics.action_received.load(Ordering::SeqCst), 1);
         assert_eq!(metrics.action_reduced.load(Ordering::SeqCst), 1);
+        assert_eq!(metrics.state_notified.load(Ordering::SeqCst), 1);
         assert_eq!(metrics.subscriber_notified.load(Ordering::SeqCst), 1);
         // Middleware should be executed
         assert!(metrics.middleware_execution_time.load(Ordering::SeqCst) > 0);
