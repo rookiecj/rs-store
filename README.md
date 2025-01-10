@@ -30,14 +30,14 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-rs-store = "0.18.2"
+rs-store = "0.19"
 ```
 
 with the `notify-channel` feature:
 
 ```toml
 [dependencies]
-rs-store = { version = "0.18.2", features = ["notify-channel"] }
+rs-store = { version = "0.19", features = ["notify-channel"] }
 ```
 
 ## Quick Start
