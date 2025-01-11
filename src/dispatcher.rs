@@ -32,6 +32,7 @@ where
     fn dispatch_thunk(&self, thunk: Box<dyn FnOnce(Box<dyn Dispatcher<Action>>) + Send>) {
         let self_clone = self.clone();
         let dispatcher: Box<Arc<Store<State, Action>>> = Box::new(self_clone);
+        // poll can be shutdown already
         match self.pool.lock() {
             Ok(pool) => {
                 if let Some(pool) = pool.as_ref() {

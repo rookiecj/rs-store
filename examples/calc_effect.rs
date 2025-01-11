@@ -1,4 +1,4 @@
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::{Arc, Mutex};
 use std::thread;
 
 use rs_store::{DispatchOp, Dispatcher, Effect, EffectResult};
@@ -6,8 +6,8 @@ use rs_store::{Reducer, Store, Subscriber};
 
 #[derive(Debug, Clone)]
 enum CalcAction {
-    Add(i32, Arc<Condvar>),
-    Subtract(i32, Arc<Condvar>),
+    AddWillProduceThunk(i32),
+    SubtractWillProduceEffectFunction(i32),
 }
 
 struct CalcReducer {}
@@ -32,24 +32,25 @@ impl Default for CalcState {
 impl Reducer<CalcState, CalcAction> for CalcReducer {
     fn reduce(&self, state: &CalcState, action: &CalcAction) -> DispatchOp<CalcState, CalcAction> {
         match action {
-            CalcAction::Add(i, cond) => {
+            CalcAction::AddWillProduceThunk(i) => {
                 println!("CalcReducer::reduce: + {}", i);
                 DispatchOp::Dispatch(
                     CalcState {
                         count: state.count + i,
                     },
-                    Some(Effect::Thunk(subtract_effect_thunk(*i, cond.clone()))),
+                    Some(Effect::Thunk(subtract_effect_thunk(*i))),
                 )
             }
-            CalcAction::Subtract(i, cond) => {
+            CalcAction::SubtractWillProduceEffectFunction(i) => {
                 println!("CalcReducer::reduce: - {}", i);
                 DispatchOp::Dispatch(
                     CalcState {
                         count: state.count - i,
                     },
+                    // produce effect function
                     Some(Effect::Function(
                         "subtract".to_string(),
-                        subtract_effect_fn(*i, cond.clone()),
+                        subtract_effect_fn(*i),
                     )),
                 )
             }
@@ -74,7 +75,7 @@ impl Default for CalcSubscriber {
 impl Subscriber<CalcState, CalcAction> for CalcSubscriber {
     fn on_notify(&self, state: &CalcState, action: &CalcAction) {
         match action {
-            CalcAction::Add(_i, _) => {
+            CalcAction::AddWillProduceThunk(_i) => {
                 println!(
                     "CalcSubscriber::on_notify: id:{}, state: {:?} <- last: {:?} + action: {:?}",
                     self.id,
@@ -83,7 +84,7 @@ impl Subscriber<CalcState, CalcAction> for CalcSubscriber {
                     action,
                 );
             }
-            CalcAction::Subtract(_i, _) => {
+            CalcAction::SubtractWillProduceEffectFunction(_i) => {
                 println!(
                     "CalcSubscriber::on_notify: id:{}, state: {:?} <- last: {:?} + action: {:?}",
                     self.id,
@@ -100,22 +101,22 @@ impl Subscriber<CalcState, CalcAction> for CalcSubscriber {
 
 fn subtract_effect_thunk(
     i: i32,
-    cond: Arc<Condvar>,
 ) -> Box<dyn FnOnce(Box<dyn Dispatcher<CalcAction>>) + Send> {
     Box::new(move |dispatcher| {
         println!("effect: working on long running task....");
         thread::sleep(std::time::Duration::from_secs(1));
 
         println!("effect: dispatching action...");
-        dispatcher.dispatch(CalcAction::Subtract(i, cond.clone()))
+        dispatcher.dispatch(CalcAction::SubtractWillProduceEffectFunction(i))
     })
 }
 
-fn subtract_effect_fn(_i: i32, cond: Arc<Condvar>) -> Box<dyn FnOnce() -> EffectResult + Send> {
+fn subtract_effect_fn(_i: i32) -> Box<dyn FnOnce() -> EffectResult + Send> {
     Box::new(move || {
-        println!("effect: set done");
-        // set done signal
-        cond.notify_all();
+        println!("effect: working on long running task again....");
+        thread::sleep(std::time::Duration::from_secs(1));
+
+        println!("effect: now returns result");
         Ok(Box::new(CalcState { count: 0 }))
     })
 }
@@ -130,14 +131,8 @@ pub fn main() {
     )
     .unwrap();
 
-    let lock_done = Arc::new(Mutex::new(false));
-    let cond_done: Arc<Condvar> = Arc::new(Condvar::new());
-
     store.add_subscriber(Arc::new(CalcSubscriber::default()));
-    store.dispatch(CalcAction::Add(1, cond_done.clone()));
-
-    drop(cond_done.wait(lock_done.lock().unwrap()).unwrap());
-    thread::sleep(std::time::Duration::from_secs(1));
+    store.dispatch(CalcAction::AddWillProduceThunk(1));
 
     store.stop();
 }

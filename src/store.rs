@@ -144,12 +144,18 @@ where
         middlewares: Vec<Arc<Mutex<dyn Middleware<State, Action> + Send + Sync>>>,
         metrics: Option<Arc<dyn StoreMetrics + Send + Sync>>,
     ) -> Result<Arc<Store<State, Action>>, StoreError> {
-        let (tx, rx) =
-            BackpressureChannel::<Action>::pair_with_metrics(capacity, policy.clone(), metrics.clone());
+        let (tx, rx) = BackpressureChannel::<Action>::pair_with_metrics(
+            capacity,
+            policy.clone(),
+            metrics.clone(),
+        );
 
         #[cfg(feature = "notify-channel")]
-        let (notify_tx, notify_rx) =
-            BackpressureChannel::<(State, Action)>::pair_with_metrics(capacity, policy.clone(), metrics.clone());
+        let (notify_tx, notify_rx) = BackpressureChannel::<(State, Action)>::pair_with_metrics(
+            capacity,
+            policy.clone(),
+            metrics.clone(),
+        );
 
         let store = Store {
             name: name.clone(),
@@ -173,10 +179,13 @@ where
         // notify 스레드
         #[cfg(feature = "notify-channel")]
         {
-            let notify_store = tx_store.clone();
-            tx_store.pool.lock().unwrap().as_ref().unwrap().execute(move || loop {
-                let msg_opt = notify_rx.recv();
-                if let Some(msg) = msg_opt {
+            let notify_tx_store = tx_store.clone();
+            let notify_store = rx_store.clone();
+            notify_tx_store.pool.lock().unwrap().as_ref().unwrap().execute(move || {
+                #[cfg(dev)]
+                eprintln!("store: notify thread started");
+
+                while let Some(msg) = notify_rx.recv() {
                     match msg {
                         ActionOp::Action((state, action)) => {
                             let start = Instant::now();
@@ -185,6 +194,7 @@ where
                             for subscriber in subscribers.iter() {
                                 subscriber.on_notify(&state, &action);
                             }
+
                             if let Some(metrics) = &notify_store.metrics {
                                 let duration = start.elapsed();
                                 metrics.subscriber_notified(
@@ -200,41 +210,59 @@ where
                             break;
                         }
                     }
-                } else {
-                    #[cfg(dev)]
-                    eprintln!("store: Notify channel error");
-                    break;
                 }
+
+                #[cfg(dev)]
+                eprintln!("store: notify thread exit");
             });
         }
 
         // reducer 스레드
         tx_store.pool.lock().unwrap().as_ref().unwrap().execute(move || {
+            #[cfg(dev)]
+            eprintln!("store: reducer thread started");
+
             while let Some(action) = rx.recv() {
+                if let Some(metrics) = &rx_store.metrics {
+                    metrics.action_received(Some(&action));
+                }
+
                 match action {
                     ActionOp::Action(action) => {
                         let the_dispatcher = Arc::new(rx_store.clone());
 
                         // do reduce
-                        let (need_dispatch, effects) =
-                            rx_store.do_reduce(&action, the_dispatcher.clone());
+                        let current_state = rx_store.state.lock().unwrap().clone();
+                        let (need_dispatch, new_state, effects) =
+                            rx_store.do_reduce(&action, current_state, the_dispatcher.clone());
+                        *rx_store.state.lock().unwrap() = new_state.clone();
 
-                        // do effect remains
+                        // do effects remain
                         if let Some(mut effects) = effects {
-                            rx_store.do_effect(&action, &mut effects, the_dispatcher.clone());
+                            rx_store.do_effect(
+                                &action,
+                                &new_state,
+                                &mut effects,
+                                the_dispatcher.clone(),
+                            );
                         }
 
                         // do notify subscribers
                         if need_dispatch {
-                            rx_store.do_notify(&action);
+                            rx_store.do_notify(&action, &new_state, the_dispatcher.clone());
                         }
                     }
                     ActionOp::Exit => {
                         rx_store.on_close();
-                        break
-                    },
+                        #[cfg(dev)]
+                        eprintln!("store: reducer action exit");
+                        break;
+                    }
                 }
             }
+
+            #[cfg(dev)]
+            eprintln!("store: reducer thread exit");
         });
 
         Ok(tx_store)
@@ -301,56 +329,57 @@ where
     pub(crate) fn do_reduce(
         &self,
         action: &Action,
+        mut state: State,
         dispatcher: Arc<dyn Dispatcher<Action>>,
-    ) -> (bool, Option<Vec<Effect<Action>>>) {
-        let current_state = self.state.lock().unwrap().clone();
+    ) -> (bool, State, Option<Vec<Effect<Action>>>) {
+        //let state = self.state.lock().unwrap().clone();
 
-        let middleware_start = Instant::now();
-        if let Some(metrics) = &self.metrics {
-            metrics.action_received(Some(action));
-        }
-
-        // Execute before_dispatch for all middlewares
         let mut reduce_action = true;
-        let mut skip_index = self.middlewares.lock().unwrap().len();
-        for (index, middleware) in self.middlewares.lock().unwrap().iter().enumerate() {
-            match middleware.lock().unwrap().before_reduce(
-                action,
-                &current_state,
-                dispatcher.clone(),
-            ) {
-                Ok(MiddlewareOp::ContinueAction) => {
-                    // continue dispatching the action
+        if !self.middlewares.lock().unwrap().is_empty() {
+            let middleware_start = Instant::now();
+            let mut middleware_executed = 0;
+            for middleware in self.middlewares.lock().unwrap().iter() {
+                middleware_executed += 1;
+                match middleware.lock().unwrap().before_reduce(action, &state, dispatcher.clone()) {
+                    Ok(MiddlewareOp::ContinueAction) => {
+                        // continue dispatching the action
+                    }
+                    Ok(MiddlewareOp::DoneAction) => {
+                        // stop dispatching the action
+                        // last middleware wins
+                        reduce_action = false;
+                    }
+                    Ok(MiddlewareOp::BreakChain) => {
+                        // break the middleware chain
+                        break;
+                    }
+                    Err(_e) => {
+                        #[cfg(dev)]
+                        eprintln!("store: Middleware error: {:?}", _e);
+                        //return (false, None);
+                    }
                 }
-                Ok(MiddlewareOp::DoneAction) => {
-                    // stop dispatching the action
-                    // last middleware wins
-                    reduce_action = false;
-                }
-                Ok(MiddlewareOp::BreakChain) => {
-                    // break the middleware chain
-                    skip_index = index;
-                    break;
-                }
-                Err(_e) => {
-                    #[cfg(dev)]
-                    eprintln!("store: Middleware error: {:?}", _e);
-                    //return (false, None);
-                }
+            }
+            if let Some(metrics) = &self.metrics {
+                let middleware_duration = middleware_start.elapsed();
+                metrics.middleware_executed(
+                    Some(action),
+                    "before_reduce",
+                    middleware_executed,
+                    middleware_duration,
+                );
             }
         }
 
         let mut effects = vec![];
-        let mut next_state = current_state.clone();
         let mut need_dispatch = true;
         if reduce_action {
-            // 여기서 reducer 실행 시간 측정 시작
             let reducer_start = Instant::now();
 
             for reducer in self.reducers.lock().unwrap().iter() {
-                match reducer.reduce(&next_state, action) {
+                match reducer.reduce(&state, action) {
                     DispatchOp::Dispatch(new_state, effect) => {
-                        next_state = new_state;
+                        state = new_state;
                         if let Some(effect) = effect {
                             effects.push(effect);
                         }
@@ -358,7 +387,7 @@ where
                     }
                     DispatchOp::Keep(new_state, effect) => {
                         // keep the state but do not dispatch
-                        next_state = new_state;
+                        state = new_state;
                         if let Some(effect) = effect {
                             effects.push(effect);
                         }
@@ -370,65 +399,63 @@ where
             // reducer 실행 시간 측정 종료 및 기록
             if let Some(metrics) = &self.metrics {
                 let reducer_duration = reducer_start.elapsed();
-                metrics.action_reduced(
-                    Some(action),
-                    reducer_duration,
-                );
+                metrics.action_reduced(Some(action), reducer_duration);
             }
         }
 
-        // Execute after_dispatch for all middlewares in reverse order
-        let skip_middlewares = if skip_index != self.middlewares.lock().unwrap().len() {
-            self.middlewares.lock().unwrap().len() - skip_index - 1
-        } else {
-            0
-        };
-        for middleware in self.middlewares.lock().unwrap().iter().rev().skip(skip_middlewares) {
-            match middleware.lock().unwrap().after_reduce(
-                action,
-                &current_state,
-                &next_state,
-                &mut effects,
-                dispatcher.clone(),
-            ) {
-                Ok(MiddlewareOp::ContinueAction) => {
-                    // do nothing
-                }
-                Ok(MiddlewareOp::DoneAction) => {
-                    // do nothing
-                }
-                Ok(MiddlewareOp::BreakChain) => {
-                    break;
-                }
-                Err(_e) => {
-                    #[cfg(dev)]
-                    eprintln!("store: Middleware error: {:?}", _e);
-                }
-            }
-        }
-
-        if let Some(metrics) = &self.metrics {
-            let middleware_duration = middleware_start.elapsed();
-            metrics.middleware_executed(
-                Some(action),
-                "after_reduce",
-                middleware_duration,
-            );
-        }
-
-        *self.state.lock().unwrap() = next_state;
-        (need_dispatch, Some(effects))
+        //*self.state.lock().unwrap() = next_state;
+        (need_dispatch, state, Some(effects))
     }
 
     pub(crate) fn do_effect(
         &self,
-        _action: &Action,
+        action: &Action,
+        state: &State,
         effects: &mut Vec<Effect<Action>>,
         dispatcher: Arc<dyn Dispatcher<Action>>,
     ) {
-        let _start = Instant::now();
+        let effect_start = Instant::now();
         if let Some(metrics) = &self.metrics {
             metrics.effect_issued(effects.len());
+        }
+
+        if !self.middlewares.lock().unwrap().is_empty() {
+            let middleware_start = Instant::now();
+            let mut middleware_executed = 0;
+            for middleware in self.middlewares.lock().unwrap().iter() {
+                middleware_executed += 1;
+                match middleware.lock().unwrap().before_effect(
+                    action,
+                    &state,
+                    effects,
+                    dispatcher.clone(),
+                ) {
+                    Ok(MiddlewareOp::ContinueAction) => {
+                        // do nothing
+                    }
+                    Ok(MiddlewareOp::DoneAction) => {
+                        // do nothing
+                    }
+                    Ok(MiddlewareOp::BreakChain) => {
+                        // break the middleware chain
+                        break;
+                    }
+                    Err(_e) => {
+                        #[cfg(dev)]
+                        eprintln!("store: Middleware error: {:?}", _e);
+                        //return (false, None);
+                    }
+                }
+            }
+            if let Some(metrics) = &self.metrics {
+                let middleware_duration = middleware_start.elapsed();
+                metrics.middleware_executed(
+                    Some(action),
+                    "before_effect",
+                    middleware_executed,
+                    middleware_duration,
+                );
+            }
         }
 
         while !effects.is_empty() {
@@ -455,43 +482,86 @@ where
         }
 
         if let Some(metrics) = &self.metrics {
-            let duration = _start.elapsed();
+            let duration = effect_start.elapsed();
             metrics.effect_executed(effects.len(), duration);
         }
     }
 
-    pub(crate) fn do_notify(&self, action: &Action) {
-        let _start = Instant::now();
-        let next_state = self.state.lock().unwrap().clone();
+    pub(crate) fn do_notify(
+        &self,
+        action: &Action,
+        next_state: &State,
+        dispatcher: Arc<dyn Dispatcher<Action>>,
+    ) {
+        let _notify_start = Instant::now();
         if let Some(metrics) = &self.metrics {
-            metrics.state_notified(Some(&next_state));
+            metrics.state_notified(Some(next_state));
         }
 
-        #[cfg(feature = "notify-channel")]
-        {
-            if let Some(notify_tx) = self.notify_tx.lock().unwrap().as_ref() {
-                let _ = notify_tx.send(ActionOp::Action((next_state, action.clone())));
-            }
-        }
-
-        #[cfg(not(feature = "notify-channel"))]
-        {
-            let subscribers = self.subscribers.lock().unwrap().clone();
-            for subscriber in subscribers.iter() {
-                subscriber.on_notify(&next_state, action)
+        let mut need_notify = true;
+        if !self.middlewares.lock().unwrap().is_empty() {
+            let middleware_start = Instant::now();
+            let mut middleware_executed = 0;
+            for middleware in self.middlewares.lock().unwrap().iter() {
+                middleware_executed += 1;
+                match middleware.lock().unwrap().before_dispatch(
+                    action,
+                    &next_state,
+                    dispatcher.clone(),
+                ) {
+                    Ok(MiddlewareOp::ContinueAction) => {
+                        // do nothing
+                    }
+                    Ok(MiddlewareOp::DoneAction) => {
+                        // last win
+                        need_notify = false;
+                    }
+                    Ok(MiddlewareOp::BreakChain) => {
+                        // break the middleware chain
+                        break;
+                    }
+                    Err(_e) => {
+                        #[cfg(dev)]
+                        eprintln!("store: Middleware error: {:?}", _e);
+                        //return (false, None);
+                    }
+                }
             }
             if let Some(metrics) = &self.metrics {
-                let duration = _start.elapsed();
-                metrics.subscriber_notified(
+                let middleware_duration = middleware_start.elapsed();
+                metrics.middleware_executed(
                     Some(action),
-                    subscribers.len(),
-                    duration,
+                    "before_dispatch",
+                    middleware_executed,
+                    middleware_duration,
                 );
+            }
+        }
+
+        if need_notify {
+            #[cfg(feature = "notify-channel")]
+            if let Some(notify_tx) = self.notify_tx.lock().unwrap().as_ref() {
+                let _ = notify_tx.send(ActionOp::Action((next_state.clone(), action.clone())));
+            }
+
+            #[cfg(not(feature = "notify-channel"))]
+            {
+                let subscribers = self.subscribers.lock().unwrap().clone();
+                for subscriber in subscribers.iter() {
+                    subscriber.on_notify(&next_state, action)
+                }
+                if let Some(metrics) = &self.metrics {
+                    let duration = _notify_start.elapsed();
+                    metrics.subscriber_notified(Some(action), subscribers.len(), duration);
+                }
             }
         }
     }
 
     fn on_close(&self) {
+        #[cfg(dev)]
+        eprintln!("store: on_close");
+
         #[cfg(feature = "notify-channel")]
         if let Some(notify_tx) = self.notify_tx.lock().unwrap().take() {
             let _ = notify_tx.send(ActionOp::Exit);
@@ -521,10 +591,17 @@ where
         self.close();
 
         // Shutdown the thread pool with timeout
-        if let Ok(mut lk) = self.pool.lock() {
-            if let Some(pool) = lk.take() {
+        // lock pool
+        let pool_took = self.pool.lock().unwrap().take();
+        // unlock pool
+        if let Some(pool) = pool_took {
+            if cfg!(dev) {
+                pool.shutdown_join();
+            } else {
                 pool.shutdown_join_timeout(Duration::from_secs(3));
             }
+            #[cfg(dev)]
+            eprintln!("store: shutdown pool");
         }
 
         #[cfg(dev)]
@@ -553,7 +630,7 @@ where
         }
     }
 
-    /// Add middleware method
+    /// Add middleware
     pub fn add_middleware(&self, middleware: Arc<Mutex<dyn Middleware<State, Action>>>) {
         self.middlewares.lock().unwrap().push(middleware);
     }
@@ -828,6 +905,7 @@ mod tests {
             &self,
             _data: Option<&dyn Any>,
             _middleware_name: &str,
+            _count: usize,
             _duration: Duration,
         ) {
             // Implementation for middleware execution

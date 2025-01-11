@@ -247,7 +247,7 @@ mod tests {
             thread::spawn(move || {
                 let mut received_items = vec![];
                 while let Some(value) = receiver.recv() {
-                    println!("Received: {:?}", value);
+                    eprintln!("Received: {:?}", value);
                     match value {
                         ActionOp::Action(i) => received_items.push(i),
                         _ => {}

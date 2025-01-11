@@ -101,19 +101,18 @@ where
                 dyn Fn(
                         &Action,
                         &State,
-                        Arc<dyn Dispatcher<Action>>,
+                    Arc<dyn Dispatcher<Action>>,
                     ) -> Result<MiddlewareOp, StoreError>
                     + Send
                     + Sync,
             >,
         >,
     >,
-    pub after_reduce_fn: Arc<
+    pub before_effect_fn: Arc<
         Mutex<
             Box<
                 dyn Fn(
                         &Action,
-                        &State,
                         &State,
                         &mut Vec<Effect<Action>>,
                         Arc<dyn Dispatcher<Action>>,
@@ -124,7 +123,7 @@ where
         >,
     >,
     pub before_reduce_call_count: Arc<Mutex<usize>>,
-    pub after_reduce_call_count: Arc<Mutex<usize>>,
+    pub before_effect_call_count: Arc<Mutex<usize>>,
 }
 
 impl<State, Action> MockMiddleware<State, Action>
@@ -137,11 +136,11 @@ where
             before_reduce_fn: Arc::new(Mutex::new(Box::new(|_, _, _| {
                 Ok(MiddlewareOp::ContinueAction)
             }))),
-            after_reduce_fn: Arc::new(Mutex::new(Box::new(|_, _, _, _, _| {
+            before_effect_fn: Arc::new(Mutex::new(Box::new(|_, _, _, _| {
                 Ok(MiddlewareOp::ContinueAction)
             }))),
             before_reduce_call_count: Arc::new(Mutex::new(0)),
-            after_reduce_call_count: Arc::new(Mutex::new(0)),
+            before_effect_call_count: Arc::new(Mutex::new(0)),
         }
     }
 }
@@ -161,16 +160,15 @@ where
         (self.before_reduce_fn.lock().unwrap())(action, state, dispatcher)
     }
 
-    fn after_reduce(
+    fn before_effect(
         &mut self,
         action: &Action,
-        old_state: &State,
-        new_state: &State,
+        state: &State,
         effects: &mut Vec<Effect<Action>>,
         dispatcher: Arc<dyn Dispatcher<Action>>,
     ) -> Result<MiddlewareOp, StoreError> {
-        *self.after_reduce_call_count.lock().unwrap() += 1;
-        (self.after_reduce_fn.lock().unwrap())(action, old_state, new_state, effects, dispatcher)
+        *self.before_effect_call_count.lock().unwrap() += 1;
+        (self.before_effect_fn.lock().unwrap())(action, state, effects, dispatcher)
     }
 }
 
@@ -294,7 +292,7 @@ mod tests {
             1
         );
         assert_eq!(
-            *mock_middleware.lock().unwrap().after_reduce_call_count.lock().unwrap(),
+            *mock_middleware.lock().unwrap().before_effect_call_count.lock().unwrap(),
             1
         );
     }
@@ -315,7 +313,7 @@ mod tests {
                 before_called_clone.store(true, Ordering::SeqCst);
                 Ok(MiddlewareOp::ContinueAction)
             });
-            *middleware.after_reduce_fn.lock().unwrap() = Box::new(move |_, _, _, _, _| {
+            *middleware.before_effect_fn.lock().unwrap() = Box::new(move |_, _, _, _| {
                 after_called_clone.store(true, Ordering::SeqCst);
                 Ok(MiddlewareOp::ContinueAction)
             });
@@ -340,7 +338,7 @@ mod tests {
             1
         );
         assert_eq!(
-            *mock_middleware.lock().unwrap().after_reduce_call_count.lock().unwrap(),
+            *mock_middleware.lock().unwrap().before_effect_call_count.lock().unwrap(),
             1
         );
     }
