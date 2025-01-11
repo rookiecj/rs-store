@@ -9,14 +9,15 @@ use std::any::Any;
 #[allow(dead_code)]
 #[allow(unused_variables)]
 pub trait StoreMetrics: Send + Sync {
-    /// action_received is called when an action is received.
+    /// action_received is called when an action is received including Exit.
+    /// data is the ActionOp that is received.
     fn action_received(&self, data: Option<&dyn Any>) {}
     /// action_dropped is called when an action is dropped.
     fn action_dropped(&self, data: Option<&dyn Any>) {}
 
     /// middleware_execution_time is called when a middleware is executed,
     /// it includes the time spent of reducing the action and the time spent in the middleware
-    fn middleware_executed(&self, data: Option<&dyn Any>, middleware_name: &str, duration: Duration) {}
+    fn middleware_executed(&self, data: Option<&dyn Any>, middleware_name: &str, count: usize, duration: Duration) {}
 
     /// action_reduced is called when an action is reduced.
     fn action_reduced(&self, data: Option<&dyn Any>, duration: Duration) {}
@@ -57,6 +58,8 @@ pub struct CountMetrics {
     pub reducer_time_min: AtomicUsize,
     /// total time spent in reducers
     pub reducer_execution_time: AtomicUsize,
+    /// total number of middleware executed
+    pub middleware_executed: AtomicUsize,
     /// max time spent in middleware
     pub middleware_time_max: AtomicUsize,
     /// min time spent in middleware
@@ -94,6 +97,7 @@ impl Default for CountMetrics {
             reducer_time_max: AtomicUsize::new(0),
             reducer_time_min: AtomicUsize::new(usize::MAX),
             reducer_execution_time: AtomicUsize::new(0),
+            middleware_executed: AtomicUsize::new(0),
             middleware_time_max: AtomicUsize::new(0),
             middleware_time_min: AtomicUsize::new(usize::MAX),
             middleware_execution_time: AtomicUsize::new(0),
@@ -141,6 +145,11 @@ impl fmt::Display for CountMetrics {
             f,
             ", reducer_execution_time: {:?}",
             self.reducer_execution_time.load(Ordering::SeqCst)
+        )?;
+        write!(
+            f,
+            ", middleware_executed: {:?}",
+            self.middleware_executed.load(Ordering::SeqCst)
         )?;
         write!(
             f,
@@ -215,6 +224,7 @@ impl CountMetrics {
         self.reducer_time_max.store(0, Ordering::SeqCst);
         self.reducer_time_min.store(0, Ordering::SeqCst);
         self.reducer_execution_time.store(0, Ordering::SeqCst);
+        self.middleware_executed.store(0, Ordering::SeqCst);
         self.middleware_time_max.store(0, Ordering::SeqCst);
         self.middleware_time_min.store(0, Ordering::SeqCst);
         self.middleware_execution_time.store(0, Ordering::SeqCst);
@@ -239,7 +249,8 @@ impl StoreMetrics for CountMetrics
         self.action_dropped.fetch_add(1, Ordering::SeqCst);
     }
 
-    fn middleware_executed(&self, data: Option<&dyn Any>, _middleware_name: &str, duration: Duration) {
+    fn middleware_executed(&self, data: Option<&dyn Any>, _middleware_name: &str, count: usize, duration: Duration) {
+        self.middleware_executed.fetch_add(count, Ordering::SeqCst);
         let duration_ms = duration.as_millis() as usize;
         if duration_ms > self.middleware_time_max.load(Ordering::SeqCst) {
             self.middleware_time_max.store(duration_ms, Ordering::SeqCst);
@@ -348,11 +359,10 @@ mod tests {
             Ok(MiddlewareOp::ContinueAction)
         }
 
-        fn after_reduce(
+        fn before_effect(
             &mut self,
             _action: &Action,
-            _old_state: &State,
-            _new_state: &State,
+            _state: &State,
             _effects: &mut Vec<Effect<Action>>,
             _dispatcher: Arc<dyn Dispatcher<Action>>,
         ) -> Result<MiddlewareOp, StoreError> {
@@ -380,13 +390,13 @@ mod tests {
         store.dispatch(2);
         store.dispatch(3);
 
-        // Action::Exit는 Store에서 처리하지 않음
+        // +1 : ActionExit
         store.stop();
 
         println!("Metrics: {}", metrics);
 
         // then
-        assert_eq!(metrics.action_received.load(Ordering::SeqCst), 3);
+        assert_eq!(metrics.action_received.load(Ordering::SeqCst), 3 + 1);
         assert_eq!(metrics.action_reduced.load(Ordering::SeqCst), 3);
         assert!(metrics.reducer_execution_time.load(Ordering::SeqCst) > 0);
     }
@@ -434,7 +444,8 @@ mod tests {
         store.dispatch(1);
         store.stop();
 
-        assert_eq!(metrics.action_received.load(Ordering::SeqCst), 1);
+        // +1 for ActionExit
+        assert_eq!(metrics.action_received.load(Ordering::SeqCst), 1 + 1);
         assert_eq!(metrics.action_reduced.load(Ordering::SeqCst), 1);
         assert_eq!(metrics.state_notified.load(Ordering::SeqCst), 1);
         assert_eq!(metrics.subscriber_notified.load(Ordering::SeqCst), 1);
