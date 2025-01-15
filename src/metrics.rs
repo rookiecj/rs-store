@@ -1,23 +1,31 @@
 use crate::StoreError;
+use std::any::Any;
 use std::fmt::Formatter;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::{fmt, sync::atomic::AtomicUsize, time::Duration};
-use std::any::Any;
 
-/// StoreMetrics is a trait for metrics that can be used to track the state of the store.
+/// Metrics is a trait for metrics that can be used to track the state of the store.
 #[allow(dead_code)]
 #[allow(unused_variables)]
-pub trait StoreMetrics: Send + Sync {
+pub(crate) trait Metrics: Send + Sync {
     /// action_received is called when an action is received including Exit.
     /// data is the ActionOp that is received.
     fn action_received(&self, data: Option<&dyn Any>) {}
+
     /// action_dropped is called when an action is dropped.
     fn action_dropped(&self, data: Option<&dyn Any>) {}
 
     /// middleware_execution_time is called when a middleware is executed,
     /// it includes the time spent of reducing the action and the time spent in the middleware
-    fn middleware_executed(&self, data: Option<&dyn Any>, middleware_name: &str, count: usize, duration: Duration) {}
+    fn middleware_executed(
+        &self,
+        data: Option<&dyn Any>,
+        middleware_name: &str,
+        count: usize,
+        duration: Duration,
+    ) {
+    }
 
     /// action_reduced is called when an action is reduced.
     fn action_reduced(&self, data: Option<&dyn Any>, duration: Duration) {}
@@ -31,7 +39,7 @@ pub trait StoreMetrics: Send + Sync {
     /// state_notified is called when the state is notified.
     fn state_notified(&self, data: Option<&dyn Any>) {}
 
-    /// subscriber_notified is called when a subscriber is notified.
+    /// subscriber_notified is called when after all subscribers are notified even if there are no subscribers.
     fn subscriber_notified(&self, data: Option<&dyn Any>, count: usize, duration: Duration) {}
 
     /// queue_size is called when the remaining queue is changed.
@@ -41,7 +49,7 @@ pub trait StoreMetrics: Send + Sync {
     fn error_occurred(&self, error: &StoreError) {}
 }
 
-pub struct CountMetrics {
+pub(crate) struct CountMetrics {
     /// total number of actions received
     pub action_received: AtomicUsize,
     /// total number of actions dropped
@@ -51,7 +59,7 @@ pub struct CountMetrics {
     /// total number of effects issued
     pub effect_issued: AtomicUsize,
     // total number of effects executed
-    //pub effect_executed: AtomicUsize,
+    pub effect_executed: AtomicUsize,
     /// max time spent in reducers
     pub reducer_time_max: AtomicUsize,
     /// min time spent in reducers
@@ -93,7 +101,7 @@ impl Default for CountMetrics {
             action_dropped: AtomicUsize::new(0),
             action_reduced: AtomicUsize::new(0),
             effect_issued: AtomicUsize::new(0),
-            //effect_executed: AtomicUsize::new(0),
+            effect_executed: AtomicUsize::new(0),
             reducer_time_max: AtomicUsize::new(0),
             reducer_time_min: AtomicUsize::new(usize::MAX),
             reducer_execution_time: AtomicUsize::new(0),
@@ -210,38 +218,8 @@ impl fmt::Display for CountMetrics {
     }
 }
 
-#[allow(dead_code)]
-impl CountMetrics {
-    pub fn new() -> Arc<Self> {
-        Arc::new(Self::default())
-    }
-
-    pub fn reset(&self) {
-        self.action_received.store(0, Ordering::SeqCst);
-        self.action_dropped.store(0, Ordering::SeqCst);
-        self.action_reduced.store(0, Ordering::SeqCst);
-        self.effect_issued.store(0, Ordering::SeqCst);
-        self.reducer_time_max.store(0, Ordering::SeqCst);
-        self.reducer_time_min.store(0, Ordering::SeqCst);
-        self.reducer_execution_time.store(0, Ordering::SeqCst);
-        self.middleware_executed.store(0, Ordering::SeqCst);
-        self.middleware_time_max.store(0, Ordering::SeqCst);
-        self.middleware_time_min.store(0, Ordering::SeqCst);
-        self.middleware_execution_time.store(0, Ordering::SeqCst);
-        self.state_notified.store(0, Ordering::SeqCst);
-        self.subscriber_notified.store(0, Ordering::SeqCst);
-        self.subscriber_time_max.store(0, Ordering::SeqCst);
-        self.subscriber_time_min.store(0, Ordering::SeqCst);
-        self.subscriber_execution_time.store(0, Ordering::SeqCst);
-        self.remaining_queue.store(0, Ordering::SeqCst);
-        self.remaining_queue_max.store(0, Ordering::SeqCst);
-        self.error_occurred.store(0, Ordering::SeqCst);
-    }
-}
-
 #[allow(unused_variables)]
-impl StoreMetrics for CountMetrics
-{
+impl Metrics for CountMetrics {
     fn action_received(&self, data: Option<&dyn Any>) {
         self.action_received.fetch_add(1, Ordering::SeqCst);
     }
@@ -249,7 +227,13 @@ impl StoreMetrics for CountMetrics
         self.action_dropped.fetch_add(1, Ordering::SeqCst);
     }
 
-    fn middleware_executed(&self, data: Option<&dyn Any>, _middleware_name: &str, count: usize, duration: Duration) {
+    fn middleware_executed(
+        &self,
+        data: Option<&dyn Any>,
+        _middleware_name: &str,
+        count: usize,
+        duration: Duration,
+    ) {
         self.middleware_executed.fetch_add(count, Ordering::SeqCst);
         let duration_ms = duration.as_millis() as usize;
         if duration_ms > self.middleware_time_max.load(Ordering::SeqCst) {
@@ -278,15 +262,15 @@ impl StoreMetrics for CountMetrics
     }
 
     fn effect_executed(&self, _count: usize, _duration: Duration) {
-        //self.effect_executed.fetch_add(1, Ordering::SeqCst);
+        self.effect_executed.fetch_add(1, Ordering::SeqCst);
     }
 
     fn state_notified(&self, data: Option<&dyn Any>) {
         self.state_notified.fetch_add(1, Ordering::SeqCst);
     }
 
-    fn subscriber_notified(&self, data: Option<&dyn Any>, _count: usize, duration: Duration) {
-        self.subscriber_notified.fetch_add(1, Ordering::SeqCst);
+    fn subscriber_notified(&self, data: Option<&dyn Any>, count: usize, duration: Duration) {
+        self.subscriber_notified.fetch_add(count, Ordering::SeqCst);
         let duration_ms = duration.as_millis() as usize;
         if duration_ms > self.subscriber_time_max.load(Ordering::SeqCst) {
             self.subscriber_time_max.store(duration_ms, Ordering::SeqCst);
@@ -309,6 +293,110 @@ impl StoreMetrics for CountMetrics
 
     fn error_occurred(&self, error: &StoreError) {
         self.error_occurred.fetch_add(1, Ordering::SeqCst);
+    }
+}
+
+#[allow(dead_code)]
+impl CountMetrics {
+    pub fn new() -> Arc<Self> {
+        Arc::new(Self::default())
+    }
+
+    pub fn reset(&self) {
+        self.action_received.store(0, Ordering::SeqCst);
+        self.action_dropped.store(0, Ordering::SeqCst);
+        self.action_reduced.store(0, Ordering::SeqCst);
+        self.effect_issued.store(0, Ordering::SeqCst);
+        self.effect_executed.store(0, Ordering::SeqCst);
+        self.reducer_time_max.store(0, Ordering::SeqCst);
+        self.reducer_time_min.store(0, Ordering::SeqCst);
+        self.reducer_execution_time.store(0, Ordering::SeqCst);
+        self.middleware_executed.store(0, Ordering::SeqCst);
+        self.middleware_time_max.store(0, Ordering::SeqCst);
+        self.middleware_time_min.store(0, Ordering::SeqCst);
+        self.middleware_execution_time.store(0, Ordering::SeqCst);
+        self.state_notified.store(0, Ordering::SeqCst);
+        self.subscriber_notified.store(0, Ordering::SeqCst);
+        self.subscriber_time_max.store(0, Ordering::SeqCst);
+        self.subscriber_time_min.store(0, Ordering::SeqCst);
+        self.subscriber_execution_time.store(0, Ordering::SeqCst);
+        self.remaining_queue.store(0, Ordering::SeqCst);
+        self.remaining_queue_max.store(0, Ordering::SeqCst);
+        self.error_occurred.store(0, Ordering::SeqCst);
+    }
+}
+
+/// MetricsSnapshot is a snapshot of the metrics.
+#[allow(dead_code)]
+pub struct MetricsSnapshot {
+    /// total number of actions received
+    pub action_received: usize,
+    /// total number of actions dropped
+    pub action_dropped: usize,
+    /// total number of actions reduced
+    pub action_reduced: usize,
+    /// total number of effects issued
+    pub effect_issued: usize,
+    // total number of effects executed
+    pub(crate) effect_executed: usize,
+    /// max time spent in reducers
+    pub reducer_time_max: usize,
+    /// min time spent in reducers
+    pub reducer_time_min: usize,
+    /// total time spent in reducers
+    pub reducer_execution_time: usize,
+    /// total number of middleware executed
+    pub middleware_executed: usize,
+    /// max time spent in middleware
+    pub middleware_time_max: usize,
+    /// min time spent in middleware
+    pub middleware_time_min: usize,
+    /// total time spent in middleware
+    pub middleware_execution_time: usize,
+    /// total number of states notified
+    pub state_notified: usize,
+    /// total number of subscribers notified
+    pub subscriber_notified: usize,
+    /// max time spent in subscribers
+    pub subscriber_time_max: usize,
+    /// min time spent in subscribers
+    pub subscriber_time_min: usize,
+    /// total time spent in subscribers
+    pub subscriber_execution_time: usize,
+
+    // remaining number of actions in the queue
+    pub(crate) remaining_queue: usize,
+    // max number of remaining actions in the queue
+    pub(crate) remaining_queue_max: usize,
+    //pub remaining_queue_min: usize,
+    /// total number of errors occurred
+    pub error_occurred: usize,
+}
+
+impl From<&CountMetrics> for MetricsSnapshot {
+    fn from(value: &CountMetrics) -> Self {
+        Self {
+            action_received: value.action_received.load(Ordering::SeqCst),
+            action_dropped: value.action_dropped.load(Ordering::SeqCst),
+            action_reduced: value.action_reduced.load(Ordering::SeqCst),
+            effect_issued: value.effect_issued.load(Ordering::SeqCst),
+            effect_executed: value.effect_executed.load(Ordering::SeqCst),
+            reducer_time_max: value.reducer_time_max.load(Ordering::SeqCst),
+            reducer_time_min: value.reducer_time_min.load(Ordering::SeqCst),
+            reducer_execution_time: value.reducer_execution_time.load(Ordering::SeqCst),
+            middleware_executed: value.middleware_executed.load(Ordering::SeqCst),
+            middleware_time_max: value.middleware_time_max.load(Ordering::SeqCst),
+            middleware_time_min: value.middleware_time_min.load(Ordering::SeqCst),
+            middleware_execution_time: value.middleware_execution_time.load(Ordering::SeqCst),
+            state_notified: value.state_notified.load(Ordering::SeqCst),
+            subscriber_notified: value.subscriber_notified.load(Ordering::SeqCst),
+            subscriber_time_max: value.subscriber_time_max.load(Ordering::SeqCst),
+            subscriber_time_min: value.subscriber_time_min.load(Ordering::SeqCst),
+            subscriber_execution_time: value.subscriber_execution_time.load(Ordering::SeqCst),
+            remaining_queue: value.remaining_queue.load(Ordering::SeqCst),
+            remaining_queue_max: value.remaining_queue_max.load(Ordering::SeqCst),
+            error_occurred: value.error_occurred.load(Ordering::SeqCst),
+        }
     }
 }
 
@@ -373,14 +461,10 @@ mod tests {
 
     #[test]
     fn test_count_metrics_basic() {
-        // let metrics: Arc<Box<dyn StoreMetrics<i32, i32> + Send + Sync>> =
-        //     Arc::new(Box::new(CountMetrics::default()));
-        let metrics = CountMetrics::new();
         let store = StoreBuilder::new()
             .with_reducer(Box::new(TestReducer))
             .with_capacity(5)
             .with_policy(BackpressurePolicy::DropOldest)
-            .with_metrics(metrics.clone())
             .build()
             .unwrap();
 
@@ -393,23 +477,21 @@ mod tests {
         // +1 : ActionExit
         store.stop();
 
-        println!("Metrics: {}", metrics);
-
         // then
-        assert_eq!(metrics.action_received.load(Ordering::SeqCst), 3 + 1);
-        assert_eq!(metrics.action_reduced.load(Ordering::SeqCst), 3);
-        assert!(metrics.reducer_execution_time.load(Ordering::SeqCst) > 0);
+        let metrics = store.get_metrics();
+        // +1 for ActionExit
+        assert_eq!(metrics.action_received, 3 + 1);
+        assert_eq!(metrics.action_reduced, 3);
+        assert!(metrics.reducer_execution_time > 0);
     }
 
     #[test]
     fn test_count_metrics_with_dropped_actions() {
         // given
-        let metrics = CountMetrics::new();
         let store = StoreBuilder::new()
             .with_reducer(Box::new(TestReducer))
             .with_capacity(2)
             .with_policy(BackpressurePolicy::DropOldest)
-            .with_metrics(metrics.clone())
             .build()
             .unwrap();
 
@@ -421,22 +503,21 @@ mod tests {
         store.stop();
 
         // then
+        let metrics = store.get_metrics();
         // actions should be dropped
-        assert!(metrics.action_dropped.load(Ordering::SeqCst) > 0);
+        assert!(metrics.action_dropped > 0);
         // Remaining queue should be less than or equal to capacity
-        assert!(metrics.remaining_queue_max.load(Ordering::SeqCst) <= 2);
+        assert!(metrics.remaining_queue_max <= 2);
     }
 
     #[test]
     fn test_count_metrics_with_middleware() {
         // given
-        let metrics = CountMetrics::new();
         let middleware = Arc::new(Mutex::new(TestMiddleware::new("test")));
         let store = StoreBuilder::new()
             .with_reducer(Box::new(TestReducer))
             .with_capacity(5)
             .with_middleware(middleware)
-            .with_metrics(metrics.clone())
             .build()
             .unwrap();
 
@@ -445,18 +526,17 @@ mod tests {
         store.stop();
 
         // +1 for ActionExit
-        assert_eq!(metrics.action_received.load(Ordering::SeqCst), 1 + 1);
-        assert_eq!(metrics.action_reduced.load(Ordering::SeqCst), 1);
-        assert_eq!(metrics.state_notified.load(Ordering::SeqCst), 1);
-        assert_eq!(metrics.subscriber_notified.load(Ordering::SeqCst), 1);
+        let metrics = store.get_metrics();
+        assert_eq!(metrics.action_received, 1 + 1);
+        assert_eq!(metrics.action_reduced, 1);
+        assert_eq!(metrics.state_notified, 1);
+        // no subscribers
+        assert_eq!(metrics.subscriber_notified, 0);
         // Middleware should be executed
-        assert!(metrics.middleware_execution_time.load(Ordering::SeqCst) > 0);
-        assert!(metrics.reducer_execution_time.load(Ordering::SeqCst) > 0);
+        assert!(metrics.middleware_execution_time > 0);
+        assert!(metrics.reducer_execution_time > 0);
         // Middleware should take longer than reducer
-        assert!(
-            metrics.middleware_execution_time.load(Ordering::SeqCst)
-                > metrics.reducer_execution_time.load(Ordering::SeqCst)
-        );
+        assert!(metrics.middleware_execution_time > metrics.reducer_execution_time);
     }
 
     #[test]
