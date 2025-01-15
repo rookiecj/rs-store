@@ -12,8 +12,9 @@ pub enum Effect<Action> {
     /// A task that takes the dispatcher as an argument.
     Thunk(Box<dyn FnOnce(Box<dyn Dispatcher<Action>>) + Send>),
     /// A function which has a result.
-    /// the result is an Any type which can be downcasted to the expected type,
+    /// The result is an Any type which can be downcasted to the expected type,
     /// you should know the type and the String key can help.
+    /// The result default ignored, if you want to get the result of the function, you can use `EffectMiddleware` to receive the result.
     Function(String, EffectFunction),
 }
 
