@@ -1,7 +1,7 @@
 use crossbeam::channel::{self, Receiver, Sender, TrySendError};
 use std::marker::PhantomData;
 use std::sync::Arc;
-use crate::metrics::StoreMetrics;
+use crate::metrics::Metrics;
 use crate::ActionOp;
 
 /// the Backpressure policy
@@ -33,7 +33,7 @@ where
     sender: Sender<ActionOp<Action>>,
     receiver: Receiver<ActionOp<Action>>,
     policy: BackpressurePolicy,
-    metrics: Option<Arc<dyn StoreMetrics + Send + Sync>>,
+    metrics: Option<Arc<dyn Metrics + Send + Sync>>,
 }
 
 impl<Action> SenderChannel<Action>
@@ -109,7 +109,7 @@ where
     Action: Send + Sync + Clone + 'static,
 {
     receiver: Receiver<ActionOp<Action>>,
-    metrics: Option<Arc<dyn StoreMetrics + Send + Sync>>,
+    metrics: Option<Arc<dyn Metrics + Send + Sync>>,
 }
 
 impl<Action> ReceiverChannel<Action>
@@ -149,7 +149,7 @@ where
     pub fn pair_with_metrics(
         capacity: usize,
         policy: BackpressurePolicy,
-        metrics: Option<Arc<dyn StoreMetrics + Send + Sync>>,
+        metrics: Option<Arc<dyn Metrics + Send + Sync>>,
     ) -> (SenderChannel<Action>, ReceiverChannel<Action>) {
         let (sender, receiver) = channel::bounded(capacity);
         (
