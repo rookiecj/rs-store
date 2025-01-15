@@ -109,4 +109,6 @@ pub fn main() {
 
     // stop the store
     store.stop();
+
+    assert_eq!(store.get_state().count, 0);
 }

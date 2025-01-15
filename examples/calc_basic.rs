@@ -1,7 +1,6 @@
 use rs_store::{DispatchOp, Dispatcher};
 use rs_store::{Reducer, Store, Subscriber};
 use std::sync::{Arc, Mutex};
-use std::thread;
 
 #[derive(Debug, Clone)]
 enum CalcAction {
@@ -99,12 +98,10 @@ pub fn main() {
     println!("add subscriber");
     store.add_subscriber(Arc::new(CalcSubscriber::default()));
     store.dispatch(CalcAction::Add(1));
-
-    thread::sleep(std::time::Duration::from_secs(1));
-    // println!("add more subscriber");
-    // store.add_subscriber(Arc::new(CalcSubscriber::default()));
     store.dispatch(CalcAction::Subtract(1));
 
     // stop the store
     store.stop();
+
+    assert_eq!(store.get_state().count, 0);
 }

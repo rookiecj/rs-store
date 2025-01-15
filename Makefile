@@ -61,34 +61,16 @@ fmt: ## format
 doc:	## doc
 	cargo doc --lib --no-deps -p rs-store
 
-example-calc:	## example calc_basic
+.PHONY: examples
+examples: ## example all
+	cargo run --example simple
 	cargo run --example calc_basic
-
-example-calc_fn:	## example calc_fn
 	cargo run --example calc_fn_basic
-
-example-calc_curr:	## example calc_concurrent
 	cargo run --example calc_concurrent
-
-example-calc_unsubcribe:	## example calc_unsubcribe
 	cargo run --example calc_unsubscribe
-
-example-calc_clear_subscribers:	## example calc_clear_subscribers
 	cargo run --example calc_clear_subscribers
-
-example-calc_thunk:	## example calc_thunk
 	cargo run --example calc_thunk
-
-example-calc_basic_builder:	## example calc_basic_builder
 	cargo run --example calc_basic_builder
-
-examples: example-calc \
-	example-calc_fn \
-	example-calc_curr \
-	example-calc_unsubcribe \
-	example-calc_clear_subscribers \
-	example-calc_thunk \
-	example-calc_basic_builder	## example all
 
 VERSION := $(shell cargo pkgid -p "rs-store" | cut -d\# -f2 | cut -d@ -f2)
 

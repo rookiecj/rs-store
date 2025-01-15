@@ -127,7 +127,7 @@ pub fn main() {
     let store = Store::<CalcState, CalcAction>::new_with_name(
         Box::new(CalcReducer::default()),
         CalcState::default(),
-        "store-thunk".into(),
+        "store-effect".into(),
     )
     .unwrap();
 
