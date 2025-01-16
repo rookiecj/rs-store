@@ -59,6 +59,17 @@ mod tests {
     use crate::subscriber::Subscriber;
     use crate::StoreBuilder;
     use std::sync::{Arc, Mutex};
+    use std::thread;
+
+    struct TestSubscriber {
+        state_changes: Arc<Mutex<Vec<i32>>>,
+    }
+
+    impl Subscriber<i32, i32> for TestSubscriber {
+        fn on_notify(&self, state: &i32, _action: &i32) {
+            self.state_changes.lock().unwrap().push(*state);
+        }
+    }
 
     #[test]
     fn test_store_continues_after_reducer_panic() {
@@ -94,14 +105,6 @@ mod tests {
         let state_changes = Arc::new(Mutex::new(Vec::new()));
         let state_changes_clone = state_changes.clone();
 
-        struct TestSubscriber {
-            state_changes: Arc<Mutex<Vec<i32>>>,
-        }
-        impl Subscriber<i32, i32> for TestSubscriber {
-            fn on_notify(&self, state: &i32, _action: &i32) {
-                self.state_changes.lock().unwrap().push(*state);
-            }
-        }
         let subscriber = Arc::new(TestSubscriber {
             state_changes: state_changes_clone,
         });
@@ -166,5 +169,112 @@ mod tests {
         // then
         // Even though PanicReducer panics, NormalReducer should still process actions
         assert_eq!(store.get_state(), 3);
+    }
+
+    #[test]
+    fn test_fn_reducer_basic() {
+        // given
+        let reducer =
+            FnReducer::from(|state: &i32, action: &i32| DispatchOp::Dispatch(state + action, None));
+        let store = StoreBuilder::new_with_reducer(Box::new(reducer)).build().unwrap();
+
+        // when
+        store.dispatch(5).unwrap();
+        store.dispatch(3).unwrap();
+        store.stop();
+
+        // then
+        assert_eq!(store.get_state(), 8); // 0 + 5 + 3 = 8
+    }
+
+    #[test]
+    fn test_fn_reducer_with_effect() {
+        // given
+        #[derive(Clone)]
+        enum Action {
+            AddWithEffect(i32),
+            Add(i32),
+        }
+
+        let reducer = FnReducer::from(|state: &i32, action: &Action| {
+            match action {
+                Action::AddWithEffect(i) => {
+                    let new_state = state + i;
+                    let effect = Effect::Action(Action::Add(40)); // Effect that adds 40 more
+                    DispatchOp::Dispatch(new_state, Some(effect))
+                }
+                Action::Add(i) => {
+                    let new_state = state + i;
+                    DispatchOp::Dispatch(new_state, None)
+                }
+            }
+        });
+        let store = StoreBuilder::new_with_reducer(Box::new(reducer)).build().unwrap();
+
+        // when
+        store.dispatch(Action::AddWithEffect(2)).unwrap();
+        thread::sleep(std::time::Duration::from_millis(1000)); // Wait for effect to be processed
+        store.stop();
+
+        // then
+        // Initial state(0) + action(2) + effect(40) = 42
+        assert_eq!(store.get_state(), 42);
+    }
+
+    #[test]
+    fn test_fn_reducer_keep_state() {
+        // given
+        let reducer = FnReducer::from(|state: &i32, action: &i32| {
+            if *action < 0 {
+                // Keep current state for negative actions
+                DispatchOp::Keep(*state, None)
+            } else {
+                DispatchOp::Dispatch(state + action, None)
+            }
+        });
+        let store = StoreBuilder::new_with_reducer(Box::new(reducer)).build().unwrap();
+
+        // Track state changes
+        let state_changes = Arc::new(Mutex::new(Vec::new()));
+        let state_changes_clone = state_changes.clone();
+
+        let subscriber = Arc::new(TestSubscriber {
+            state_changes: state_changes_clone,
+        });
+        store.add_subscriber(subscriber);
+
+        // when
+        store.dispatch(5).unwrap(); // Should change state
+        store.dispatch(-3).unwrap(); // Should keep state
+        store.dispatch(2).unwrap(); // Should change state
+        store.stop();
+
+        // then
+        assert_eq!(store.get_state(), 7); // 0 + 5 + 2 = 7
+        let changes = state_changes.lock().unwrap();
+        assert_eq!(&*changes, &vec![5, 7]); // Only two state changes should be recorded
+    }
+
+    #[test]
+    fn test_multiple_fn_reducers() {
+        // given
+        let add_reducer =
+            FnReducer::from(|state: &i32, action: &i32| DispatchOp::Dispatch(state + action, None));
+        let double_reducer =
+            FnReducer::from(|state: &i32, _action: &i32| DispatchOp::Dispatch(state * 2, None));
+
+        let store = StoreBuilder::new()
+            .with_reducer(Box::new(add_reducer))
+            .add_reducer(Box::new(double_reducer))
+            .build()
+            .unwrap();
+
+        // when
+        store.dispatch(3).unwrap(); // (((0)  +3) *2) = 6
+        store.dispatch(15).unwrap(); // (((6) +15) *2) = 42
+        store.stop();
+
+        // then
+        assert_eq!(store.get_state(), 42);
     }
 }

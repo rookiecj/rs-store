@@ -582,6 +582,7 @@ where
         // unlock pool
         if let Some(pool) = pool_took {
             if cfg!(dev) {
+                // wait forever
                 pool.shutdown_join();
             } else {
                 pool.shutdown_join_timeout(Duration::from_secs(3));
@@ -827,7 +828,7 @@ mod tests {
         store.dispatch(EffectAction::ActionProduceEffect(42));
 
         // give time to the effect
-        thread::sleep(Duration::from_secs(1));
+        thread::sleep(Duration::from_millis(1000));
         store.stop();
 
         assert_eq!(store.get_state(), 43);

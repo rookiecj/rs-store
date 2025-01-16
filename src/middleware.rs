@@ -371,7 +371,7 @@ mod tests {
         assert_eq!(store.get_state(), 0);
 
         // give time to the effect
-        thread::sleep(Duration::from_secs(1));
+        thread::sleep(Duration::from_millis(1000));
         store.stop();
 
         // the state should be changed
