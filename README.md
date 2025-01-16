@@ -30,66 +30,45 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-rs-store = "0.20.0"
+rs-store = "0.21.0"
 ```
 
 with the `notify-channel` feature:
 
 ```toml
 [dependencies]
-rs-store = { version = "0.20.0", features = ["notify-channel"] }
+rs-store = { version = "0.21.0", features = ["notify-channel"] }
 ```
 
 ## Quick Start
 
 ```rust
-use rs_store::{Store, CalcState, CalcAction, CalcReducer, CalcSubscriber};
-use std::{thread, sync::Arc};
+use std::sync::Arc;
+use rs_store::{DispatchOp, Dispatcher, FnReducer, FnSubscriber, StoreBuilder};
 
-impl Reducer<CalcState> for CalcReducer {
-    fn reduce(&self, state: &CalcState, action: &CalcAction) -> DispatchOp<CalcState, CalcAction> {
-        match action {
-            CalcAction::Add(value) => {
-                println!("Adding value: {}", value);
-                DispatchOp::Dispatch(
-                    CalcState {
-                        value: state.value + value,
-                    },
-                    None,
-                )
-            }
-            CalcAction::Subtract(value) => {
-                println!("Subtracting value: {}", value);
-                DispatchOp::Dispatch(
-                    CalcState {
-                        value: state.value - value,
-                    },
-                    None,
-                )
-            }
-        }
-    }
-}
+pub fn main() {
+    // new store with reducer
+    let store = StoreBuilder::default()
+        .with_reducer(Box::new(FnReducer::from(|state: &i32, action: &i32| {
+            println!("reducer: {} + {}", state, action);
+            DispatchOp::Dispatch(state + action, None)
+        })))
+        .build()
+        .unwrap();
 
-fn main() {
-    // Initialize store with default reducer
-    let store = Store::<CalcState, CalcAction>::new(Box::new(CalcReducer::default()));
+    // add subscriber
+    store.add_subscriber(Arc::new(FnSubscriber::from(|state: &i32, _action: &i32| {
+        println!("subscriber: state: {}", state);
+    })));
 
-    // Add subscriber
-    store.add_subscriber(Arc::new(CalcSubscriber::default()));
+    // dispatch actions
+    store.dispatch(41);
+    store.dispatch(1);
 
-    // Dispatch action
-    store.dispatch(CalcAction::Add(1));
-
-    thread::sleep(std::time::Duration::from_secs(1));
-    // add more subscriber
-    store.add_subscriber(Arc::new(CalcSubscriber::default()));
-
-    // Dispatch action
-    store.dispatch(CalcAction::Subtract(1));
-
-    // Clean up
+    // stop the store
     store.stop();
+
+    assert_eq!(store.get_state(), 42);
 }
 ```
 
@@ -113,7 +92,7 @@ The notification channel feature provides a dedicated channel for state notifica
 
 For detailed documentation, visit:
 
-- [API Documentation (docs.rs)](https://docs.rs/rs-store/0.20.0/rs_store/)
+- [API Documentation (docs.rs)](https://docs.rs/rs-store/0.21.0/rs_store/)
 - [Crate Page (crates.io)](https://crates.io/crates/rs-store)
 
 ## Implementation Status
@@ -121,6 +100,7 @@ For detailed documentation, visit:
 ### In Progress 🚧
 - Latest state notification for new subscribers
 - [x] Notification scheduler (CurrentThread, ThreadPool)
+- [ ] Stop store after all effects are scheduled
 - Stream-based pull model
 
 ## Contributing
