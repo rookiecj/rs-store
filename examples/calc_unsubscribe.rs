@@ -1,8 +1,8 @@
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-use rs_store::{DispatchOp, Dispatcher};
-use rs_store::{Reducer, Store, Subscriber};
+use rs_store::{DispatchOp, StoreBuilder};
+use rs_store::{Reducer, Subscriber};
 
 #[derive(Debug, Clone)]
 enum CalcAction {
@@ -107,16 +107,15 @@ impl Subscriber<CalcState, CalcAction> for CalcSubscriber {
 pub fn main() {
     println!("Hello, Unsubscribe!");
 
-    let store = Store::<CalcState, CalcAction>::new_with_name(
-        Box::new(CalcReducer::default()),
-        CalcState::default(),
-        "store-unsubscribe".into(),
-    )
-    .unwrap();
+    let store = StoreBuilder::new_with_reducer(Box::new(CalcReducer::default()))
+        .with_state(CalcState::default())
+        .with_name("store-unsubscribe".into())
+        .build()
+        .unwrap();
 
     println!("add subscriber");
     store.add_subscriber(Arc::new(CalcSubscriber::default()));
-    store.dispatch(CalcAction::Add(1));
+    let _ = store.dispatch(CalcAction::Add(1));
 
     let store_clone = store.clone();
     let handle = thread::spawn(move || {
@@ -125,7 +124,7 @@ pub fn main() {
         // subscribe
         println!("add more subscriber");
         let subscription = store_clone.add_subscriber(Arc::new(CalcSubscriber::new(1)));
-        store_clone.dispatch(CalcAction::Subtract(1));
+        let _ = store_clone.dispatch(CalcAction::Subtract(1));
         subscription
     });
 
@@ -135,7 +134,7 @@ pub fn main() {
     subscription.unsubscribe();
 
     println!("Send 42...");
-    store.dispatch(CalcAction::Add(42));
+    let _ = store.dispatch(CalcAction::Add(42));
 
     store.stop();
 

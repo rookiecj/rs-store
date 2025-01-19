@@ -13,10 +13,19 @@ readme = "README.md"
 keywords = ["redux", "store", "rust", "state", "management"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[profile.release]
+strip = "debuginfo"
+#codegen-units = 1   # Reduce number of codegen units to increase optimizations.
+# note: only 'staticlib', 'bin', and 'cdylib' outputs are supported with LTO
+#lto = true          # Enable Link Time Optimization
+#opt-level = 3 # All optimizations # https://doc.rust-lang.org/cargo/reference/profiles.html#opt-level
+# panic = 'abort'     # Abort on panic
+debug = true # Enable debug symbols. For example, we can use `dwarfdump` to check crash traces.
+
 [features]
 notify-channel = []
 
 [dependencies]
-thiserror = "1.0.58"
+thiserror = "1.0"
 crossbeam = "0.8"
 rusty_pool = { version = "0.7" }

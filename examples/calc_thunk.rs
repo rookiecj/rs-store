@@ -1,8 +1,8 @@
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 
-use rs_store::{DispatchOp, Dispatcher};
-use rs_store::{Reducer, Store, Subscriber};
+use rs_store::{DispatchOp, Dispatcher, StoreBuilder};
+use rs_store::{Reducer, Subscriber};
 
 #[derive(Debug, Clone)]
 enum CalcAction {
@@ -123,21 +123,24 @@ fn get_subtract_thunk(
 pub fn main() {
     println!("Hello, Thunk!");
 
-    let store = Store::<CalcState, CalcAction>::new_with_name(
-        Box::new(CalcReducer::default()),
-        CalcState::default(),
-        "store-thunk".into(),
-    )
-    .unwrap();
+    // create a thunk somewhere else
+    let lock_done = Arc::new(Mutex::new(false));
+    let cond_done: Arc<Condvar> = Arc::new(Condvar::new());
+    let subtract_thunk = get_subtract_thunk(cond_done.clone(), 1);
+
+    let store = StoreBuilder::new_with_reducer(Box::new(CalcReducer::default()))
+        .with_state(CalcState::default())
+        .with_name("store-thunk".into())
+        .build()
+        .unwrap();
 
     store.add_subscriber(Arc::new(CalcSubscriber::default()));
     store.dispatch(CalcAction::Add(1));
 
-    let lock_done = Arc::new(Mutex::new(false));
-    let cond_done: Arc<Condvar> = Arc::new(Condvar::new());
-    let subtract_thunk = get_subtract_thunk(cond_done.clone(), 1);
+    // send thunk to store
     store.dispatch_thunk(subtract_thunk);
 
+    // wait for thunk to finish
     drop(cond_done.wait(lock_done.lock().unwrap()).unwrap());
 
     store.stop();

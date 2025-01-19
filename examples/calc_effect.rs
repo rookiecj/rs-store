@@ -1,8 +1,8 @@
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-use rs_store::{DispatchOp, Dispatcher, Effect, EffectResult};
-use rs_store::{Reducer, Store, Subscriber};
+use rs_store::{DispatchOp, Dispatcher, Effect, EffectResult, StoreBuilder};
+use rs_store::{Reducer, Subscriber};
 
 #[derive(Debug, Clone)]
 enum CalcAction {
@@ -124,15 +124,14 @@ fn subtract_effect_fn(_i: i32) -> Box<dyn FnOnce() -> EffectResult + Send> {
 pub fn main() {
     println!("Hello, Effect!");
 
-    let store = Store::<CalcState, CalcAction>::new_with_name(
-        Box::new(CalcReducer::default()),
-        CalcState::default(),
-        "store-effect".into(),
-    )
-    .unwrap();
+    let store = StoreBuilder::new_with_reducer(Box::new(CalcReducer::default()))
+        .with_state(CalcState::default())
+        .with_name("store-effect".into())
+        .build()
+        .unwrap();
 
     store.add_subscriber(Arc::new(CalcSubscriber::default()));
-    store.dispatch(CalcAction::AddWillProduceThunk(1));
+    let _ = store.dispatch(CalcAction::AddWillProduceThunk(1));
 
     store.stop();
 }

@@ -1,8 +1,8 @@
 use std::sync::Arc;
 use std::thread;
 
-use rs_store::{DispatchOp, Dispatcher};
-use rs_store::{FnReducer, FnSubscriber, Store};
+use rs_store::{DispatchOp, StoreBuilder};
+use rs_store::{FnReducer, FnSubscriber};
 
 #[derive(Debug, Clone)]
 enum CalcAction {
@@ -58,14 +58,17 @@ fn calc_subscriber(state: &CalcState, action: &CalcAction) {
 pub fn main() {
     println!("Hello, reduce function !");
 
-    let store = Store::<CalcState, CalcAction>::new(Box::new(FnReducer::from(calc_reducer)));
+    let store = StoreBuilder::new_with_reducer(Box::new(FnReducer::from(calc_reducer)))
+        .with_name("store-reduce-fn".into())
+        .build()
+        .unwrap();
 
     store.add_subscriber(Arc::new(FnSubscriber::from(calc_subscriber)));
-    store.dispatch(CalcAction::Add(1));
+    let _ = store.dispatch(CalcAction::Add(1));
 
     thread::sleep(std::time::Duration::from_secs(1));
     store.add_subscriber(Arc::new(FnSubscriber::from(calc_subscriber)));
-    store.dispatch(CalcAction::Subtract(1));
+    let _ = store.dispatch(CalcAction::Subtract(1));
 
     store.stop();
 }
