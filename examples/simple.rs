@@ -1,5 +1,5 @@
-use std::sync::Arc;
 use rs_store::{DispatchOp, Dispatcher, FnReducer, FnSubscriber, StoreBuilder};
+use std::sync::Arc;
 
 pub fn main() {
     // new store with reducer
@@ -12,9 +12,11 @@ pub fn main() {
         .unwrap();
 
     // add subscriber
-    store.add_subscriber(Arc::new(FnSubscriber::from(|state: &i32, _action: &i32| {
-        println!("subscriber: state: {}", state);
-    })));
+    store.add_subscriber(Arc::new(FnSubscriber::from(
+        |state: &i32, _action: &i32| {
+            println!("subscriber: state: {}", state);
+        },
+    )));
 
     // dispatch actions
     store.dispatch(41);

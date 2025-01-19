@@ -1,11 +1,11 @@
+use crate::metrics::Metrics;
+use crate::ActionOp;
 use crossbeam::channel::{self, Receiver, Sender, TrySendError};
 use std::marker::PhantomData;
 use std::sync::Arc;
-use crate::metrics::Metrics;
-use crate::ActionOp;
 
 /// the Backpressure policy
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Default)]
 pub enum BackpressurePolicy {
     /// Block the sender when the queue is full
     #[default]
@@ -56,9 +56,8 @@ where
                     // Remove the oldest item
                     let _old = self.receiver.try_recv();
                     if let Some(metrics) = &self.metrics {
-                        match _old.as_ref() {
-                            Ok(ActionOp::Action(action)) => metrics.action_dropped(Some(action)),
-                            _ => {}
+                        if let Ok(ActionOp::Action(action)) = _old.as_ref() {
+                            metrics.action_dropped(Some(action));
                         }
                     }
                     match self.sender.try_send(item).map_err(SenderError::TrySendError) {
@@ -73,24 +72,18 @@ where
                 // Try to send the item, if the queue is full, just ignore the item (drop the latest)
                 match self.sender.try_send(item).map_err(SenderError::TrySendError) {
                     Ok(_) => Ok(self.receiver.len() as i64),
-                    Err(e) => {
+                    Err(err) => {
                         #[cfg(dev)]
                         eprintln!("store: dropping the latest item in channel");
                         if let Some(metrics) = &self.metrics {
-                            match &e {
-                                SenderError::TrySendError(inner_err) => match inner_err {
-                                    TrySendError::Full(item) => match item {
-                                        ActionOp::Action(action) => {
-                                            metrics.action_dropped(Some(action))
-                                        }
-                                        _ => {}
-                                    },
-                                    _ => {}
-                                },
-                                _ => {}
+                            if let SenderError::TrySendError(TrySendError::Full(
+                                ActionOp::Action(action_drop),
+                            )) = &err
+                            {
+                                metrics.action_dropped(Some(action_drop));
                             }
                         }
-                        Err(e)
+                        Err(err)
                     }
                 }
             }
@@ -165,7 +158,6 @@ where
             },
         )
     }
-
 }
 
 #[cfg(test)]

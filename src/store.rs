@@ -46,6 +46,7 @@ where
 }
 
 /// Store is a simple implementation of a Redux store
+#[allow(clippy::type_complexity)]
 pub struct Store<State, Action>
 where
     State: Default + Send + Sync + Clone + 'static,
@@ -420,7 +421,7 @@ where
                 middleware_executed += 1;
                 match middleware.lock().unwrap().before_effect(
                     action,
-                    &state,
+                    state,
                     effects,
                     dispatcher.clone(),
                 ) {
@@ -496,7 +497,7 @@ where
                 middleware_executed += 1;
                 match middleware.lock().unwrap().before_dispatch(
                     action,
-                    &next_state,
+                    next_state,
                     dispatcher.clone(),
                 ) {
                     Ok(MiddlewareOp::ContinueAction) => {
@@ -536,7 +537,7 @@ where
             {
                 let subscribers = self.subscribers.lock().unwrap().clone();
                 for subscriber in subscribers.iter() {
-                    subscriber.on_notify(&next_state, action)
+                    subscriber.on_notify(next_state, action)
                 }
                 let duration = _notify_start.elapsed();
                 self.metrics.subscriber_notified(Some(action), subscribers.len(), duration);

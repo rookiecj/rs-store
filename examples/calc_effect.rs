@@ -99,9 +99,7 @@ impl Subscriber<CalcState, CalcAction> for CalcSubscriber {
     }
 }
 
-fn subtract_effect_thunk(
-    i: i32,
-) -> Box<dyn FnOnce(Box<dyn Dispatcher<CalcAction>>) + Send> {
+fn subtract_effect_thunk(i: i32) -> Box<dyn FnOnce(Box<dyn Dispatcher<CalcAction>>) + Send> {
     Box::new(move |dispatcher| {
         println!("effect: working on long running task....");
         thread::sleep(std::time::Duration::from_secs(1));

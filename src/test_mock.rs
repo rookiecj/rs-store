@@ -101,7 +101,7 @@ where
                 dyn Fn(
                         &Action,
                         &State,
-                    Arc<dyn Dispatcher<Action>>,
+                        Arc<dyn Dispatcher<Action>>,
                     ) -> Result<MiddlewareOp, StoreError>
                     + Send
                     + Sync,

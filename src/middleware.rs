@@ -467,16 +467,14 @@ mod tests {
                                     // it is almost safe to cast.
                                     let new_result = new_value.downcast::<i32>().unwrap();
                                     // and can determine which action can be dispatched
-                                    dispatcher.dispatch(EffectAction::ResponseForTheEffect(
-                                        *new_result,
-                                    ));
+                                    dispatcher
+                                        .dispatch(EffectAction::ResponseForTheEffect(*new_result));
                                 }
                                 Err(e) => {
                                     println!("Error: {:?}", e);
                                 }
                             }
-                        }),
-                        );
+                        }));
                     }
                     _ => {
                         assert!(false);
