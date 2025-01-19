@@ -9,13 +9,13 @@ setup:	## setup
 	cargo install cargo-tarpaulin
 
 build:	## build
-	cargo build --lib
+	RUSTFLAGS="-D warnings" cargo build --lib
 
 build-dev: ## build for development
-	cargo build --lib --profile dev
+	RUSTFLAGS="-D warnings" cargo build --lib --profile dev
 
 build-full: ## build for release
-	cargo build --lib --features full
+	RUSTFLAGS="-D warnings" cargo build --lib --features full
 
 
 clean:	## clean
@@ -63,14 +63,14 @@ doc:	## doc
 
 .PHONY: examples
 examples: ## example all
-	cargo run --example simple
-	cargo run --example calc_basic
-	cargo run --example calc_fn_basic
-	cargo run --example calc_concurrent
-	cargo run --example calc_unsubscribe
-	cargo run --example calc_clear_subscribers
-	cargo run --example calc_thunk
-	cargo run --example calc_basic_builder
+	RUSTFLAGS="-D warnings" cargo run --example simple
+	RUSTFLAGS="-D warnings" cargo run --example calc_basic
+	RUSTFLAGS="-D warnings" cargo run --example calc_fn_basic
+	RUSTFLAGS="-D warnings" cargo run --example calc_concurrent
+	RUSTFLAGS="-D warnings" cargo run --example calc_unsubscribe
+	RUSTFLAGS="-D warnings" cargo run --example calc_clear_subscribers
+	RUSTFLAGS="-D warnings" cargo run --example calc_thunk
+	RUSTFLAGS="-D warnings" cargo run --example calc_basic_builder
 
 VERSION := $(shell cargo pkgid -p "rs-store" | cut -d\# -f2 | cut -d@ -f2)
 
