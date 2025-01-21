@@ -49,7 +49,7 @@ where
 #[allow(clippy::type_complexity)]
 pub struct Store<State, Action>
 where
-    State: Default + Send + Sync + Clone + 'static,
+    State: Send + Sync + Clone + 'static,
     Action: Send + Sync + Clone + 'static,
 {
     #[allow(dead_code)]
@@ -77,7 +77,7 @@ impl Subscription for SubscriptionImpl {
 
 impl<State, Action> Store<State, Action>
 where
-    State: Default + Send + Sync + Clone + 'static,
+    State: Send + Sync + Clone + 'static,
     Action: Send + Sync + Clone + 'static,
 {
     /// create a new store with a reducer
@@ -284,7 +284,7 @@ where
         on_change: F,
     ) -> Box<dyn Subscription>
     where
-        State: Default + Send + Sync + Clone,
+        State: Send + Sync + Clone,
         Action: Send + Sync + Clone,
         Select: Selector<State, Output> + Send + Sync + 'static,
         Output: PartialEq + Clone + Send + Sync + 'static,
@@ -593,7 +593,7 @@ where
 /// if you want to stop the dispatcher, call the stop method
 impl<State, Action> Drop for Store<State, Action>
 where
-    State: Default + Send + Sync + Clone + 'static,
+    State: Send + Sync + Clone + 'static,
     Action: Send + Sync + Clone + 'static,
 {
     fn drop(&mut self) {

@@ -1,7 +1,7 @@
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-use rs_store::{DispatchOp, Dispatcher, StoreBuilder};
+use rs_store::{DispatchOp, StoreBuilder};
 use rs_store::{Reducer, Subscriber};
 
 #[derive(Debug, Clone)]
@@ -94,18 +94,19 @@ impl Subscriber<CalcState, CalcAction> for CalcSubscriber {
 pub fn main() {
     println!("Hello, Builder!");
 
-    let store = StoreBuilder::new_with_reducer(Box::new(CalcReducer::default()))
-        .with_name("calc".to_string())
-        .build()
-        .unwrap();
+    let store =
+        StoreBuilder::new_with_reducer(CalcState::default(), Box::new(CalcReducer::default()))
+            .with_name("calc".to_string())
+            .build()
+            .unwrap();
     println!("add subscriber");
     store.add_subscriber(Arc::new(CalcSubscriber::default()));
-    store.dispatch(CalcAction::Add(1));
+    let _ = store.dispatch(CalcAction::Add(1));
 
     thread::sleep(std::time::Duration::from_secs(1));
     println!("add more subscriber");
     store.add_subscriber(Arc::new(CalcSubscriber::default()));
-    store.dispatch(CalcAction::Subtract(1));
+    let _ = store.dispatch(CalcAction::Subtract(1));
 
     // stop the store
     store.stop();

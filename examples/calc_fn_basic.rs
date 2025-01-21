@@ -58,10 +58,13 @@ fn calc_subscriber(state: &CalcState, action: &CalcAction) {
 pub fn main() {
     println!("Hello, reduce function !");
 
-    let store = StoreBuilder::new_with_reducer(Box::new(FnReducer::from(calc_reducer)))
-        .with_name("store-reduce-fn".into())
-        .build()
-        .unwrap();
+    let store = StoreBuilder::new_with_reducer(
+        CalcState::default(),
+        Box::new(FnReducer::from(calc_reducer)),
+    )
+    .with_name("store-reduce-fn".into())
+    .build()
+    .unwrap();
 
     store.add_subscriber(Arc::new(FnSubscriber::from(calc_subscriber)));
     let _ = store.dispatch(CalcAction::Add(1));

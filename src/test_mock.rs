@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 #[derive(Clone)]
 pub struct MockReducer<State, Action>
 where
-    State: Default + Send + Sync + Clone,
+    State: Send + Sync + Clone,
     Action: Send + Sync + Clone,
 {
     pub reduce_fn:
@@ -16,7 +16,7 @@ where
 
 impl<State, Action> MockReducer<State, Action>
 where
-    State: Default + Send + Sync + Clone,
+    State: Send + Sync + Clone,
     Action: Send + Sync + Clone,
 {
     pub fn new() -> Self {
@@ -40,7 +40,7 @@ where
 
 impl<State, Action> Reducer<State, Action> for MockReducer<State, Action>
 where
-    State: Default + Send + Sync + Clone + 'static,
+    State: Send + Sync + Clone + 'static,
     Action: Send + Sync + Clone + 'static,
 {
     fn reduce(&self, state: &State, action: &Action) -> DispatchOp<State, Action> {
@@ -51,7 +51,7 @@ where
 
 pub struct MockSubscriber<State, Action>
 where
-    State: Default + Send + Sync + Clone + 'static,
+    State: Send + Sync + Clone + 'static,
     Action: Send + Sync + Clone + 'static,
 {
     pub on_notify_fn: Arc<Mutex<Box<dyn Fn(&State, &Action) + Send + Sync + 'static>>>,
@@ -60,7 +60,7 @@ where
 
 impl<State, Action> MockSubscriber<State, Action>
 where
-    State: Default + Send + Sync + Clone + 'static,
+    State: Send + Sync + Clone + 'static,
     Action: Send + Sync + Clone + 'static,
 {
     pub fn new() -> Self {
@@ -81,7 +81,7 @@ where
 
 impl<State, Action> Subscriber<State, Action> for MockSubscriber<State, Action>
 where
-    State: Default + Send + Sync + Clone + 'static,
+    State: Send + Sync + Clone + 'static,
     Action: Send + Sync + Clone + 'static,
 {
     fn on_notify(&self, state: &State, action: &Action) {
@@ -92,7 +92,7 @@ where
 
 pub struct MockMiddleware<State, Action>
 where
-    State: Default + Send + Sync + Clone + 'static,
+    State: Send + Sync + Clone + 'static,
     Action: Send + Sync + Clone + 'static,
 {
     pub before_reduce_fn: Arc<
@@ -128,7 +128,7 @@ where
 
 impl<State, Action> MockMiddleware<State, Action>
 where
-    State: Default + Send + Sync + Clone + 'static,
+    State: Send + Sync + Clone + 'static,
     Action: Send + Sync + Clone + 'static,
 {
     pub fn new() -> Self {
@@ -147,7 +147,7 @@ where
 
 impl<State, Action> Middleware<State, Action> for MockMiddleware<State, Action>
 where
-    State: Default + Send + Sync + Clone + 'static,
+    State: Send + Sync + Clone + 'static,
     Action: Send + Sync + Clone + 'static,
 {
     fn before_reduce(
@@ -227,7 +227,7 @@ mod tests {
     fn test_mock_subscriber() {
         // given
         let mock_subscriber = Arc::new(MockSubscriber::new());
-        let store = StoreBuilder::new()
+        let store = StoreBuilder::new(0)
             .with_reducer(Box::new(TestReducer))
             .with_name("test_store".to_string())
             .build()
@@ -254,7 +254,7 @@ mod tests {
             },
         ));
 
-        let store = StoreBuilder::new()
+        let store = StoreBuilder::new(0)
             .with_reducer(Box::new(TestReducer))
             .with_name("test_store".to_string())
             .build()
@@ -275,7 +275,7 @@ mod tests {
         // given
         let mock_middleware = Arc::new(MockMiddleware::new());
 
-        let store = StoreBuilder::new()
+        let store = StoreBuilder::new(0)
             .with_reducer(Box::new(TestReducer))
             .with_name("test_store".to_string())
             .with_middleware(mock_middleware.clone())
@@ -313,7 +313,7 @@ mod tests {
             });
         }
 
-        let store = StoreBuilder::new()
+        let store = StoreBuilder::new(0)
             .with_reducer(Box::new(TestReducer))
             .with_name("test_store".to_string())
             .with_middleware(mock_middleware.clone())

@@ -122,11 +122,11 @@ fn subtract_effect_fn(_i: i32) -> Box<dyn FnOnce() -> EffectResult + Send> {
 pub fn main() {
     println!("Hello, Effect!");
 
-    let store = StoreBuilder::new_with_reducer(Box::new(CalcReducer::default()))
-        .with_state(CalcState::default())
-        .with_name("store-effect".into())
-        .build()
-        .unwrap();
+    let store =
+        StoreBuilder::new_with_reducer(CalcState::default(), Box::new(CalcReducer::default()))
+            .with_name("store-effect".into())
+            .build()
+            .unwrap();
 
     store.add_subscriber(Arc::new(CalcSubscriber::default()));
     let _ = store.dispatch(CalcAction::AddWillProduceThunk(1));

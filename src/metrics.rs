@@ -461,7 +461,7 @@ mod tests {
 
     #[test]
     fn test_count_metrics_basic() {
-        let store = StoreBuilder::new()
+        let store = StoreBuilder::new(0)
             .with_reducer(Box::new(TestReducer))
             .with_capacity(5)
             .with_policy(BackpressurePolicy::DropOldest)
@@ -488,7 +488,7 @@ mod tests {
     #[test]
     fn test_count_metrics_with_dropped_actions() {
         // given
-        let store = StoreBuilder::new()
+        let store = StoreBuilder::new(0)
             .with_reducer(Box::new(TestReducer))
             .with_capacity(2)
             .with_policy(BackpressurePolicy::DropOldest)
@@ -514,7 +514,7 @@ mod tests {
     fn test_count_metrics_with_middleware() {
         // given
         let middleware = Arc::new(TestMiddleware::new("test"));
-        let store = StoreBuilder::new()
+        let store = StoreBuilder::new(0)
             .with_reducer(Box::new(TestReducer))
             .with_capacity(5)
             .with_middleware(middleware)

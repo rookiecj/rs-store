@@ -5,7 +5,7 @@ use crate::Selector;
 /// Subscriber is a trait that can be implemented to receive notifications from the store.
 pub trait Subscriber<State, Action>
 where
-    State: Default + Send + Sync + Clone,
+    State: Send + Sync + Clone,
     Action: Send + Sync + Clone,
 {
     /// on_notify is called when the store is notified of an action.
@@ -21,7 +21,7 @@ pub trait Subscription: Send {
 pub struct FnSubscriber<F, State, Action>
 where
     F: Fn(&State, &Action),
-    State: Default + Send + Sync + Clone,
+    State: Send + Sync + Clone,
     Action: Send + Sync + Clone,
 {
     func: F,
@@ -32,7 +32,7 @@ where
 impl<F, State, Action> Subscriber<State, Action> for FnSubscriber<F, State, Action>
 where
     F: Fn(&State, &Action),
-    State: Default + Send + Sync + Clone,
+    State: Send + Sync + Clone,
     Action: Send + Sync + Clone,
 {
     fn on_notify(&self, state: &State, action: &Action) {
@@ -43,7 +43,7 @@ where
 impl<F, State, Action> From<F> for FnSubscriber<F, State, Action>
 where
     F: Fn(&State, &Action),
-    State: Default + Send + Sync + Clone,
+    State: Send + Sync + Clone,
     Action: Send + Sync + Clone,
 {
     fn from(func: F) -> Self {
@@ -59,7 +59,7 @@ where
 /// when the state changes, the selector subscriber will notify the subscriber.
 pub struct SelectorSubscriber<State, Action, Select, Output>
 where
-    State: Default + Send + Sync + Clone,
+    State: Send + Sync + Clone,
     Action: Send + Sync + Clone,
     Select: Selector<State, Output>,
 {
@@ -71,7 +71,7 @@ where
 
 impl<State, Action, Select, Output> SelectorSubscriber<State, Action, Select, Output>
 where
-    State: Default + Send + Sync + Clone,
+    State: Send + Sync + Clone,
     Action: Send + Sync + Clone,
     Select: Selector<State, Output>,
     Output: PartialEq + Clone,
@@ -92,7 +92,7 @@ where
 impl<State, Action, Select, Output> Subscriber<State, Action>
     for SelectorSubscriber<State, Action, Select, Output>
 where
-    State: Default + Send + Sync + Clone,
+    State: Send + Sync + Clone,
     Action: Send + Sync + Clone,
     Select: Selector<State, Output>,
     Output: PartialEq + Clone,

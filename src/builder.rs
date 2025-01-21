@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 pub struct StoreBuilder<State, Action>
 where
-    State: Default + Send + Sync + Clone + 'static,
+    State: Send + Sync + Clone + 'static,
     Action: Send + Sync + Clone + 'static,
 {
     name: String,
@@ -20,32 +20,15 @@ where
     middlewares: Vec<Arc<dyn Middleware<State, Action> + Send + Sync>>,
 }
 
-impl<State, Action> Default for StoreBuilder<State, Action>
-where
-    State: Default + Send + Sync + Clone + 'static,
-    Action: Send + Sync + Clone + 'static,
-{
-    fn default() -> Self {
-        StoreBuilder {
-            name: "store".to_string(),
-            state: Default::default(),
-            reducers: Vec::new(),
-            capacity: DEFAULT_CAPACITY,
-            policy: Default::default(),
-            middlewares: Vec::new(),
-        }
-    }
-}
-
 impl<State, Action> StoreBuilder<State, Action>
 where
-    State: Default + Send + Sync + Clone + 'static,
+    State: Send + Sync + Clone + 'static,
     Action: Send + Sync + Clone + 'static,
 {
-    pub fn new() -> Self {
+    pub fn new(state: State) -> Self {
         StoreBuilder {
             name: "store".to_string(),
-            state: Default::default(),
+            state,
             reducers: vec![],
             capacity: DEFAULT_CAPACITY,
             policy: Default::default(),
@@ -53,10 +36,13 @@ where
         }
     }
 
-    pub fn new_with_reducer(reducer: Box<dyn Reducer<State, Action> + Send + Sync>) -> Self {
+    pub fn new_with_reducer(
+        state: State,
+        reducer: Box<dyn Reducer<State, Action> + Send + Sync>,
+    ) -> Self {
         StoreBuilder {
             name: "store".to_string(),
-            state: Default::default(),
+            state,
             reducers: vec![reducer],
             capacity: DEFAULT_CAPACITY,
             policy: Default::default(),
@@ -165,13 +151,13 @@ mod tests {
 
     #[test]
     fn test_builder() {
-        let store = StoreBuilder::default().with_reducer(Box::new(TestReducer)).build();
+        let store = StoreBuilder::new(0).with_reducer(Box::new(TestReducer)).build();
         assert!(store.is_ok());
     }
 
     #[test]
     fn test_builder_with_name() {
-        let store = StoreBuilder::default()
+        let store = StoreBuilder::new(0)
             .with_reducer(Box::new(TestReducer))
             .with_name("test".to_string())
             .build();
@@ -180,7 +166,7 @@ mod tests {
 
     #[test]
     fn test_builder_with_reducers() {
-        let store = StoreBuilder::default()
+        let store = StoreBuilder::new(0)
             .with_reducers(vec![Box::new(TestReducer), Box::new(TestReducer)])
             .build();
         assert!(store.is_ok());
@@ -189,7 +175,7 @@ mod tests {
     #[test]
     fn test_builder_with_capacity() {
         let store =
-            StoreBuilder::default().with_reducer(Box::new(TestReducer)).with_capacity(100).build();
+            StoreBuilder::new(0).with_reducer(Box::new(TestReducer)).with_capacity(100).build();
         assert!(store.is_ok());
     }
 
@@ -216,7 +202,7 @@ mod tests {
 
     #[test]
     fn test_builder_with_middleware() {
-        let store = StoreBuilder::default()
+        let store = StoreBuilder::new(0)
             .with_reducer(Box::new(TestReducer))
             .with_middleware(Arc::new(TestMiddleware))
             .build();

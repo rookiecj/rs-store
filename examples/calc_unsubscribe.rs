@@ -107,11 +107,11 @@ impl Subscriber<CalcState, CalcAction> for CalcSubscriber {
 pub fn main() {
     println!("Hello, Unsubscribe!");
 
-    let store = StoreBuilder::new_with_reducer(Box::new(CalcReducer::default()))
-        .with_state(CalcState::default())
-        .with_name("store-unsubscribe".into())
-        .build()
-        .unwrap();
+    let store =
+        StoreBuilder::new_with_reducer(CalcState::default(), Box::new(CalcReducer::default()))
+            .with_name("store-unsubscribe".into())
+            .build()
+            .unwrap();
 
     println!("add subscriber");
     store.add_subscriber(Arc::new(CalcSubscriber::default()));

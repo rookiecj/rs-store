@@ -11,7 +11,7 @@ pub enum DispatchOp<State, Action> {
 /// Reducer reduces the state based on the action.
 pub trait Reducer<State, Action>
 where
-    State: Default + Send + Sync + Clone,
+    State: Send + Sync + Clone,
     Action: Send + Sync + 'static,
 {
     fn reduce(&self, state: &State, action: &Action) -> DispatchOp<State, Action>;
@@ -21,7 +21,7 @@ where
 pub struct FnReducer<F, State, Action>
 where
     F: Fn(&State, &Action) -> DispatchOp<State, Action>,
-    State: Default + Send + Sync + Clone,
+    State: Send + Sync + Clone,
     Action: Send + Sync + 'static,
 {
     func: F,
@@ -31,7 +31,7 @@ where
 impl<F, State, Action> Reducer<State, Action> for FnReducer<F, State, Action>
 where
     F: Fn(&State, &Action) -> DispatchOp<State, Action>,
-    State: Default + Send + Sync + Clone,
+    State: Send + Sync + Clone,
     Action: Send + Sync + 'static,
 {
     fn reduce(&self, state: &State, action: &Action) -> DispatchOp<State, Action> {
@@ -42,7 +42,7 @@ where
 impl<F, State, Action> From<F> for FnReducer<F, State, Action>
 where
     F: Fn(&State, &Action) -> DispatchOp<State, Action>,
-    State: Default + Send + Sync + Clone,
+    State: Send + Sync + Clone,
     Action: Send + Sync + 'static,
 {
     fn from(func: F) -> Self {
@@ -99,7 +99,7 @@ mod tests {
 
         // Create store with our test reducer
         let reducer = Box::new(PanicOnValueReducer { panic_on: 42 });
-        let store = StoreBuilder::new_with_reducer(reducer).build().unwrap();
+        let store = StoreBuilder::new_with_reducer(0, reducer).build().unwrap();
 
         // Track state changes
         let state_changes = Arc::new(Mutex::new(Vec::new()));
@@ -153,7 +153,7 @@ mod tests {
         }
 
         // Create store with both reducers
-        let store = StoreBuilder::new()
+        let store = StoreBuilder::new(0)
             .with_reducer(Box::new(PanicReducer))
             .add_reducer(Box::new(NormalReducer))
             .build()
@@ -176,7 +176,7 @@ mod tests {
         // given
         let reducer =
             FnReducer::from(|state: &i32, action: &i32| DispatchOp::Dispatch(state + action, None));
-        let store = StoreBuilder::new_with_reducer(Box::new(reducer)).build().unwrap();
+        let store = StoreBuilder::new_with_reducer(0, Box::new(reducer)).build().unwrap();
 
         // when
         store.dispatch(5).unwrap();
@@ -209,7 +209,7 @@ mod tests {
                 }
             }
         });
-        let store = StoreBuilder::new_with_reducer(Box::new(reducer)).build().unwrap();
+        let store = StoreBuilder::new_with_reducer(0, Box::new(reducer)).build().unwrap();
 
         // when
         store.dispatch(Action::AddWithEffect(2)).unwrap();
@@ -232,7 +232,7 @@ mod tests {
                 DispatchOp::Dispatch(state + action, None)
             }
         });
-        let store = StoreBuilder::new_with_reducer(Box::new(reducer)).build().unwrap();
+        let store = StoreBuilder::new_with_reducer(0, Box::new(reducer)).build().unwrap();
 
         // Track state changes
         let state_changes = Arc::new(Mutex::new(Vec::new()));
@@ -263,7 +263,7 @@ mod tests {
         let double_reducer =
             FnReducer::from(|state: &i32, _action: &i32| DispatchOp::Dispatch(state * 2, None));
 
-        let store = StoreBuilder::new()
+        let store = StoreBuilder::new(0)
             .with_reducer(Box::new(add_reducer))
             .add_reducer(Box::new(double_reducer))
             .build()

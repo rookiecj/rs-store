@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 pub fn main() {
     // new store with reducer
-    let store = StoreBuilder::default()
+    let store = StoreBuilder::new(0)
         .with_reducer(Box::new(FnReducer::from(|state: &i32, action: &i32| {
             println!("reducer: {} + {}", state, action);
             DispatchOp::Dispatch(state + action, None)
