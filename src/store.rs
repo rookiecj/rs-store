@@ -339,7 +339,7 @@ where
         if !self.middlewares.lock().unwrap().is_empty() {
             let middleware_start = Instant::now();
             let mut middleware_executed = 0;
-            for middleware in self.middlewares.lock().unwrap().iter().cloned() {
+            for middleware in self.middlewares.lock().unwrap().iter() {
                 middleware_executed += 1;
                 match middleware.before_reduce(action, &state, dispatcher.clone()) {
                     Ok(MiddlewareOp::ContinueAction) => {
@@ -417,7 +417,7 @@ where
         if !self.middlewares.lock().unwrap().is_empty() {
             let middleware_start = Instant::now();
             let mut middleware_executed = 0;
-            for middleware in self.middlewares.lock().unwrap().iter().cloned() {
+            for middleware in self.middlewares.lock().unwrap().iter() {
                 middleware_executed += 1;
                 match middleware.before_effect(action, state, effects, dispatcher.clone()) {
                     Ok(MiddlewareOp::ContinueAction) => {
@@ -488,7 +488,7 @@ where
         if !self.middlewares.lock().unwrap().is_empty() {
             let middleware_start = Instant::now();
             let mut middleware_executed = 0;
-            for middleware in self.middlewares.lock().unwrap().iter().cloned() {
+            for middleware in self.middlewares.lock().unwrap().iter() {
                 middleware_executed += 1;
                 match middleware.before_dispatch(action, next_state, dispatcher.clone()) {
                     Ok(MiddlewareOp::ContinueAction) => {
