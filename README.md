@@ -30,14 +30,14 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-rs-store = "0.21.0"
+rs-store = "0.22.0"
 ```
 
 with the `notify-channel` feature:
 
 ```toml
 [dependencies]
-rs-store = { version = "0.21.0", features = ["notify-channel"] }
+rs-store = { version = "0.22.0", features = ["notify-channel"] }
 ```
 
 ## Quick Start
@@ -72,27 +72,29 @@ pub fn main() {
 }
 ```
 
+## Backpressure feature
+
+Backpressure is a feature that allows you to control the rate of state updates to subscribers.
+it can be used to prevent slow subscribers from blocking state updates.
+
 ## Side Effects in Reducers
 
 Unlike traditional Redux implementations, rs-store allows reducers to produce side effects directly. This means reducers can produce asynchronous operations.
 
-This design choice provides more flexibility while maintaining predictable state management.
+## Middleware feature
+
+Middleware is a powerful feature that allows you to intercept and modify actions before they reach the reducer.
+it can be used to handle side effects, logging, metrics, etc.
 
 ## Notification Channel feature
 
-The notification channel feature provides a dedicated channel for state notifications to subscribers, separating the concerns of state updates and notification delivery. This can help improve performance and reliability by:
-
-- Decoupling state updates from notification delivery
-- Preventing slow subscribers from blocking state updates
-- Allowing independent backpressure handling for notifications
-- Supporting different threading models for notification delivery
-
+The notification channel feature provides a dedicated channel for state notifications to subscribers, separating the concerns of state updates and notification delivery. 
 
 ## Documentation
 
 For detailed documentation, visit:
 
-- [API Documentation (docs.rs)](https://docs.rs/rs-store/0.21.0/rs_store/)
+- [API Documentation (docs.rs)](https://docs.rs/rs-store/0.22.0/rs_store/)
 - [Crate Page (crates.io)](https://crates.io/crates/rs-store)
 
 ## Implementation Status
