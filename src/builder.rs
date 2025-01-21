@@ -6,7 +6,6 @@ use crate::Store;
 use crate::StoreError;
 use crate::DEFAULT_CAPACITY;
 use std::sync::Arc;
-use std::sync::Mutex;
 
 pub struct StoreBuilder<State, Action>
 where
@@ -18,7 +17,7 @@ where
     reducers: Vec<Box<dyn Reducer<State, Action> + Send + Sync>>,
     capacity: usize,
     policy: BackpressurePolicy,
-    middlewares: Vec<Arc<Mutex<dyn Middleware<State, Action> + Send + Sync>>>,
+    middlewares: Vec<Arc<dyn Middleware<State, Action> + Send + Sync>>,
 }
 
 impl<State, Action> Default for StoreBuilder<State, Action>
@@ -105,7 +104,7 @@ where
 
     pub fn with_middleware(
         mut self,
-        middleware: Arc<Mutex<dyn Middleware<State, Action> + Send + Sync>>,
+        middleware: Arc<dyn Middleware<State, Action> + Send + Sync>,
     ) -> Self {
         self.middlewares = vec![middleware];
         self
@@ -113,7 +112,7 @@ where
 
     pub fn with_middlewares(
         mut self,
-        middlewares: Vec<Arc<Mutex<dyn Middleware<State, Action> + Send + Sync>>>,
+        middlewares: Vec<Arc<dyn Middleware<State, Action> + Send + Sync>>,
     ) -> Self {
         self.middlewares = middlewares;
         self
@@ -121,7 +120,7 @@ where
 
     pub fn add_middleware(
         mut self,
-        middleware: Arc<Mutex<dyn Middleware<State, Action> + Send + Sync>>,
+        middleware: Arc<dyn Middleware<State, Action> + Send + Sync>,
     ) -> Self {
         self.middlewares.push(middleware);
         self
@@ -197,7 +196,7 @@ mod tests {
     struct TestMiddleware;
     impl Middleware<i32, i32> for TestMiddleware {
         fn before_reduce(
-            &mut self,
+            &self,
             _action: &i32,
             _state: &i32,
             _dispatcher: Arc<dyn Dispatcher<i32>>,
@@ -205,7 +204,7 @@ mod tests {
             Ok(MiddlewareOp::ContinueAction)
         }
         fn before_effect(
-            &mut self,
+            &self,
             _action: &i32,
             _state: &i32,
             _effects: &mut Vec<crate::Effect<i32>>,
@@ -219,7 +218,7 @@ mod tests {
     fn test_builder_with_middleware() {
         let store = StoreBuilder::default()
             .with_reducer(Box::new(TestReducer))
-            .with_middleware(Arc::new(Mutex::new(TestMiddleware)))
+            .with_middleware(Arc::new(TestMiddleware))
             .build();
         assert!(store.is_ok());
     }

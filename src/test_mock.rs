@@ -151,7 +151,7 @@ where
     Action: Send + Sync + Clone + 'static,
 {
     fn before_reduce(
-        &mut self,
+        &self,
         action: &Action,
         state: &State,
         dispatcher: Arc<dyn Dispatcher<Action>>,
@@ -161,7 +161,7 @@ where
     }
 
     fn before_effect(
-        &mut self,
+        &self,
         action: &Action,
         state: &State,
         effects: &mut Vec<Effect<Action>>,
@@ -273,7 +273,7 @@ mod tests {
     #[test]
     fn test_mock_middleware() {
         // given
-        let mock_middleware = Arc::new(Mutex::new(MockMiddleware::new()));
+        let mock_middleware = Arc::new(MockMiddleware::new());
 
         let store = StoreBuilder::new()
             .with_reducer(Box::new(TestReducer))
@@ -287,14 +287,8 @@ mod tests {
         store.stop();
 
         // then
-        assert_eq!(
-            *mock_middleware.lock().unwrap().before_reduce_call_count.lock().unwrap(),
-            1
-        );
-        assert_eq!(
-            *mock_middleware.lock().unwrap().before_effect_call_count.lock().unwrap(),
-            1
-        );
+        assert_eq!(*mock_middleware.before_reduce_call_count.lock().unwrap(), 1);
+        assert_eq!(*mock_middleware.before_effect_call_count.lock().unwrap(), 1);
     }
 
     #[test]
@@ -306,9 +300,9 @@ mod tests {
         let after_called = Arc::new(AtomicBool::new(false));
         let after_called_clone = after_called.clone();
 
-        let mock_middleware = Arc::new(Mutex::new(MockMiddleware::new()));
+        let mock_middleware = Arc::new(MockMiddleware::new());
         {
-            let middleware = mock_middleware.lock().unwrap();
+            let middleware = mock_middleware.clone();
             *middleware.before_reduce_fn.lock().unwrap() = Box::new(move |_, _, _| {
                 before_called_clone.store(true, Ordering::SeqCst);
                 Ok(MiddlewareOp::ContinueAction)
@@ -333,13 +327,7 @@ mod tests {
         // then
         assert!(before_called.load(Ordering::SeqCst));
         assert!(after_called.load(Ordering::SeqCst));
-        assert_eq!(
-            *mock_middleware.lock().unwrap().before_reduce_call_count.lock().unwrap(),
-            1
-        );
-        assert_eq!(
-            *mock_middleware.lock().unwrap().before_effect_call_count.lock().unwrap(),
-            1
-        );
+        assert_eq!(*mock_middleware.before_reduce_call_count.lock().unwrap(), 1);
+        assert_eq!(*mock_middleware.before_effect_call_count.lock().unwrap(), 1);
     }
 }
