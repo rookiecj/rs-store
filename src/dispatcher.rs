@@ -19,7 +19,7 @@ pub trait Dispatcher<Action: Send + Clone> {
 
 impl<State, Action> Dispatcher<Action> for Arc<Store<State, Action>>
 where
-    State: Default + Send + Sync + Clone + 'static,
+    State: Send + Sync + Clone + 'static,
     Action: Send + Sync + Clone + 'static,
 {
     fn dispatch(&self, action: Action) {

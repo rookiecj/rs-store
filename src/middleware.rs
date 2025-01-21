@@ -146,7 +146,7 @@ mod tests {
     #[test]
     fn test_logger_middleware() {
         let reducer = Box::new(TestReducer);
-        let store_result = StoreBuilder::new_with_reducer(reducer).build();
+        let store_result = StoreBuilder::new_with_reducer(0, reducer).build();
 
         assert!(store_result.is_ok());
 
@@ -175,7 +175,8 @@ mod tests {
     where
         State: std::fmt::Debug + Send + Sync,
         Action: std::fmt::Debug + Send + Sync,
-    {}
+    {
+    }
 
     struct ChainMiddlewareDoneAction;
     impl ChainMiddlewareDoneAction {
@@ -223,7 +224,7 @@ mod tests {
     #[test]
     fn test_middleware_done_action() {
         // given
-        let store = StoreBuilder::default()
+        let store = StoreBuilder::new(0)
             .with_reducer(Box::new(TestReducer))
             .add_middleware(Arc::new(ChainMiddlewareDoneAction::new()))
             .add_middleware(Arc::new(ChainMiddlewareContinueAction::new()))
@@ -242,7 +243,7 @@ mod tests {
 
     #[test]
     fn test_middleware_break_chain() {
-        let store = StoreBuilder::default()
+        let store = StoreBuilder::new(0)
             .with_reducer(Box::new(TestReducer))
             .add_middleware(Arc::new(ChainMiddlewareBreakChain::new()))
             .add_middleware(Arc::new(ChainMiddlewareContinueAction::new()))
@@ -325,7 +326,7 @@ mod tests {
     fn test_middleware_before_reduce() {
         // given
         let reducer = Box::new(MiddlewareReducer::new());
-        let store_result = StoreBuilder::new_with_reducer(reducer).build();
+        let store_result = StoreBuilder::new_with_reducer(0, reducer).build();
         assert!(store_result.is_ok());
         let store = store_result.unwrap();
 
@@ -460,7 +461,7 @@ mod tests {
     fn test_effect_middleware() {
         // given
         let reducer = Box::new(EffectReducer::new());
-        let store_result = StoreBuilder::new_with_reducer(reducer).build();
+        let store_result = StoreBuilder::new_with_reducer(EffectState::default(), reducer).build();
         assert!(store_result.is_ok());
 
         // when

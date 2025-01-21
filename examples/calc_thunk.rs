@@ -128,11 +128,11 @@ pub fn main() {
     let cond_done: Arc<Condvar> = Arc::new(Condvar::new());
     let subtract_thunk = get_subtract_thunk(cond_done.clone(), 1);
 
-    let store = StoreBuilder::new_with_reducer(Box::new(CalcReducer::default()))
-        .with_state(CalcState::default())
-        .with_name("store-thunk".into())
-        .build()
-        .unwrap();
+    let store =
+        StoreBuilder::new_with_reducer(CalcState::default(), Box::new(CalcReducer::default()))
+            .with_name("store-thunk".into())
+            .build()
+            .unwrap();
 
     store.add_subscriber(Arc::new(CalcSubscriber::default()));
     store.dispatch(CalcAction::Add(1));
