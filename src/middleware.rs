@@ -21,11 +21,7 @@ pub enum MiddlewareOp {
 ///
 /// if 'BreakChain' is returned, it breaks the middleware chain to 'before_xxx'
 /// when reducing: 'before_reduce1': 'BreakChain' -> skip 'before_reduce2' -> 'do_reduce'
-pub trait Middleware<State, Action>: Send + Sync
-where
-    State: Send + Sync,
-    Action: Send + Sync,
-{
+pub trait Middleware<State, Action> {
     /// called before reduce
     ///
     /// Arguments:
@@ -38,7 +34,7 @@ where
     /// - `MiddlewareOp::DoneAction` if you want to skip the dispatch
     #[allow(unused_variables)]
     fn before_reduce(
-        &mut self,
+        &self,
         action: &Action,
         state: &State,
         dispatcher: Arc<dyn Dispatcher<Action>>,
@@ -58,7 +54,7 @@ where
     /// - `MiddlewareOp::DoneAction` if you want to skip the dispatch
     #[allow(unused_variables)]
     fn before_effect(
-        &mut self,
+        &self,
         action: &Action,
         state: &State,
         effects: &mut Vec<Effect<Action>>,
@@ -78,7 +74,7 @@ where
     /// - `MiddlewareOp::DoneAction` if you want to skip the dispatch
     #[allow(unused_variables)]
     fn before_dispatch(
-        &mut self,
+        &self,
         action: &Action,
         state: &State,
         dispatcher: Arc<dyn Dispatcher<Action>>,
@@ -105,12 +101,14 @@ mod tests {
     }
 
     struct LoggerMiddleware {
-        logs: Vec<String>,
+        logs: Mutex<Vec<String>>,
     }
 
     impl LoggerMiddleware {
         fn new() -> Self {
-            Self { logs: vec![] }
+            Self {
+                logs: Mutex::new(vec![]),
+            }
         }
     }
 
@@ -120,19 +118,19 @@ mod tests {
         Action: std::fmt::Debug + Send + Sync,
     {
         fn before_reduce(
-            &mut self,
+            &self,
             action: &Action,
             state: &State,
             _dispatcher: Arc<dyn Dispatcher<Action>>,
         ) -> Result<MiddlewareOp, StoreError> {
             let log = format!("Before reduce - Action: {:?}, state: {:?}", action, state);
             println!("{}", log);
-            self.logs.push(log);
+            self.logs.lock().unwrap().push(log);
             Ok(MiddlewareOp::ContinueAction)
         }
 
         fn before_effect(
-            &mut self,
+            &self,
             action: &Action,
             state: &State,
             _effects: &mut Vec<Effect<Action>>,
@@ -140,7 +138,7 @@ mod tests {
         ) -> Result<MiddlewareOp, StoreError> {
             let log = format!("Before effect - Action: {:?}, state: {:?}", action, state);
             println!("{}", log);
-            self.logs.push(log);
+            self.logs.lock().unwrap().push(log);
             Ok(MiddlewareOp::ContinueAction)
         }
     }
@@ -154,7 +152,7 @@ mod tests {
 
         let store = store_result.unwrap();
         // Add logger middleware
-        let logger = Arc::new(Mutex::new(LoggerMiddleware::new()));
+        let logger = Arc::new(LoggerMiddleware::new());
         store.add_middleware(logger.clone());
 
         let _ = store.dispatch(1);
@@ -162,9 +160,9 @@ mod tests {
 
         // reduce: 1
         // effect: 1
-        assert_eq!(logger.lock().unwrap().logs.len(), 2);
-        assert!(logger.lock().unwrap().logs.first().unwrap().contains("Before reduce"));
-        assert!(logger.lock().unwrap().logs.last().unwrap().contains("Before effect"));
+        assert_eq!(logger.logs.lock().unwrap().len(), 2);
+        assert!(logger.logs.lock().unwrap().first().unwrap().contains("Before reduce"));
+        assert!(logger.logs.lock().unwrap().last().unwrap().contains("Before effect"));
     }
 
     struct ChainMiddlewareContinueAction;
@@ -177,27 +175,7 @@ mod tests {
     where
         State: std::fmt::Debug + Send + Sync,
         Action: std::fmt::Debug + Send + Sync,
-    {
-        // fn before_reduce(
-        //     &mut self,
-        //     _action: &Action,
-        //     _state: &State,
-        //     _dispatcher: Arc<dyn Dispatcher<Action>>,
-        // ) -> Result<MiddlewareOp, StoreError> {
-        //     Ok(MiddlewareOp::ContinueAction)
-        // }
-        //
-        // fn after_reduce(
-        //     &mut self,
-        //     _action: &Action,
-        //     _old_state: &State,
-        //     _new_state: &State,
-        //     _effects: &mut Vec<Effect<Action>>,
-        //     _dispatcher: Arc<dyn Dispatcher<Action>>,
-        // ) -> Result<MiddlewareOp, StoreError> {
-        //     Ok(MiddlewareOp::ContinueAction)
-        // }
-    }
+    {}
 
     struct ChainMiddlewareDoneAction;
     impl ChainMiddlewareDoneAction {
@@ -212,7 +190,7 @@ mod tests {
         Action: std::fmt::Debug + Send + Sync,
     {
         fn before_reduce(
-            &mut self,
+            &self,
             _action: &Action,
             _state: &State,
             _dispatcher: Arc<dyn Dispatcher<Action>>,
@@ -233,24 +211,13 @@ mod tests {
         Action: std::fmt::Debug + Send + Sync,
     {
         fn before_reduce(
-            &mut self,
+            &self,
             _action: &Action,
             _state: &State,
             _dispatcher: Arc<dyn Dispatcher<Action>>,
         ) -> Result<MiddlewareOp, StoreError> {
             Ok(MiddlewareOp::BreakChain)
         }
-
-        // fn after_reduce(
-        //     &mut self,
-        //     _action: &Action,
-        //     _old_state: &State,
-        //     _new_state: &State,
-        //     _effects: &mut Vec<Effect<Action>>,
-        //     _dispatcher: Arc<dyn Dispatcher<Action>>,
-        // ) -> Result<MiddlewareOp, StoreError> {
-        //     Ok(MiddlewareOp::ContinueAction)
-        // }
     }
 
     #[test]
@@ -258,8 +225,8 @@ mod tests {
         // given
         let store = StoreBuilder::default()
             .with_reducer(Box::new(TestReducer))
-            .add_middleware(Arc::new(Mutex::new(ChainMiddlewareDoneAction::new())))
-            .add_middleware(Arc::new(Mutex::new(ChainMiddlewareContinueAction::new())))
+            .add_middleware(Arc::new(ChainMiddlewareDoneAction::new()))
+            .add_middleware(Arc::new(ChainMiddlewareContinueAction::new()))
             .build();
         assert!(store.is_ok());
         let store = store.unwrap();
@@ -277,8 +244,8 @@ mod tests {
     fn test_middleware_break_chain() {
         let store = StoreBuilder::default()
             .with_reducer(Box::new(TestReducer))
-            .add_middleware(Arc::new(Mutex::new(ChainMiddlewareBreakChain::new())))
-            .add_middleware(Arc::new(Mutex::new(ChainMiddlewareContinueAction::new())))
+            .add_middleware(Arc::new(ChainMiddlewareBreakChain::new()))
+            .add_middleware(Arc::new(ChainMiddlewareContinueAction::new()))
             .build();
 
         assert!(store.is_ok());
@@ -322,8 +289,8 @@ mod tests {
 
     struct MiddlewareBeforeDispatch;
     impl MiddlewareBeforeDispatch {
-        fn new() -> Arc<Mutex<Self>> {
-            Arc::new(Mutex::new(Self {}))
+        fn new() -> Arc<Self> {
+            Arc::new(Self {})
         }
     }
     impl<State> Middleware<State, MiddlewareAction> for MiddlewareBeforeDispatch
@@ -331,7 +298,7 @@ mod tests {
         State: std::fmt::Debug + Send + Sync,
     {
         fn before_reduce(
-            &mut self,
+            &self,
             action: &MiddlewareAction,
             _state: &State,
             dispatcher: Arc<dyn Dispatcher<MiddlewareAction>>,
@@ -437,14 +404,18 @@ mod tests {
 
     struct EffectMiddleware;
     impl EffectMiddleware {
-        fn new() -> Arc<Mutex<Self>> {
-            Arc::new(Mutex::new(Self {}))
+        fn new() -> Self {
+            Self {}
         }
     }
-    impl Middleware<EffectState, EffectAction> for EffectMiddleware {
-        // after_reduce is called after the effect is produced
+
+    impl Middleware<EffectState, EffectAction> for EffectMiddleware
+    where
+        EffectState: Send + Sync,
+        EffectAction: Send + Sync,
+    {
         fn before_effect(
-            &mut self,
+            &self,
             _action: &EffectAction,
             _state: &EffectState,
             effects: &mut Vec<Effect<EffectAction>>,
@@ -494,7 +465,7 @@ mod tests {
 
         // when
         let store: Arc<crate::Store<EffectState, EffectAction>> = store_result.unwrap();
-        let effect_middleware = EffectMiddleware::new();
+        let effect_middleware = Arc::new(EffectMiddleware::new());
         store.add_middleware(effect_middleware.clone());
 
         let _ = store.dispatch(EffectAction::ActionProduceEffectFunction(42));

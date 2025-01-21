@@ -407,7 +407,7 @@ mod tests {
         BackpressurePolicy, DispatchOp, Dispatcher, Effect, Middleware, MiddlewareOp, Reducer,
         StoreBuilder,
     };
-    use std::sync::{Arc, Mutex};
+    use std::sync::Arc;
     use std::thread;
 
     struct TestReducer;
@@ -438,7 +438,7 @@ mod tests {
         Action: Send + Sync + Clone + 'static,
     {
         fn before_reduce(
-            &mut self,
+            &self,
             _action: &Action,
             _state: &State,
             _dispatcher: Arc<dyn Dispatcher<Action>>,
@@ -448,7 +448,7 @@ mod tests {
         }
 
         fn before_effect(
-            &mut self,
+            &self,
             _action: &Action,
             _state: &State,
             _effects: &mut Vec<Effect<Action>>,
@@ -513,7 +513,7 @@ mod tests {
     #[test]
     fn test_count_metrics_with_middleware() {
         // given
-        let middleware = Arc::new(Mutex::new(TestMiddleware::new("test")));
+        let middleware = Arc::new(TestMiddleware::new("test"));
         let store = StoreBuilder::new()
             .with_reducer(Box::new(TestReducer))
             .with_capacity(5)

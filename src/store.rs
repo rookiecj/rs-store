@@ -58,7 +58,7 @@ where
     pub(crate) reducers: Mutex<Vec<Box<dyn Reducer<State, Action> + Send + Sync>>>,
     pub(crate) subscribers: Arc<Mutex<Vec<Arc<dyn Subscriber<State, Action> + Send + Sync>>>>,
     pub(crate) dispatch_tx: Mutex<Option<SenderChannel<Action>>>,
-    middlewares: Mutex<Vec<Arc<Mutex<dyn Middleware<State, Action> + Send + Sync>>>>,
+    middlewares: Mutex<Vec<Arc<dyn Middleware<State, Action> + Send + Sync>>>,
     pub(crate) metrics: Arc<CountMetrics>,
     pub(crate) pool: Mutex<Option<ThreadPool>>,
     #[cfg(feature = "notify-channel")]
@@ -141,7 +141,7 @@ where
         name: String,
         capacity: usize,
         policy: BackpressurePolicy,
-        middlewares: Vec<Arc<Mutex<dyn Middleware<State, Action> + Send + Sync>>>,
+        middlewares: Vec<Arc<dyn Middleware<State, Action> + Send + Sync>>,
     ) -> Result<Arc<Store<State, Action>>, StoreError> {
         let metrics = Arc::new(CountMetrics::default());
         let (tx, rx) = BackpressureChannel::<Action>::pair_with_metrics(
@@ -339,9 +339,9 @@ where
         if !self.middlewares.lock().unwrap().is_empty() {
             let middleware_start = Instant::now();
             let mut middleware_executed = 0;
-            for middleware in self.middlewares.lock().unwrap().iter() {
+            for middleware in self.middlewares.lock().unwrap().iter().cloned() {
                 middleware_executed += 1;
-                match middleware.lock().unwrap().before_reduce(action, &state, dispatcher.clone()) {
+                match middleware.before_reduce(action, &state, dispatcher.clone()) {
                     Ok(MiddlewareOp::ContinueAction) => {
                         // continue dispatching the action
                     }
@@ -417,14 +417,9 @@ where
         if !self.middlewares.lock().unwrap().is_empty() {
             let middleware_start = Instant::now();
             let mut middleware_executed = 0;
-            for middleware in self.middlewares.lock().unwrap().iter() {
+            for middleware in self.middlewares.lock().unwrap().iter().cloned() {
                 middleware_executed += 1;
-                match middleware.lock().unwrap().before_effect(
-                    action,
-                    state,
-                    effects,
-                    dispatcher.clone(),
-                ) {
+                match middleware.before_effect(action, state, effects, dispatcher.clone()) {
                     Ok(MiddlewareOp::ContinueAction) => {
                         // do nothing
                     }
@@ -493,13 +488,9 @@ where
         if !self.middlewares.lock().unwrap().is_empty() {
             let middleware_start = Instant::now();
             let mut middleware_executed = 0;
-            for middleware in self.middlewares.lock().unwrap().iter() {
+            for middleware in self.middlewares.lock().unwrap().iter().cloned() {
                 middleware_executed += 1;
-                match middleware.lock().unwrap().before_dispatch(
-                    action,
-                    next_state,
-                    dispatcher.clone(),
-                ) {
+                match middleware.before_dispatch(action, next_state, dispatcher.clone()) {
                     Ok(MiddlewareOp::ContinueAction) => {
                         // do nothing
                     }
@@ -615,8 +606,8 @@ where
     }
 
     /// Add middleware
-    pub fn add_middleware(&self, middleware: Arc<Mutex<dyn Middleware<State, Action>>>) {
-        self.middlewares.lock().unwrap().push(middleware);
+    pub fn add_middleware(&self, middleware: Arc<dyn Middleware<State, Action> + Send + Sync>) {
+        self.middlewares.lock().unwrap().push(middleware.clone());
     }
 }
 
