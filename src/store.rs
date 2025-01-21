@@ -65,29 +65,6 @@ where
     notify_tx: Mutex<Option<SenderChannel<(State, Action)>>>,
 }
 
-impl<State, Action> Default for Store<State, Action>
-where
-    State: Default + Send + Sync + Clone + 'static,
-    Action: Send + Sync + Clone + 'static,
-{
-    fn default() -> Store<State, Action> {
-        Store {
-            name: "store".to_string(),
-            state: Default::default(),
-            reducers: Mutex::new(Vec::default()),
-            subscribers: Arc::new(Mutex::new(Vec::default())),
-            dispatch_tx: Mutex::new(None),
-            middlewares: Mutex::new(Vec::default()),
-            metrics: Arc::new(CountMetrics::default()),
-            pool: Mutex::new(Some(
-                rusty_pool::Builder::new().name("store-pool".to_string()).build(),
-            )),
-            #[cfg(feature = "notify-channel")]
-            notify_tx: Mutex::new(None),
-        }
-    }
-}
-
 struct SubscriptionImpl {
     unsubscribe: Box<dyn Fn() + Send + Sync>,
 }
@@ -106,8 +83,9 @@ where
     /// create a new store with a reducer
     pub fn new(
         reducer: Box<dyn Reducer<State, Action> + Send + Sync>,
+        state: State,
     ) -> Arc<Store<State, Action>> {
-        Self::new_with_state(reducer, Default::default())
+        Self::new_with_state(reducer, state)
     }
 
     /// create a new store with a reducer and an initial state
@@ -655,7 +633,7 @@ mod tests {
     #[test]
     fn test_store_creation() {
         let reducer = Box::new(TestReducer);
-        let store = Store::new(reducer);
+        let store = Store::new_with_state(reducer, 0);
 
         assert_eq!(store.get_state(), 0);
     }
@@ -663,7 +641,7 @@ mod tests {
     #[test]
     fn test_store_dispatch() {
         let reducer = Box::new(TestReducer);
-        let store = Store::new(reducer);
+        let store = Store::new_with_state(reducer, 0);
 
         store.dispatch(1);
         store.stop();
@@ -674,7 +652,7 @@ mod tests {
     #[test]
     fn test_store_subscriber() {
         let reducer = Box::new(TestReducer);
-        let store = Store::new(reducer);
+        let store = Store::new_with_state(reducer, 0);
 
         let subscriber = Arc::new(TestSubscriber);
         store.add_subscriber(subscriber);
@@ -815,7 +793,7 @@ mod tests {
     #[test]
     fn test_effect() {
         let reducer = Box::new(EffectReducer::new());
-        let store = Store::new(reducer);
+        let store = Store::new_with_state(reducer, 0);
 
         store.dispatch(EffectAction::ActionProduceEffect(42));
 

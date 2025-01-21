@@ -93,7 +93,10 @@ impl Subscriber<CalcState, CalcAction> for CalcSubscriber {
 pub fn main() {
     println!("Hello, Basic!");
 
-    let store = Store::<CalcState, CalcAction>::new(Box::new(CalcReducer::default()));
+    let store = Store::<CalcState, CalcAction>::new_with_state(
+        Box::new(CalcReducer::default()),
+        CalcState::default(),
+    );
 
     println!("add subscriber");
     store.add_subscriber(Arc::new(CalcSubscriber::default()));
