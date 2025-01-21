@@ -30,14 +30,14 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-rs-store = "0.23.0"
+rs-store = "0.23.1"
 ```
 
 with the `notify-channel` feature:
 
 ```toml
 [dependencies]
-rs-store = { version = "0.23.0", features = ["notify-channel"] }
+rs-store = { version = "0.23.1", features = ["notify-channel"] }
 ```
 
 ## Quick Start
@@ -48,7 +48,7 @@ use rs_store::{DispatchOp, Dispatcher, FnReducer, FnSubscriber, StoreBuilder};
 
 pub fn main() {
     // new store with reducer
-    let store = StoreBuilder::default()
+    let store = StoreBuilder::new(0)
         .with_reducer(Box::new(FnReducer::from(|state: &i32, action: &i32| {
             println!("reducer: {} + {}", state, action);
             DispatchOp::Dispatch(state + action, None)
@@ -74,8 +74,8 @@ pub fn main() {
 
 ## Backpressure feature
 
-Backpressure is a feature that allows you to control the rate of state updates to subscribers.
-it can be used to prevent slow subscribers from blocking state updates.
+Backpressure is a feature that allows you to control the rate of state updates.
+and it also can be used to prevent slow subscribers from blocking state updates.
 
 ## Side Effects in Reducers
 
@@ -83,8 +83,7 @@ Unlike traditional Redux implementations, rs-store allows reducers to produce si
 
 ## Middleware feature
 
-Middleware is a powerful feature that allows you to intercept and modify actions before they reach the reducer.
-it can be used to handle side effects, logging, metrics, etc.
+Middleware is a powerful feature that allows you to intercept and modify actions before they reach the reducer, or to handle side effects, logging, metrics, etc.
 
 ## Notification Channel feature
 
@@ -94,7 +93,7 @@ The notification channel feature provides a dedicated channel for state notifica
 
 For detailed documentation, visit:
 
-- [API Documentation (docs.rs)](https://docs.rs/rs-store/0.23.0/rs_store/)
+- [API Documentation (docs.rs)](https://docs.rs/rs-store/0.23.1/rs_store/)
 - [Crate Page (crates.io)](https://crates.io/crates/rs-store)
 
 ## Implementation Status
