@@ -12,6 +12,9 @@ use std::fmt;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+#[cfg(feature = "notify-channel")]
+use crate::iterator::{StateIterator, StateSubscriber};
+
 /// Default capacity for the channel
 pub const DEFAULT_CAPACITY: usize = 16;
 
@@ -65,11 +68,13 @@ where
     notify_tx: Mutex<Option<SenderChannel<(State, Action)>>>,
 }
 
-struct SubscriptionImpl {
+/// Subscription for a subscriber
+/// the subscriber can use it to unsubscribe from the store
+struct SubscriberSubscription {
     unsubscribe: Box<dyn Fn() + Send + Sync>,
 }
 
-impl Subscription for SubscriptionImpl {
+impl Subscription for SubscriberSubscription {
     fn unsubscribe(&self) {
         (self.unsubscribe)();
     }
@@ -122,14 +127,16 @@ where
         middlewares: Vec<Arc<dyn Middleware<State, Action> + Send + Sync>>,
     ) -> Result<Arc<Store<State, Action>>, StoreError> {
         let metrics = Arc::new(CountMetrics::default());
-        let (tx, rx) = BackpressureChannel::<Action>::pair_with_metrics(
+        let (tx, rx) = BackpressureChannel::<Action>::pair_with(
+            "dispatch",
             capacity,
             policy.clone(),
             Some(metrics.clone()),
         );
 
         #[cfg(feature = "notify-channel")]
-        let (notify_tx, notify_rx) = BackpressureChannel::<(State, Action)>::pair_with_metrics(
+        let (notify_tx, notify_rx) = BackpressureChannel::<(State, Action)>::pair_with(
+            "notify",
             capacity,
             policy.clone(),
             Some(metrics.clone()),
@@ -181,15 +188,18 @@ where
                             );
                         }
                         ActionOp::Exit => {
-                            #[cfg(dev)]
-                            eprintln!("store: Notify channel closed");
+                            #[cfg(any(dev))]
+                            eprintln!("store: notify loop exit");
                             break;
                         }
                     }
                 }
 
-                #[cfg(dev)]
-                eprintln!("store: notify thread exit");
+                // drop all subscribers, it may close iterator channels
+                notify_store.clear_subscribers();
+
+                #[cfg(any(dev))]
+                eprintln!("store: notify thread done");
             });
         }
 
@@ -228,21 +238,28 @@ where
                     }
                     ActionOp::Exit => {
                         rx_store.on_close();
-                        #[cfg(dev)]
-                        eprintln!("store: reducer action exit");
+                        #[cfg(any(dev))]
+                        eprintln!("store: reducer loop exit");
                         break;
                     }
                 }
             }
 
-            #[cfg(dev)]
-            eprintln!("store: reducer thread exit");
+            // drop all subscribers
+            #[cfg(not(feature = "notify-channel"))]
+            {
+                // notify channel이 없는 경우는 여기서 subscriber들 drop한다.
+                rx_store.clear_subscribers();
+            }
+
+            #[cfg(any(dev))]
+            eprintln!("store: reducer thread done");
         });
 
         Ok(tx_store)
     }
 
-    /// get the lastest state(for debugging)
+    /// get the latest state(for debugging)
     ///
     /// prefer to use `subscribe` to get the state
     pub fn get_state(&self) -> State {
@@ -254,7 +271,7 @@ where
         (&(*self.metrics)).into()
     }
 
-    /// add a   reducer to the store
+    /// add a reducer to the store
     pub fn add_reducer(&self, reducer: Box<dyn Reducer<State, Action> + Send + Sync>) {
         self.reducers.lock().unwrap().push(reducer);
     }
@@ -269,15 +286,21 @@ where
 
         // disposer for the subscriber
         let subscribers = self.subscribers.clone();
-        Box::new(SubscriptionImpl {
+        Box::new(SubscriberSubscription {
             unsubscribe: Box::new(move || {
                 let mut subscribers = subscribers.lock().unwrap();
-                subscribers.retain(|s| !Arc::ptr_eq(s, &subscriber));
+                subscribers.retain(|s| {
+                    let retain = !Arc::ptr_eq(s, &subscriber);
+                    if !retain {
+                        s.on_unsubscribe();
+                    }
+                    retain
+                });
             }),
         })
     }
 
-    /// 셀렉터를 사용하여 상태 변경을 구독
+    /// add a subscriber with a selector
     pub fn subscribe_with_selector<Select, Output, F>(
         &self,
         selector: Select,
@@ -296,8 +319,15 @@ where
 
     /// clear all subscribers
     pub fn clear_subscribers(&self) {
-        let mut subscribers = self.subscribers.lock().unwrap();
-        subscribers.clear();
+        #[cfg(any(dev))]
+        eprintln!("store: clear_subscribers");
+
+        let subscribers = self.subscribers.lock().unwrap().clone();
+        self.subscribers.lock().unwrap().clear();
+
+        for subscriber in subscribers.iter() {
+            subscriber.on_unsubscribe();
+        }
     }
 
     /// do reduce
@@ -378,7 +408,6 @@ where
             self.metrics.action_reduced(Some(action), reducer_duration);
         }
 
-        //*self.state.lock().unwrap() = next_state;
         (need_dispatch, state, Some(effects))
     }
 
@@ -520,7 +549,18 @@ where
 
         #[cfg(feature = "notify-channel")]
         if let Some(notify_tx) = self.notify_tx.lock().unwrap().take() {
-            let _ = notify_tx.send(ActionOp::Exit);
+            #[cfg(any(dev))]
+            eprintln!("store: closing notify channel");
+            match notify_tx.send(ActionOp::Exit) {
+                Ok(_) => {
+                    #[cfg(any(dev))]
+                    eprintln!("store: notify channel sent exit");
+                }
+                Err(_e) => {
+                    #[cfg(any(dev))]
+                    eprintln!("store: Error while closing notify channel");
+                }
+            }
             drop(notify_tx);
         }
     }
@@ -528,14 +568,16 @@ where
     /// close the store
     pub fn close(&self) {
         if let Some(tx) = self.dispatch_tx.lock().unwrap().take() {
+            #[cfg(any(dev))]
+            eprintln!("store: closing dispatch channel");
             match tx.send(ActionOp::Exit) {
                 Ok(_) => {
-                    #[cfg(dev)]
-                    eprintln!("store: Store closed");
+                    #[cfg(any(dev))]
+                    eprintln!("store: dispatch channel sent exit");
                 }
                 Err(_e) => {
-                    #[cfg(dev)]
-                    eprintln!("store: Error while closing Store");
+                    #[cfg(any(dev))]
+                    eprintln!("store: Error while closing dispatch channel");
                 }
             }
             drop(tx);
@@ -587,6 +629,37 @@ where
     pub fn add_middleware(&self, middleware: Arc<dyn Middleware<State, Action> + Send + Sync>) {
         self.middlewares.lock().unwrap().push(middleware.clone());
     }
+
+    /// Iterator for the state
+    ///
+    /// it uses a channel to subscribe to the state changes
+    /// when the channel is full, the oldest state will be dropped
+    #[cfg(feature = "notify-channel")]
+    pub fn iter_state(&self) -> impl Iterator<Item = State> {
+        self.iter_state_with_policy(DEFAULT_CAPACITY, BackpressurePolicy::DropOldest)
+    }
+
+    /// Iterator for the state
+    ///  
+    /// ### Parameters
+    /// * capacity: the capacity of the channel, when it is full, the oldest state will be dropped
+    /// * policy: the backpressure policy
+    #[cfg(feature = "notify-channel")]
+    pub fn iter_state_with_policy(
+        &self,
+        capacity: usize,
+        policy: BackpressurePolicy,
+    ) -> impl Iterator<Item = State> {
+        let (iter_tx, iter_rx) = BackpressureChannel::<State>::pair_with(
+            "iter_state",
+            capacity,
+            policy,
+            Some(self.metrics.clone()),
+        );
+
+        let subscription = self.add_subscriber(Arc::new(StateSubscriber::new(iter_tx)));
+        StateIterator::new(iter_rx, subscription)
+    }
 }
 
 /// close tx channel when the store is dropped, but not the dispatcher
@@ -604,6 +677,9 @@ where
                 pool.shutdown_join_timeout(Duration::from_secs(3));
             }
         }
+
+        #[cfg(any(dev))]
+        eprintln!("store: '{}' Store done", self.name);
     }
 }
 
@@ -830,5 +906,88 @@ mod tests {
         // no subscriber notified
         assert_eq!(metrics.subscriber_notified, 0);
         assert_eq!(metrics.subscriber_time_max, 0);
+    }
+
+    #[cfg(feature = "notify-channel")]
+    #[test]
+    fn test_store_iter_state() {
+        // given
+        let store = Store::new_with_name(
+            Box::new(TestReducer),
+            0,
+            "test_store".to_string())
+            .unwrap();
+
+        // when
+        let mut iter = store.iter_state();
+
+        // then
+        // Initial state
+        store.dispatch(1);
+        assert_eq!(iter.next(), Some(1));
+
+        // Multiple state changes
+        store.dispatch(2);
+        assert_eq!(iter.next(), Some(3)); // 1 + 2 = 3
+
+        store.dispatch(3);
+        assert_eq!(iter.next(), Some(6)); // 3 + 3 = 6
+
+        store.stop();
+
+        assert_eq!(iter.next(), None);
+    }
+
+    #[cfg(feature = "notify-channel")]
+    #[test]
+    fn test_store_iter_state_with_policy() {
+        // given
+        let store = Store::new_with_name(
+            Box::new(TestReducer),
+            0,
+            "test_store".to_string())
+            .unwrap();
+
+        // when
+        let iter = store.iter_state_with_policy(2, BackpressurePolicy::DropOldest);
+
+        // then
+        // Fill the channel beyond capacity
+        for i in 0..5 {
+            store.dispatch(i);
+            thread::sleep(Duration::from_millis(10));
+        }
+
+        // Should only get the last 2 states due to capacity limit
+        let states: Vec<i32> = iter.take(2).collect();
+        assert_eq!(states.len(), 2);
+
+        // The exact values depend on timing, but we should have the last states
+        assert!(states[0] > 0);
+        assert!(states[1] > states[0]);
+
+        store.stop();
+    }
+
+    #[cfg(feature = "notify-channel")]
+    #[test]
+    fn test_store_iter_state_unsubscribe() {
+        // given
+        let store = Store::new_with_name(
+            Box::new(TestReducer),
+            0,
+            "test_store".to_string())
+            .unwrap();
+
+        // when
+        let iter = store.iter_state();
+        assert_eq!(store.subscribers.lock().unwrap().len(), 1);
+
+        // then
+        drop(iter); // This should trigger unsubscribe
+        store.dispatch(1);
+        assert_eq!(store.subscribers.lock().unwrap().len(), 0);
+
+        store.stop();
     }
 }

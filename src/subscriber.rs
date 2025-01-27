@@ -10,6 +10,9 @@ where
 {
     /// on_notify is called when the store is notified of an action.
     fn on_notify(&self, state: &State, action: &Action);
+
+    /// on_unsubscribe is called when the subscriber is unsubscribed from the store.
+    fn on_unsubscribe(&self) {}
 }
 
 /// Subscription is a handle to unsubscribe from the store.

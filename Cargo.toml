@@ -23,6 +23,7 @@ strip = "debuginfo"
 debug = true # Enable debug symbols. For example, we can use `dwarfdump` to check crash traces.
 
 [features]
+full = ["notify-channel"]
 notify-channel = []
 
 [dependencies]
