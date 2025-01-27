@@ -194,8 +194,11 @@ where
                     }
                 }
 
-                #[cfg(dev)]
-                eprintln!("store: notify thread exit");
+                // drop all subscribers, it may close iterator channels
+                notify_store.clear_subscribers();
+
+                #[cfg(any(dev))]
+                eprintln!("store: notify thread done");
             });
         }
 
@@ -241,8 +244,15 @@ where
                 }
             }
 
-            #[cfg(dev)]
-            eprintln!("store: reducer thread exit");
+            // drop all subscribers
+            #[cfg(not(feature = "notify-channel"))]
+            {
+                // notify channel이 없는 경우는 여기서 subscriber들 drop한다.
+                rx_store.clear_subscribers();
+            }
+
+            #[cfg(any(dev))]
+            eprintln!("store: reducer thread done");
         });
 
         Ok(tx_store)
@@ -308,8 +318,15 @@ where
 
     /// clear all subscribers
     pub fn clear_subscribers(&self) {
-        let mut subscribers = self.subscribers.lock().unwrap();
-        subscribers.clear();
+        #[cfg(any(dev))]
+        eprintln!("store: clear_subscribers");
+
+        let subscribers = self.subscribers.lock().unwrap().clone();
+        self.subscribers.lock().unwrap().clear();
+
+        for subscriber in subscribers.iter() {
+            subscriber.on_unsubscribe();
+        }
     }
 
     /// do reduce
