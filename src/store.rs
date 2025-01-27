@@ -69,11 +69,13 @@ where
     notify_tx: Mutex<Option<SenderChannel<(State, Action)>>>,
 }
 
-struct SubscriptionImpl {
+/// Subscription for a subscriber
+/// the subscriber can use it to unsubscribe from the store
+struct SubscriberSubscription {
     unsubscribe: Box<dyn Fn() + Send + Sync>,
 }
 
-impl Subscription for SubscriptionImpl {
+impl Subscription for SubscriberSubscription {
     fn unsubscribe(&self) {
         (self.unsubscribe)();
     }
@@ -258,7 +260,7 @@ where
         (&(*self.metrics)).into()
     }
 
-    /// add a   reducer to the store
+    /// add a reducer to the store
     pub fn add_reducer(&self, reducer: Box<dyn Reducer<State, Action> + Send + Sync>) {
         self.reducers.lock().unwrap().push(reducer);
     }
@@ -273,15 +275,21 @@ where
 
         // disposer for the subscriber
         let subscribers = self.subscribers.clone();
-        Box::new(SubscriptionImpl {
+        Box::new(SubscriberSubscription {
             unsubscribe: Box::new(move || {
                 let mut subscribers = subscribers.lock().unwrap();
-                subscribers.retain(|s| !Arc::ptr_eq(s, &subscriber));
+                subscribers.retain(|s| {
+                    let retain = !Arc::ptr_eq(s, &subscriber);
+                    if !retain {
+                        s.on_unsubscribe();
+                    }
+                    retain
+                });
             }),
         })
     }
 
-    /// 셀렉터를 사용하여 상태 변경을 구독
+    /// add a subscriber with a selector
     pub fn subscribe_with_selector<Select, Output, F>(
         &self,
         selector: Select,
@@ -611,21 +619,77 @@ where
         capacity: usize,
         policy: BackpressurePolicy,
     ) -> impl Iterator<Item = State> {
-        let (tx, rx) = BackpressureChannel::<State>::pair_with_metrics(
+        let (iter_tx, iter_rx) = BackpressureChannel::<State>::pair_with(
+            "iter_state",
             capacity,
             policy,
             Some(self.metrics.clone()),
         );
-        let subscription = self.add_subscriber(Arc::new(FnSubscriber::from(
-            move |new_state: &State, _action: &Action| {
-                let _ = tx.send(ActionOp::Action(new_state.clone()));
-            },
-        )));
+
+        let subscription = self.add_subscriber(Arc::new(StateSubscriber::new(iter_tx)));
 
         StateIterator {
-            rx,
+            iter_rx: Some(iter_rx),
             subscription: Some(subscription),
         }
+    }
+}
+
+#[cfg(feature = "notify-channel")]
+struct StateSubscriber<State>
+where
+    State: Send + Sync + Clone + 'static,
+{
+    iter_tx: Option<SenderChannel<State>>,
+}
+
+#[cfg(feature = "notify-channel")]
+impl<State, Action> Subscriber<State, Action> for StateSubscriber<State>
+where
+    State: Send + Sync + Clone + 'static,
+    Action: Send + Sync + Clone + 'static,
+{
+    fn on_notify(&self, state: &State, _action: &Action) {
+        if let Some(iter_tx) = self.iter_tx.as_ref() {
+            match iter_tx.send(ActionOp::Action(state.clone())) {
+                Ok(_) => {}
+                Err(_e) => {
+                    #[cfg(any(dev))]
+                    eprintln!("store: Error while sending state to iterator");
+                }
+            }
+        }
+    }
+
+    fn on_unsubscribe(&self) {
+        // when the subscriber is unsubscribed, send an exit message to the iterator not to wait forever
+        if let Some(iter_tx) = self.iter_tx.as_ref() {
+            let _ = iter_tx.send(ActionOp::Exit);
+        }
+    }
+}
+
+#[cfg(feature = "notify-channel")]
+impl<State> Drop for StateSubscriber<State>
+where
+    State: Send + Sync + Clone + 'static,
+{
+    fn drop(&mut self) {
+        if let Some(iter_tx) = self.iter_tx.take() {
+            drop(iter_tx);
+        }
+        #[cfg(any(dev))]
+        eprintln!("store: StateSubscriber done");
+    }
+}
+
+#[cfg(feature = "notify-channel")]
+impl<State> StateSubscriber<State>
+where
+    State: Send + Sync + Clone + 'static,
+{
+    fn new(tx: SenderChannel<State>) -> Self {
+        StateSubscriber { iter_tx: Some(tx) }
     }
 }
 
@@ -634,7 +698,7 @@ struct StateIterator<State>
 where
     State: Send + Sync + Clone + 'static,
 {
-    rx: ReceiverChannel<State>,
+    iter_rx: Option<ReceiverChannel<State>>,
     subscription: Option<Box<dyn Subscription>>,
 }
 
@@ -646,14 +710,34 @@ where
     type Item = State;
 
     fn next(&mut self) -> Option<Self::Item> {
-        match self.rx.recv() {
-            Some(ActionOp::Action(state)) => Some(state),
-            Some(ActionOp::Exit) => {
-                self.subscription.take();
-                None
-            }
-            None => None,
+        #[cfg(any(dev))]
+        eprintln!("store: StateIterator next");
+
+        if let Some(iter_rx) = self.iter_rx.as_ref() {
+            match iter_rx.recv() {
+                Some(ActionOp::Action(state)) => return Some(state),
+                Some(ActionOp::Exit) => {
+                    #[cfg(any(dev))]
+                    eprintln!("store: StateIterator exit");
+                }
+                None => {
+                    #[cfg(any(dev))]
+                    eprintln!("store: StateIterator error");
+                },
+            };
+        };
+
+        if let Some(subscription) = self.subscription.take() {
+            subscription.unsubscribe()
         }
+        if let Some(rx) = self.iter_rx.take() {
+            drop(rx);
+        }
+
+        #[cfg(any(dev))]
+        eprintln!("store: StateIterator done");
+
+        None
     }
 }
 
@@ -910,5 +994,35 @@ mod tests {
         // no subscriber notified
         assert_eq!(metrics.subscriber_notified, 0);
         assert_eq!(metrics.subscriber_time_max, 0);
+    }
+
+    #[test]
+    #[cfg(feature = "notify-channel")]
+    fn test_store_iter_state() {
+        // given
+        let reducer = Box::new(TestReducer);
+        let store = Store::new_with_state(reducer, 0);
+
+        // when
+        let mut iter = store.iter_state();
+        store.dispatch(0);
+
+        // then
+        assert_eq!(iter.next(), Some(0));
+        store.dispatch(1);
+        assert_eq!(iter.next(), Some(1));
+
+        store.stop();
+        println!("test_store_iter_state stopped");
+
+        println!("test_store_iter_state dropping iter");
+        // drop(iter);
+        let mut item = iter.next();
+        while item.is_some() {
+            println!("item: {:?}", item);
+            item = iter.next();
+        }
+
+        println!("test_store_iter_state done");
     }
 }
