@@ -30,10 +30,21 @@ pub(crate) struct SenderChannel<Action>
 where
     Action: Send + Sync + Clone + 'static,
 {
+    _name: String,
     sender: Sender<ActionOp<Action>>,
     receiver: Receiver<ActionOp<Action>>,
     policy: BackpressurePolicy,
     metrics: Option<Arc<dyn Metrics + Send + Sync>>,
+}
+
+#[cfg(any(dev))]
+impl<Action> Drop for SenderChannel<Action>
+where
+    Action: Send + Sync + Clone + 'static,
+{
+    fn drop(&mut self) {
+        eprintln!("store: drop '{}' sender channel", self._name);
+    }
 }
 
 impl<Action> SenderChannel<Action>
@@ -101,8 +112,19 @@ pub(crate) struct ReceiverChannel<Action>
 where
     Action: Send + Sync + Clone + 'static,
 {
+    name: String,
     receiver: Receiver<ActionOp<Action>>,
     metrics: Option<Arc<dyn Metrics + Send + Sync>>,
+}
+
+#[cfg(any(dev))]
+impl<Action> Drop for ReceiverChannel<Action>
+where
+    Action: Send + Sync + Clone + 'static,
+{
+    fn drop(&mut self) {
+        eprintln!("store: drop '{}' receiver channel", self.name);
+    }
 }
 
 impl<Action> ReceiverChannel<Action>
@@ -136,10 +158,21 @@ where
         capacity: usize,
         policy: BackpressurePolicy,
     ) -> (SenderChannel<Action>, ReceiverChannel<Action>) {
-        Self::pair_with_metrics(capacity, policy, None)
+        Self::pair_with("<anon>", capacity, policy, None)
     }
 
+    #[allow(dead_code)]
     pub fn pair_with_metrics(
+        capacity: usize,
+        policy: BackpressurePolicy,
+        metrics: Option<Arc<dyn Metrics + Send + Sync>>,
+    ) -> (SenderChannel<Action>, ReceiverChannel<Action>) {
+        Self::pair_with("<anon>", capacity, policy, metrics)
+    }
+
+    #[allow(dead_code)]
+    pub fn pair_with(
+        name: &str,
         capacity: usize,
         policy: BackpressurePolicy,
         metrics: Option<Arc<dyn Metrics + Send + Sync>>,
@@ -147,12 +180,14 @@ where
         let (sender, receiver) = channel::bounded(capacity);
         (
             SenderChannel {
+                _name: name.to_string(),
                 sender,
                 receiver: receiver.clone(),
                 policy,
                 metrics: metrics.clone(),
             },
             ReceiverChannel {
+                name: name.to_string(),
                 receiver,
                 metrics: metrics.clone(),
             },

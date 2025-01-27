@@ -4,8 +4,6 @@ use crate::channel::{BackpressureChannel, BackpressurePolicy, SenderChannel};
 use crate::dispatcher::Dispatcher;
 use crate::metrics::{CountMetrics, Metrics, MetricsSnapshot};
 use crate::middleware::Middleware;
-#[cfg(feature = "notify-channel")]
-use crate::FnSubscriber;
 use crate::{
     DispatchOp, Effect, MiddlewareOp, Reducer, Selector, SelectorSubscriber, Subscriber,
     Subscription,
@@ -128,14 +126,16 @@ where
         middlewares: Vec<Arc<dyn Middleware<State, Action> + Send + Sync>>,
     ) -> Result<Arc<Store<State, Action>>, StoreError> {
         let metrics = Arc::new(CountMetrics::default());
-        let (tx, rx) = BackpressureChannel::<Action>::pair_with_metrics(
+        let (tx, rx) = BackpressureChannel::<Action>::pair_with(
+            "dispatch",
             capacity,
             policy.clone(),
             Some(metrics.clone()),
         );
 
         #[cfg(feature = "notify-channel")]
-        let (notify_tx, notify_rx) = BackpressureChannel::<(State, Action)>::pair_with_metrics(
+        let (notify_tx, notify_rx) = BackpressureChannel::<(State, Action)>::pair_with(
+            "notify",
             capacity,
             policy.clone(),
             Some(metrics.clone()),
@@ -187,8 +187,8 @@ where
                             );
                         }
                         ActionOp::Exit => {
-                            #[cfg(dev)]
-                            eprintln!("store: Notify channel closed");
+                            #[cfg(any(dev))]
+                            eprintln!("store: notify loop exit");
                             break;
                         }
                     }
@@ -234,8 +234,8 @@ where
                     }
                     ActionOp::Exit => {
                         rx_store.on_close();
-                        #[cfg(dev)]
-                        eprintln!("store: reducer action exit");
+                        #[cfg(any(dev))]
+                        eprintln!("store: reducer loop exit");
                         break;
                     }
                 }
@@ -531,7 +531,18 @@ where
 
         #[cfg(feature = "notify-channel")]
         if let Some(notify_tx) = self.notify_tx.lock().unwrap().take() {
-            let _ = notify_tx.send(ActionOp::Exit);
+            #[cfg(any(dev))]
+            eprintln!("store: closing notify channel");
+            match notify_tx.send(ActionOp::Exit) {
+                Ok(_) => {
+                    #[cfg(any(dev))]
+                    eprintln!("store: notify channel sent exit");
+                }
+                Err(_e) => {
+                    #[cfg(any(dev))]
+                    eprintln!("store: Error while closing notify channel");
+                }
+            }
             drop(notify_tx);
         }
     }
@@ -539,14 +550,16 @@ where
     /// close the store
     pub fn close(&self) {
         if let Some(tx) = self.dispatch_tx.lock().unwrap().take() {
+            #[cfg(any(dev))]
+            eprintln!("store: closing dispatch channel");
             match tx.send(ActionOp::Exit) {
                 Ok(_) => {
-                    #[cfg(dev)]
-                    eprintln!("store: Store closed");
+                    #[cfg(any(dev))]
+                    eprintln!("store: dispatch channel sent exit");
                 }
                 Err(_e) => {
-                    #[cfg(dev)]
-                    eprintln!("store: Error while closing Store");
+                    #[cfg(any(dev))]
+                    eprintln!("store: Error while closing dispatch channel");
                 }
             }
             drop(tx);
@@ -750,6 +763,8 @@ where
         if let Some(subscription) = self.subscription.take() {
             subscription.unsubscribe();
         }
+        #[cfg(any(dev))]
+        eprintln!("store: StateIterator drop");
     }
 }
 
@@ -768,6 +783,9 @@ where
                 pool.shutdown_join_timeout(Duration::from_secs(3));
             }
         }
+
+        #[cfg(any(dev))]
+        eprintln!("store: '{}' Store done", self.name);
     }
 }
 
