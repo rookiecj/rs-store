@@ -908,33 +908,86 @@ mod tests {
         assert_eq!(metrics.subscriber_time_max, 0);
     }
 
-    #[test]
     #[cfg(feature = "notify-channel")]
+    #[test]
     fn test_store_iter_state() {
         // given
-        let reducer = Box::new(TestReducer);
-        let store = Store::new_with_state(reducer, 0);
+        let store = Store::new_with_name(
+            Box::new(TestReducer),
+            0,
+            "test_store".to_string())
+            .unwrap();
 
         // when
         let mut iter = store.iter_state();
-        store.dispatch(0);
 
         // then
-        assert_eq!(iter.next(), Some(0));
+        // Initial state
         store.dispatch(1);
         assert_eq!(iter.next(), Some(1));
 
-        store.stop();
-        println!("test_store_iter_state stopped");
+        // Multiple state changes
+        store.dispatch(2);
+        assert_eq!(iter.next(), Some(3)); // 1 + 2 = 3
 
-        println!("test_store_iter_state dropping iter");
-        // drop(iter);
-        let mut item = iter.next();
-        while item.is_some() {
-            println!("item: {:?}", item);
-            item = iter.next();
+        store.dispatch(3);
+        assert_eq!(iter.next(), Some(6)); // 3 + 3 = 6
+
+        store.stop();
+
+        assert_eq!(iter.next(), None);
+    }
+
+    #[cfg(feature = "notify-channel")]
+    #[test]
+    fn test_store_iter_state_with_policy() {
+        // given
+        let store = Store::new_with_name(
+            Box::new(TestReducer),
+            0,
+            "test_store".to_string())
+            .unwrap();
+
+        // when
+        let iter = store.iter_state_with_policy(2, BackpressurePolicy::DropOldest);
+
+        // then
+        // Fill the channel beyond capacity
+        for i in 0..5 {
+            store.dispatch(i);
+            thread::sleep(Duration::from_millis(10));
         }
 
-        println!("test_store_iter_state done");
+        // Should only get the last 2 states due to capacity limit
+        let states: Vec<i32> = iter.take(2).collect();
+        assert_eq!(states.len(), 2);
+
+        // The exact values depend on timing, but we should have the last states
+        assert!(states[0] > 0);
+        assert!(states[1] > states[0]);
+
+        store.stop();
+    }
+
+    #[cfg(feature = "notify-channel")]
+    #[test]
+    fn test_store_iter_state_unsubscribe() {
+        // given
+        let store = Store::new_with_name(
+            Box::new(TestReducer),
+            0,
+            "test_store".to_string())
+            .unwrap();
+
+        // when
+        let iter = store.iter_state();
+        assert_eq!(store.subscribers.lock().unwrap().len(), 1);
+
+        // then
+        drop(iter); // This should trigger unsubscribe
+        store.dispatch(1);
+        assert_eq!(store.subscribers.lock().unwrap().len(), 0);
+
+        store.stop();
     }
 }

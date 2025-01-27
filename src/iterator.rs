@@ -1,8 +1,6 @@
-use crate::channel::{
-    ReceiverChannel, SenderChannel,
-};
-use crate::{Subscriber, Subscription};
+use crate::channel::{ReceiverChannel, SenderChannel};
 use crate::store::ActionOp;
+use crate::{Subscriber, Subscription};
 
 pub(crate) struct StateSubscriber<State>
 where
@@ -63,6 +61,7 @@ where
     State: Send + Sync + Clone + 'static,
 {
     iter_rx: Option<ReceiverChannel<State>>,
+    /// subscription for StateSubscriber
     subscription: Option<Box<dyn Subscription>>,
 }
 
@@ -128,6 +127,86 @@ where
         Self {
             iter_rx: Some(iter_rx),
             subscription: Some(subscription),
+        }
+    }
+}
+
+#[cfg(feature = "notify-channel")]
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::channel::{BackpressureChannel, BackpressurePolicy};
+    use std::sync::Arc;
+
+    #[test]
+    fn test_state_subscriber() {
+        // given
+        let (tx, rx) = BackpressureChannel::<i32>::pair_with(
+            "test",
+            5,
+            BackpressurePolicy::DropOldest,
+            None,
+        );
+        let subscriber = StateSubscriber::new(tx);
+
+        // when
+        subscriber.on_notify(&42, &"action");
+
+        // then
+        if let Some(ActionOp::Action(state)) = rx.recv() {
+            assert_eq!(state, 42);
+        } else {
+            panic!("Expected state not received");
+        }
+    }
+
+    #[test]
+    fn test_state_iterator() {
+        // given
+        let (tx, rx) = BackpressureChannel::<i32>::pair_with(
+            "test",
+            5,
+            BackpressurePolicy::DropOldest,
+            None,
+        );
+
+        let mock_subscription = MockSubscription::new();
+        let mut iterator = StateIterator::new(rx, Box::new(mock_subscription));
+
+        // when & then
+        // Send some test states
+        tx.send(ActionOp::Action(1)).unwrap();
+        assert_eq!(iterator.next(), Some(1));
+
+        tx.send(ActionOp::Action(2)).unwrap();
+        assert_eq!(iterator.next(), Some(2));
+
+        // Test exit message
+        tx.send(ActionOp::Exit).unwrap();
+        assert_eq!(iterator.next(), None);
+    }
+
+    struct MockSubscription {
+        unsubscribed: Arc<std::sync::atomic::AtomicBool>,
+    }
+
+    impl MockSubscription {
+        fn new() -> Self {
+            Self {
+                unsubscribed: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            }
+        }
+
+        #[allow(dead_code)]
+        fn was_unsubscribed(&self) -> bool {
+            self.unsubscribed.load(std::sync::atomic::Ordering::SeqCst)
+        }
+    }
+
+    impl Subscription for MockSubscription {
+        fn unsubscribe(&self) {
+            self.unsubscribed
+                .store(true, std::sync::atomic::Ordering::SeqCst);
         }
     }
 }
