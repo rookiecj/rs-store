@@ -23,7 +23,7 @@ clean:	## clean
 
 .PHONY: test
 test:	## test
-	RUST_TEST_THREADS=1 RUST_LOG=debug cargo test
+	RUST_TEST_THREADS=1 RUST_LOG=debug cargo test  -- --nocapture
 
 test-all: test-dev test-notify-channel test-full ## test all
 
@@ -33,11 +33,11 @@ test-dev:	## test with log
 
 .PHONY: test-notify-channel
 test-notify-channel:	## test with notify-channel feature
-	RUST_TEST_THREADS=1 RUST_LOG=debug cargo test --profile dev  --features full -- --nocapture
+	RUST_TEST_THREADS=1 RUST_LOG=debug cargo test --profile dev  --features notify-channel -- --nocapture
 
 .PHONY: test-full
 test-full:	## test with full features
-	RUST_TEST_THREADS=1 RUST_LOG=debug cargo test --profile dev  --features notify-channel -- --nocapture
+	RUST_TEST_THREADS=1 RUST_LOG=debug cargo test --profile dev  --features full -- --nocapture
 
 
 .PHONY: test-cov
@@ -68,14 +68,15 @@ doc:	## doc
 
 .PHONY: examples
 examples: ## example all
-	RUSTFLAGS="-D warnings" cargo run --example simple
-	RUSTFLAGS="-D warnings" cargo run --example calc_basic
-	RUSTFLAGS="-D warnings" cargo run --example calc_fn_basic
-	RUSTFLAGS="-D warnings" cargo run --example calc_concurrent
-	RUSTFLAGS="-D warnings" cargo run --example calc_unsubscribe
-	RUSTFLAGS="-D warnings" cargo run --example calc_clear_subscribers
-	RUSTFLAGS="-D warnings" cargo run --example calc_thunk
-	RUSTFLAGS="-D warnings" cargo run --example calc_basic_builder
+	RUSTFLAGS="-D warnings" cargo run --example simple -- --nocapture
+	RUSTFLAGS="-D warnings" cargo run --example calc_basic -- --nocapture
+	RUSTFLAGS="-D warnings" cargo run --example calc_fn_basic -- --nocapture
+	RUSTFLAGS="-D warnings" cargo run --example calc_concurrent -- --nocapture
+	RUSTFLAGS="-D warnings" cargo run --example calc_unsubscribe -- --nocapture
+	RUSTFLAGS="-D warnings" cargo run --example calc_clear_subscribers -- --nocapture
+	RUSTFLAGS="-D warnings" cargo run --example calc_thunk -- --nocapture
+	RUSTFLAGS="-D warnings" cargo run --example calc_basic_builder -- --nocapture
+	RUSTFLAGS="-D warnings" cargo run --features full --example iter_state -- --nocapture
 
 VERSION := $(shell cargo pkgid -p "rs-store" | cut -d\# -f2 | cut -d@ -f2)
 
