@@ -19,10 +19,11 @@ rs-store provides a predictable state container inspired by Redux, featuring thr
 - 📊 Middleware handles actions and effects
 - 📊 Backpressure handling with configurable policies
 - 🎯 Bounded channel size with sync channels
-- 🧪 Comprehensive test coverage
+- 🔄 Decoupling state updates from notification delivery
+- 📚 State Iterator support
 - 📚 Selector support
 - 📊 Metrics support
-- 🔄 Decoupling state updates from notification delivery
+- 🧪 Comprehensive test coverage
 
 ## Installation
 
@@ -72,22 +73,37 @@ pub fn main() {
 }
 ```
 
-## Backpressure feature
+## Feature Details
+
+### Backpressure feature
 
 Backpressure is a feature that allows you to control the rate of state updates.
 and it also can be used to prevent slow subscribers from blocking state updates.
 
-## Side Effects in Reducers
+### Side Effects in Reducers
 
 Unlike traditional Redux implementations, rs-store allows reducers to produce side effects directly. This means reducers can produce asynchronous operations.
 
-## Middleware feature
+### Middleware feature
 
 Middleware is a powerful feature that allows you to intercept and modify actions before they reach the reducer, or to handle side effects, logging, metrics, etc.
 
-## Notification Channel feature
+### Notification Channel feature
 
 The notification channel feature provides a dedicated channel for state notifications to subscribers, separating the concerns of state updates and notification delivery. 
+
+### State Iterator feature
+
+You can subscribe to a Store to get the state history, But the state iterator feature provides a way to iterate over the state.
+
+### Selector feature
+
+The selector feature provides a way to select a part of the state.
+
+### Metrics feature
+
+The metrics feature provides a way to collect metrics.
+
 
 ## Documentation
 
@@ -99,10 +115,10 @@ For detailed documentation, visit:
 ## Implementation Status
 
 ### In Progress 🚧
-- Latest state notification for new subscribers
+- [ ] Latest state notification for new subscribers
 - [x] Notification scheduler (CurrentThread, ThreadPool)
+- [X] Stream-based pull model
 - [ ] Stop store after all effects are scheduled
-- Stream-based pull model
 
 ## Contributing
 
