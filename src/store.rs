@@ -1,7 +1,11 @@
+#[cfg(feature = "notify-channel")]
+use crate::channel::ReceiverChannel;
 use crate::channel::{BackpressureChannel, BackpressurePolicy, SenderChannel};
 use crate::dispatcher::Dispatcher;
 use crate::metrics::{CountMetrics, Metrics, MetricsSnapshot};
 use crate::middleware::Middleware;
+#[cfg(feature = "notify-channel")]
+use crate::FnSubscriber;
 use crate::{
     DispatchOp, Effect, MiddlewareOp, Reducer, Selector, SelectorSubscriber, Subscriber,
     Subscription,
@@ -242,7 +246,7 @@ where
         Ok(tx_store)
     }
 
-    /// get the lastest state(for debugging)
+    /// get the latest state(for debugging)
     ///
     /// prefer to use `subscribe` to get the state
     pub fn get_state(&self) -> State {
@@ -378,7 +382,6 @@ where
             self.metrics.action_reduced(Some(action), reducer_duration);
         }
 
-        //*self.state.lock().unwrap() = next_state;
         (need_dispatch, state, Some(effects))
     }
 
@@ -586,6 +589,83 @@ where
     /// Add middleware
     pub fn add_middleware(&self, middleware: Arc<dyn Middleware<State, Action> + Send + Sync>) {
         self.middlewares.lock().unwrap().push(middleware.clone());
+    }
+
+    /// Iterator for the state
+    ///
+    /// it uses a channel to subscribe to the state changes
+    /// when the channel is full, the oldest state will be dropped
+    #[cfg(feature = "notify-channel")]
+    pub fn iter_state(&self) -> impl Iterator<Item = State> {
+        self.iter_state_with_policy(DEFAULT_CAPACITY, BackpressurePolicy::DropOldest)
+    }
+
+    /// Iterator for the state
+    ///  
+    /// ### Parameters
+    /// * capacity: the capacity of the channel, when it is full, the oldest state will be dropped
+    /// * policy: the backpressure policy
+    #[cfg(feature = "notify-channel")]
+    pub fn iter_state_with_policy(
+        &self,
+        capacity: usize,
+        policy: BackpressurePolicy,
+    ) -> impl Iterator<Item = State> {
+        let (tx, rx) = BackpressureChannel::<State>::pair_with_metrics(
+            capacity,
+            policy,
+            Some(self.metrics.clone()),
+        );
+        let subscription = self.add_subscriber(Arc::new(FnSubscriber::from(
+            move |new_state: &State, _action: &Action| {
+                let _ = tx.send(ActionOp::Action(new_state.clone()));
+            },
+        )));
+
+        StateIterator {
+            rx,
+            subscription: Some(subscription),
+        }
+    }
+}
+
+#[cfg(feature = "notify-channel")]
+struct StateIterator<State>
+where
+    State: Send + Sync + Clone + 'static,
+{
+    rx: ReceiverChannel<State>,
+    subscription: Option<Box<dyn Subscription>>,
+}
+
+#[cfg(feature = "notify-channel")]
+impl<State> Iterator for StateIterator<State>
+where
+    State: Send + Sync + Clone + 'static,
+{
+    type Item = State;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.rx.recv() {
+            Some(ActionOp::Action(state)) => Some(state),
+            Some(ActionOp::Exit) => {
+                self.subscription.take();
+                None
+            }
+            None => None,
+        }
+    }
+}
+
+#[cfg(feature = "notify-channel")]
+impl<State> Drop for StateIterator<State>
+where
+    State: Send + Sync + Clone,
+{
+    fn drop(&mut self) {
+        if let Some(subscription) = self.subscription.take() {
+            subscription.unsubscribe();
+        }
     }
 }
 

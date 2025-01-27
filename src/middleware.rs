@@ -9,7 +9,7 @@ pub enum MiddlewareOp {
     ContinueAction,
     /// DoneAction is used to stop reducing the action
     DoneAction,
-    /// BreakChain is used to break the middleware chain to 'before_reduce' or 'after_reduce'
+    /// (experimental) BreakChain is used to break the middleware chain to 'before_reduce' or 'after_reduce'
     BreakChain,
 }
 

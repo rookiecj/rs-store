@@ -25,15 +25,20 @@ clean:	## clean
 test:	## test
 	RUST_TEST_THREADS=1 RUST_LOG=debug cargo test
 
-test-all: test-dev test-notify-channel ## test with full features
+test-all: test-dev test-notify-channel test-full ## test all
 
 .PHONY: test-dev
 test-dev:	## test with log
 	RUST_TEST_THREADS=1 RUST_LOG=debug cargo test --profile dev  -- --nocapture
 
 .PHONY: test-notify-channel
-test-notify-channel:	## test with notify-channel
+test-notify-channel:	## test with notify-channel feature
+	RUST_TEST_THREADS=1 RUST_LOG=debug cargo test --profile dev  --features full -- --nocapture
+
+.PHONY: test-full
+test-full:	## test with full features
 	RUST_TEST_THREADS=1 RUST_LOG=debug cargo test --profile dev  --features notify-channel -- --nocapture
+
 
 .PHONY: test-cov
 test-cov:	## Run test coverage using tarpaulin

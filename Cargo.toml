@@ -23,9 +23,11 @@ strip = "debuginfo"
 debug = true # Enable debug symbols. For example, we can use `dwarfdump` to check crash traces.
 
 [features]
+full = ["notify-channel"]
 notify-channel = []
 
 [dependencies]
 thiserror = "1.0"
 crossbeam = "0.8"
 rusty_pool = { version = "0.7" }
+tokio = { version = "1.0", features = ["sync"] }
