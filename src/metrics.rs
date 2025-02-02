@@ -1,6 +1,7 @@
 use crate::StoreError;
 use std::any::Any;
 use std::fmt::Formatter;
+use std::ops::Sub;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::{fmt, sync::atomic::AtomicUsize, time::Duration};
@@ -103,16 +104,16 @@ impl Default for CountMetrics {
             effect_issued: AtomicUsize::new(0),
             effect_executed: AtomicUsize::new(0),
             reducer_time_max: AtomicUsize::new(0),
-            reducer_time_min: AtomicUsize::new(usize::MAX),
+            reducer_time_min: AtomicUsize::new(0),
             reducer_execution_time: AtomicUsize::new(0),
             middleware_executed: AtomicUsize::new(0),
             middleware_time_max: AtomicUsize::new(0),
-            middleware_time_min: AtomicUsize::new(usize::MAX),
+            middleware_time_min: AtomicUsize::new(0),
             middleware_execution_time: AtomicUsize::new(0),
             state_notified: Default::default(),
             subscriber_notified: AtomicUsize::new(0),
             subscriber_time_max: AtomicUsize::new(0),
-            subscriber_time_min: AtomicUsize::new(usize::MAX),
+            subscriber_time_min: AtomicUsize::new(0),
             subscriber_execution_time: AtomicUsize::new(0),
             remaining_queue: AtomicUsize::new(0),
             remaining_queue_max: AtomicUsize::new(0),
@@ -239,7 +240,9 @@ impl Metrics for CountMetrics {
         if duration_ms > self.middleware_time_max.load(Ordering::SeqCst) {
             self.middleware_time_max.store(duration_ms, Ordering::SeqCst);
         }
-        if duration_ms < self.middleware_time_min.load(Ordering::SeqCst) {
+        if self.middleware_time_min.load(Ordering::SeqCst) == 0 {
+            self.middleware_time_min.store(duration_ms, Ordering::SeqCst);
+        } else if duration_ms < self.middleware_time_min.load(Ordering::SeqCst) {
             self.middleware_time_min.store(duration_ms, Ordering::SeqCst);
         }
         self.middleware_execution_time.fetch_add(duration_ms, Ordering::SeqCst);
@@ -251,7 +254,9 @@ impl Metrics for CountMetrics {
         if duration_ms > self.reducer_time_max.load(Ordering::SeqCst) {
             self.reducer_time_max.store(duration_ms, Ordering::SeqCst);
         }
-        if duration_ms < self.reducer_time_min.load(Ordering::SeqCst) {
+        if self.reducer_time_min.load(Ordering::SeqCst) == 0 {
+            self.reducer_time_min.store(duration_ms, Ordering::SeqCst);
+        } else if duration_ms < self.reducer_time_min.load(Ordering::SeqCst) {
             self.reducer_time_min.store(duration_ms, Ordering::SeqCst);
         }
         self.reducer_execution_time.fetch_add(duration_ms, Ordering::SeqCst);
@@ -261,8 +266,8 @@ impl Metrics for CountMetrics {
         self.effect_issued.fetch_add(count, Ordering::SeqCst);
     }
 
-    fn effect_executed(&self, _count: usize, _duration: Duration) {
-        self.effect_executed.fetch_add(1, Ordering::SeqCst);
+    fn effect_executed(&self, count: usize, _duration: Duration) {
+        self.effect_executed.fetch_add(count, Ordering::SeqCst);
     }
 
     fn state_notified(&self, data: Option<&dyn Any>) {
@@ -275,7 +280,9 @@ impl Metrics for CountMetrics {
         if duration_ms > self.subscriber_time_max.load(Ordering::SeqCst) {
             self.subscriber_time_max.store(duration_ms, Ordering::SeqCst);
         }
-        if duration_ms < self.subscriber_time_min.load(Ordering::SeqCst) {
+        if self.subscriber_time_min.load(Ordering::SeqCst) == 0 {
+            self.subscriber_time_min.store(duration_ms, Ordering::SeqCst);
+        } else if duration_ms < self.subscriber_time_min.load(Ordering::SeqCst) {
             self.subscriber_time_min.store(duration_ms, Ordering::SeqCst);
         }
         self.subscriber_execution_time.fetch_add(duration_ms, Ordering::SeqCst);
@@ -373,6 +380,33 @@ pub struct MetricsSnapshot {
     pub error_occurred: usize,
 }
 
+impl Default for MetricsSnapshot {
+    fn default() -> Self {
+        Self {
+            action_received: 0,
+            action_dropped: 0,
+            action_reduced: 0,
+            effect_issued: 0,
+            effect_executed: 0,
+            reducer_time_max: 0,
+            reducer_time_min: 0,
+            reducer_execution_time: 0,
+            middleware_executed: 0,
+            middleware_time_max: 0,
+            middleware_time_min: 0,
+            middleware_execution_time: 0,
+            state_notified: 0,
+            subscriber_notified: 0,
+            subscriber_time_max: 0,
+            subscriber_time_min: 0,
+            subscriber_execution_time: 0,
+            remaining_queue: 0,
+            remaining_queue_max: 0,
+            error_occurred: 0,
+        }
+    }
+}
+
 impl From<&CountMetrics> for MetricsSnapshot {
     fn from(value: &CountMetrics) -> Self {
         Self {
@@ -396,6 +430,37 @@ impl From<&CountMetrics> for MetricsSnapshot {
             remaining_queue: value.remaining_queue.load(Ordering::SeqCst),
             remaining_queue_max: value.remaining_queue_max.load(Ordering::SeqCst),
             error_occurred: value.error_occurred.load(Ordering::SeqCst),
+        }
+    }
+}
+
+impl Sub<MetricsSnapshot> for MetricsSnapshot {
+    type Output = MetricsSnapshot;
+
+    fn sub(self, rhs: MetricsSnapshot) -> Self::Output {
+        Self::Output {
+            action_received: self.action_received - rhs.action_received,
+            action_dropped: self.action_dropped - rhs.action_dropped,
+            action_reduced: self.action_reduced - rhs.action_reduced,
+            effect_issued: self.effect_issued - rhs.effect_issued,
+            effect_executed: self.effect_executed - rhs.effect_executed,
+            reducer_time_max: self.reducer_time_max - rhs.reducer_time_max,
+            reducer_time_min: self.reducer_time_min - rhs.reducer_time_min,
+            reducer_execution_time: self.reducer_execution_time - rhs.reducer_execution_time,
+            middleware_executed: self.middleware_executed - rhs.middleware_executed,
+            middleware_time_max: self.middleware_time_max - rhs.middleware_time_max,
+            middleware_time_min: self.middleware_time_min - rhs.middleware_time_min,
+            middleware_execution_time: self.middleware_execution_time
+                - rhs.middleware_execution_time,
+            state_notified: self.state_notified - rhs.state_notified,
+            subscriber_notified: self.subscriber_notified - rhs.subscriber_notified,
+            subscriber_time_max: self.subscriber_time_max - rhs.subscriber_time_max,
+            subscriber_time_min: self.subscriber_time_min - rhs.subscriber_time_min,
+            subscriber_execution_time: self.subscriber_execution_time
+                - rhs.subscriber_execution_time,
+            remaining_queue: self.remaining_queue - rhs.remaining_queue,
+            remaining_queue_max: self.remaining_queue_max - rhs.remaining_queue_max,
+            error_occurred: self.error_occurred - rhs.error_occurred,
         }
     }
 }
@@ -557,5 +622,25 @@ mod tests {
         assert_eq!(metrics.subscriber_notified.load(Ordering::SeqCst), 0);
         assert_eq!(metrics.middleware_execution_time.load(Ordering::SeqCst), 0);
         assert_eq!(metrics.reducer_execution_time.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn test_metrics_snapshot_sub() {
+        let metrics1 = MetricsSnapshot {
+            action_received: 1,
+            action_dropped: 2,
+            action_reduced: 3,
+            ..Default::default()
+        };
+        let metrics2 = MetricsSnapshot {
+            action_received: 11,
+            action_dropped: 12,
+            action_reduced: 13,
+            ..Default::default()
+        };
+        let diff = metrics2 - metrics1;
+        assert_eq!(diff.action_received, 10);
+        assert_eq!(diff.action_dropped, 10);
+        assert_eq!(diff.action_reduced, 10);
     }
 }

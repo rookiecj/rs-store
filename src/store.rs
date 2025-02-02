@@ -899,11 +899,28 @@ mod tests {
 
         // then
         let metrics = store.get_metrics();
+        // +1 for the exit action
         assert_eq!(metrics.action_received, 1 + 1);
+        assert_eq!(metrics.action_dropped, 0);
+
+        // reducer
         assert_eq!(metrics.action_reduced, 1);
-        assert_eq!(metrics.state_notified, 1);
+        assert_eq!(metrics.reducer_time_max, 0);
+        assert_eq!(metrics.reducer_time_min, 0);
+        assert_eq!(metrics.reducer_execution_time, 0);
+
+        // no effect
+        assert_eq!(metrics.effect_issued, 0);
+        assert_eq!(metrics.effect_executed, 0);
+
+        // no middleware
         assert_eq!(metrics.middleware_executed, 0);
+        assert_eq!(metrics.middleware_time_max, 0);
+        assert_eq!(metrics.middleware_time_min, 0);
+        assert_eq!(metrics.middleware_execution_time, 0);
+
         // no subscriber notified
+        assert_eq!(metrics.state_notified, 1);
         assert_eq!(metrics.subscriber_notified, 0);
         assert_eq!(metrics.subscriber_time_max, 0);
     }
@@ -912,11 +929,8 @@ mod tests {
     #[test]
     fn test_store_iter_state() {
         // given
-        let store = Store::new_with_name(
-            Box::new(TestReducer),
-            0,
-            "test_store".to_string())
-            .unwrap();
+        let store =
+            Store::new_with_name(Box::new(TestReducer), 0, "test_store".to_string()).unwrap();
 
         // when
         let mut iter = store.iter_state();
@@ -942,11 +956,8 @@ mod tests {
     #[test]
     fn test_store_iter_state_with_policy() {
         // given
-        let store = Store::new_with_name(
-            Box::new(TestReducer),
-            0,
-            "test_store".to_string())
-            .unwrap();
+        let store =
+            Store::new_with_name(Box::new(TestReducer), 0, "test_store".to_string()).unwrap();
 
         // when
         let iter = store.iter_state_with_policy(2, BackpressurePolicy::DropOldest);
@@ -973,11 +984,8 @@ mod tests {
     #[test]
     fn test_store_iter_state_unsubscribe() {
         // given
-        let store = Store::new_with_name(
-            Box::new(TestReducer),
-            0,
-            "test_store".to_string())
-            .unwrap();
+        let store =
+            Store::new_with_name(Box::new(TestReducer), 0, "test_store".to_string()).unwrap();
 
         // when
         let iter = store.iter_state();
