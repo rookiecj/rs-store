@@ -18,6 +18,7 @@ rs-store provides a predictable state container inspired by Redux, featuring thr
 - 📊 Side effect handling in reducers
 - 📊 Middleware handles actions and effects
 - 📊 Backpressure handling with configurable policies
+- 🔄 Droppable store
 - 🎯 Bounded channel size with sync channels
 - 🔄 Decoupling state updates from notification delivery
 - 📚 State Iterator support
@@ -31,14 +32,14 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-rs-store = "0.25"
+rs-store = "1.0"
 ```
 
 with the `notify-channel` feature:
 
 ```toml
 [dependencies]
-rs-store = { version = "0.25", features = ["notify-channel"] }
+rs-store = { version = "1.0", features = ["notify-channel"] }
 ```
 
 ## Quick Start
@@ -109,7 +110,7 @@ The metrics feature provides a way to collect metrics.
 
 For detailed documentation, visit:
 
-- [API Documentation (docs.rs)](https://docs.rs/rs-store/0.25.0/rs_store/)
+- [API Documentation (docs.rs)](https://docs.rs/rs-store/1.0.0/rs_store/)
 - [Crate Page (crates.io)](https://crates.io/crates/rs-store)
 
 ## Implementation Status
@@ -120,7 +121,7 @@ For detailed documentation, visit:
 - [X] Stream-based pull model(Iterator)
 - [ ] Stop store after all effects are scheduled
 - [X] Separate state interface and implementation
-- [ ] drop store after all references are dropped
+- [X] drop store after all references are dropped
 
 ## Contributing
 

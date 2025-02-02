@@ -1,7 +1,7 @@
 [package]
 name = "rs-store"
-# 0.25.0 seperate state trait and store impl
-version = "0.25.0"
+# 1.0.0 feat: Add DroppableStore wrapper to handle store cleanup on drop
+version = "1.0.0"
 edition = "2021"
 authors = ["Changju Lee", "Changju Lee<rookiecj@gmail.com>"]
 description = "Redux Store for Rust"
