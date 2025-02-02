@@ -31,14 +31,14 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-rs-store = "0.24"
+rs-store = "0.25"
 ```
 
 with the `notify-channel` feature:
 
 ```toml
 [dependencies]
-rs-store = { version = "0.24", features = ["notify-channel"] }
+rs-store = { version = "0.25", features = ["notify-channel"] }
 ```
 
 ## Quick Start
@@ -84,23 +84,23 @@ and it also can be used to prevent slow subscribers from blocking state updates.
 
 Unlike traditional Redux implementations, rs-store allows reducers to produce side effects directly. This means reducers can produce asynchronous operations.
 
-### Middleware feature
+### Middleware
 
 Middleware is a powerful feature that allows you to intercept and modify actions before they reach the reducer, or to handle side effects, logging, metrics, etc.
 
-### Notification Channel feature
+### Notification Channel
 
 The notification channel feature provides a dedicated channel for state notifications to subscribers, separating the concerns of state updates and notification delivery. 
 
-### State Iterator feature
+### State Iterator
 
 You can subscribe to a Store to get the state history, But the state iterator feature provides a way to iterate over the state.
 
-### Selector feature
+### Selector
 
 The selector feature provides a way to select a part of the state.
 
-### Metrics feature
+### Metrics
 
 The metrics feature provides a way to collect metrics.
 
@@ -109,7 +109,7 @@ The metrics feature provides a way to collect metrics.
 
 For detailed documentation, visit:
 
-- [API Documentation (docs.rs)](https://docs.rs/rs-store/0.24.0/rs_store/)
+- [API Documentation (docs.rs)](https://docs.rs/rs-store/0.25.0/rs_store/)
 - [Crate Page (crates.io)](https://crates.io/crates/rs-store)
 
 ## Implementation Status
@@ -119,6 +119,8 @@ For detailed documentation, visit:
 - [x] Notification scheduler (CurrentThread, ThreadPool)
 - [X] Stream-based pull model(Iterator)
 - [ ] Stop store after all effects are scheduled
+- [X] Separate state interface and implementation
+- [ ] drop store after all references are dropped
 
 ## Contributing
 
