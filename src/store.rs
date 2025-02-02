@@ -101,7 +101,7 @@ mod tests {
         }
     }
 
-    fn create_test_store() -> Arc<dyn Store<TestState, TestAction>> {
+    fn create_test_store() -> DroppableStore<TestState, TestAction> {
         StoreBuilder::new(TestState::default())
             .with_reducer(Box::new(TestReducer))
             .with_name("test-store".into())
