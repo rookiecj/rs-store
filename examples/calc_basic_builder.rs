@@ -101,7 +101,7 @@ pub fn main() {
             .unwrap();
     println!("add subscriber");
     store.add_subscriber(Arc::new(CalcSubscriber::default()));
-    let _ = store.dispatch(CalcAction::Add(1));
+    let _ = store.dispatch(CalcAction::Add(1)).expect("no dispatch failed");
 
     thread::sleep(std::time::Duration::from_secs(1));
     println!("add more subscriber");

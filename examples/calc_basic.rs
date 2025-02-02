@@ -100,8 +100,8 @@ pub fn main() {
 
     println!("add subscriber");
     store.add_subscriber(Arc::new(CalcSubscriber::default()));
-    store.dispatch(CalcAction::Add(1));
-    store.dispatch(CalcAction::Subtract(1));
+    store.dispatch(CalcAction::Add(1)).expect("no dispatch failed");
+    store.dispatch(CalcAction::Subtract(1)).expect("no dispatch failed");
 
     // stop the store
     store.stop();

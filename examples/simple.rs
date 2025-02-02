@@ -19,8 +19,8 @@ pub fn main() {
     )));
 
     // dispatch actions
-    store.dispatch(41);
-    store.dispatch(1);
+    store.dispatch(41).expect("no error");
+    store.dispatch(1).expect("no error");
 
     // stop the store
     store.stop();
