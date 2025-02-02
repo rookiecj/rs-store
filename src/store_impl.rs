@@ -442,7 +442,7 @@ where
             match effect {
                 Effect::Action(a) => {
                     dispatcher.dispatch_thunk(Box::new(move |dispatcher| {
-                        dispatcher.dispatch(a);
+                        dispatcher.dispatch(a).expect("no dispatch failed");
                     }));
                 }
                 Effect::Task(task) => {
@@ -662,7 +662,7 @@ where
         }
 
         #[cfg(any(dev))]
-        eprintln!("store: '{}' Store done", self.name);
+        eprintln!("store: '{}' Store dropped", self.name);
     }
 }
 
@@ -720,7 +720,7 @@ mod tests {
         let reducer = Box::new(TestReducer);
         let store = StoreImpl::new_with_reducer(0, reducer);
 
-        store.dispatch(1);
+        store.dispatch(1).expect("no dispatch failed");
         store.stop();
 
         assert_eq!(store.get_state(), 1);
@@ -734,7 +734,7 @@ mod tests {
         let subscriber = Arc::new(TestSubscriber);
         store.add_subscriber(subscriber);
 
-        store.dispatch(1);
+        store.dispatch(1).expect("no dispatch failed");
         store.stop();
 
         assert_eq!(store.get_state(), 1);
@@ -794,7 +794,7 @@ mod tests {
         // if the panic occurs in a different thread created within the test function, the #[should_panic] attribute will not catch it
         // you can use the std::panic::catch_unwind function to catch the panic and then propagate it to the main thread.
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            store.dispatch(1);
+            store.dispatch(1).expect("no dispatch failed");
             store.stop();
         }));
 
@@ -826,7 +826,7 @@ mod tests {
         store.add_subscriber(panic_subscriber_clone);
 
         // when
-        store.dispatch(1);
+        store.dispatch(1).expect("no dispatch failed");
         store.stop();
 
         // then
@@ -872,7 +872,7 @@ mod tests {
         let reducer = Box::new(EffectReducer::new());
         let store = StoreImpl::new_with_reducer(0, reducer);
 
-        store.dispatch(EffectAction::ActionProduceEffect(42));
+        let _ = store.dispatch(EffectAction::ActionProduceEffect(42));
 
         // give time to the effect
         thread::sleep(Duration::from_millis(1000));
@@ -895,7 +895,7 @@ mod tests {
         .unwrap();
 
         // when
-        store.dispatch(1);
+        store.dispatch(1).expect("no dispatch failed");
         store.stop();
 
         // then
@@ -938,14 +938,14 @@ mod tests {
 
         // then
         // Initial state
-        store.dispatch(1);
+        let _ = store.dispatch(1);
         assert_eq!(iter.next(), Some(1));
 
         // Multiple state changes
-        store.dispatch(2);
+        let _ = store.dispatch(2);
         assert_eq!(iter.next(), Some(3)); // 1 + 2 = 3
 
-        store.dispatch(3);
+        let _ = store.dispatch(3);
         assert_eq!(iter.next(), Some(6)); // 3 + 3 = 6
 
         store.stop();
@@ -966,7 +966,7 @@ mod tests {
         // then
         // Fill the channel beyond capacity
         for i in 0..5 {
-            store.dispatch(i);
+            let _ = store.dispatch(i);
             thread::sleep(Duration::from_millis(10));
         }
 
@@ -994,7 +994,7 @@ mod tests {
 
         // then
         drop(iter); // This should trigger unsubscribe
-        store.dispatch(1);
+        let _ = store.dispatch(1);
         assert_eq!(store.subscribers.lock().unwrap().len(), 0);
 
         store.stop();

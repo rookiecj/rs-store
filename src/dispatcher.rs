@@ -1,12 +1,12 @@
 use crate::store_impl::ActionOp;
-use crate::StoreImpl;
+use crate::{StoreError, StoreImpl};
 use std::sync::Arc;
 
 /// Dispatcher dispatches actions to the store
 pub trait Dispatcher<Action: Send + Clone> {
     /// dispatch is used to dispatch an action to the store
     /// the caller can be blocked by the channel
-    fn dispatch(&self, action: Action);
+    fn dispatch(&self, action: Action) -> Result<(), StoreError>;
 
     /// dispatch_thunk is used to dispatch a thunk.
     ///
@@ -22,10 +22,18 @@ where
     State: Send + Sync + Clone + 'static,
     Action: Send + Sync + Clone + 'static,
 {
-    fn dispatch(&self, action: Action) {
+    fn dispatch(&self, action: Action) -> Result<(), StoreError> {
         let sender = self.dispatch_tx.lock().unwrap();
         if let Some(tx) = sender.as_ref() {
-            let _ = tx.send(ActionOp::Action(action)).unwrap_or(0);
+            match tx.send(ActionOp::Action(action)) {
+                Ok(_) => Ok(()),
+                Err(_e) => {
+                    // eprintln!("Failed to send action: {}", e);
+                    Err(StoreError::DispatchError(format!("Failed to send action")))
+                }
+            }
+        } else {
+            Err(StoreError::DispatchError(format!("Store is stopped")))
         }
     }
 

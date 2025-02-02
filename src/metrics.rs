@@ -1,10 +1,10 @@
+use crate::store::StoreError;
 use std::any::Any;
 use std::fmt::Formatter;
 use std::ops::Sub;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::{fmt, sync::atomic::AtomicUsize, time::Duration};
-use crate::store::StoreError;
 
 /// Metrics is a trait for metrics that can be used to track the state of the store.
 #[allow(dead_code)]
@@ -535,9 +535,9 @@ mod tests {
 
         // when
         // Test multiple actions
-        store.dispatch(1);
-        store.dispatch(2);
-        store.dispatch(3);
+        let _ = store.dispatch(1);
+        let _ = store.dispatch(2);
+        let _ = store.dispatch(3);
 
         // +1 : ActionExit
         store.stop();
@@ -563,7 +563,7 @@ mod tests {
         // when
         // Dispatch more actions than capacity
         for i in 0..5 {
-            store.dispatch(i);
+            let _ = store.dispatch(i);
         }
         store.stop();
 
@@ -587,7 +587,7 @@ mod tests {
             .unwrap();
 
         // when
-        store.dispatch(1);
+        store.dispatch(1).expect("no error");
         store.stop();
 
         // +1 for ActionExit

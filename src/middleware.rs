@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
+use crate::store::StoreError;
 use crate::Dispatcher;
 use crate::Effect;
-use crate::store::StoreError;
 
 pub enum MiddlewareOp {
     /// ContinueAction is used to continue reducing the action
@@ -310,7 +310,7 @@ mod tests {
                     // ReqAsync -> Response
                     let v = v.clone();
                     dispatcher.dispatch_thunk(Box::new(move |dispatcher| {
-                        dispatcher.dispatch(MiddlewareAction::ResponseAsThis(v + 1));
+                        let _ = dispatcher.dispatch(MiddlewareAction::ResponseAsThis(v + 1));
                     }));
                     // done action
                     return Ok(MiddlewareOp::DoneAction);
@@ -440,7 +440,8 @@ mod tests {
                                     let new_result = new_value.downcast::<i32>().unwrap();
                                     // and can determine which action can be dispatched
                                     dispatcher
-                                        .dispatch(EffectAction::ResponseForTheEffect(*new_result));
+                                        .dispatch(EffectAction::ResponseForTheEffect(*new_result))
+                                        .expect("no dispatch failed");
                                 }
                                 Err(e) => {
                                     println!("Error: {:?}", e);
@@ -465,7 +466,7 @@ mod tests {
         assert!(store_result.is_ok());
 
         // when
-        let store: Arc<crate::StoreImpl<EffectState, EffectAction>> = store_result.unwrap();
+        let store = store_result.unwrap();
         let effect_middleware = Arc::new(EffectMiddleware::new());
         store.add_middleware(effect_middleware.clone());
 

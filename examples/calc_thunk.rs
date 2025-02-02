@@ -116,7 +116,7 @@ fn get_subtract_thunk(
         println!("thunk: dispatching action...");
         // set done signal
         cond.notify_all();
-        dispatcher.dispatch(CalcAction::Subtract(i));
+        dispatcher.dispatch(CalcAction::Subtract(i)).expect("no dispatch failed");
     })
 }
 
@@ -135,7 +135,7 @@ pub fn main() {
             .unwrap();
 
     store.add_subscriber(Arc::new(CalcSubscriber::default()));
-    store.dispatch(CalcAction::Add(1));
+    store.dispatch(CalcAction::Add(1)).expect("no dispatch failed");
 
     // send thunk to store
     store.dispatch_thunk(subtract_thunk);

@@ -43,6 +43,7 @@ where
 mod tests {
     use super::*;
     use crate::builder::StoreBuilder;
+    use crate::store_droppable::DroppableStore;
     use crate::BackpressurePolicy;
     use crate::DispatchOp;
     use crate::Reducer;
