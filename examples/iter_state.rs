@@ -1,10 +1,10 @@
 #[cfg(feature = "notify-channel")]
-use rs_store::{DispatchOp, FnReducer, Store};
+use rs_store::{DispatchOp, FnReducer, StoreImpl};
 
 #[cfg(feature = "notify-channel")]
 fn main() {
     // new store with reducer
-    let store = Store::new_with_reducer(
+    let store = StoreImpl::new_with_reducer(
         0,
         Box::new(FnReducer::from(|state: &i32, action: &i32| {
             println!("reducer: {} + {}", state, action);

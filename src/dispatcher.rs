@@ -1,5 +1,5 @@
 use crate::store::ActionOp;
-use crate::Store;
+use crate::StoreImpl;
 use std::sync::Arc;
 
 /// Dispatcher dispatches actions to the store
@@ -17,7 +17,7 @@ pub trait Dispatcher<Action: Send + Clone> {
     fn dispatch_task(&self, task: Box<dyn FnOnce() + Send>);
 }
 
-impl<State, Action> Dispatcher<Action> for Arc<Store<State, Action>>
+impl<State, Action> Dispatcher<Action> for Arc<StoreImpl<State, Action>>
 where
     State: Send + Sync + Clone + 'static,
     Action: Send + Sync + Clone + 'static,
@@ -31,7 +31,7 @@ where
 
     fn dispatch_thunk(&self, thunk: Box<dyn FnOnce(Box<dyn Dispatcher<Action>>) + Send>) {
         let self_clone = self.clone();
-        let dispatcher: Box<Arc<Store<State, Action>>> = Box::new(self_clone);
+        let dispatcher: Box<Arc<StoreImpl<State, Action>>> = Box::new(self_clone);
         // poll can be shutdown already
         match self.pool.lock() {
             Ok(pool) => {

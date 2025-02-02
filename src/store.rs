@@ -49,9 +49,25 @@ where
     Exit,
 }
 
-/// Store is a simple implementation of a Redux store
+/// Store trait defines the interface for a Redux-like store
+pub trait Store<State, Action>: Send + Sync
+where
+    State: Send + Sync + Clone + 'static,
+    Action: Send + Sync + Clone + 'static,
+{
+    /// Get the current state
+    fn get_state(&self) -> State;
+
+    /// Dispatch an action
+    fn dispatch(&self, action: Action) -> Result<(), StoreError>;
+
+    /// Stop the store
+    fn stop(&self);
+}
+
+/// StoreImpl is the default implementation of a Redux store
 #[allow(clippy::type_complexity)]
-pub struct Store<State, Action>
+pub struct StoreImpl<State, Action>
 where
     State: Send + Sync + Clone + 'static,
     Action: Send + Sync + Clone + 'static,
@@ -81,13 +97,13 @@ impl Subscription for SubscriberSubscription {
     }
 }
 
-impl<State, Action> Store<State, Action>
+impl<State, Action> StoreImpl<State, Action>
 where
     State: Send + Sync + Clone + 'static,
     Action: Send + Sync + Clone + 'static,
 {
     /// create a new store with an initial state
-    pub fn new(state: State) -> Arc<Store<State, Action>> {
+    pub fn new(state: State) -> Arc<StoreImpl<State, Action>> {
         Self::new_with(
             state,
             vec![],
@@ -103,7 +119,7 @@ where
     pub fn new_with_reducer(
         state: State,
         reducer: Box<dyn Reducer<State, Action> + Send + Sync>,
-    ) -> Arc<Store<State, Action>> {
+    ) -> Arc<StoreImpl<State, Action>> {
         Self::new_with_name(state, reducer, DEFAULT_STORE_NAME.into()).unwrap()
     }
 
@@ -112,7 +128,7 @@ where
         state: State,
         reducer: Box<dyn Reducer<State, Action> + Send + Sync>,
         name: String,
-    ) -> Result<Arc<Store<State, Action>>, StoreError> {
+    ) -> Result<Arc<StoreImpl<State, Action>>, StoreError> {
         Self::new_with(
             state,
             vec![reducer],
@@ -131,7 +147,7 @@ where
         capacity: usize,
         policy: BackpressurePolicy,
         middlewares: Vec<Arc<dyn Middleware<State, Action> + Send + Sync>>,
-    ) -> Result<Arc<Store<State, Action>>, StoreError> {
+    ) -> Result<Arc<StoreImpl<State, Action>>, StoreError> {
         let metrics = Arc::new(CountMetrics::default());
         let (tx, rx) = BackpressureChannel::<Action>::pair_with(
             "dispatch",
@@ -148,7 +164,7 @@ where
             Some(metrics.clone()),
         );
 
-        let store = Store {
+        let store = StoreImpl {
             name: name.clone(),
             state: Mutex::new(state),
             reducers: Mutex::new(reducers),
@@ -616,14 +632,15 @@ where
     /// dispatch an action
     ///
     /// ### Return
-    /// * Ok(remains) : the number of remaining actions in the channel
-    pub fn dispatch(&self, action: Action) -> Result<i64, StoreError> {
+    /// * Ok(()) : if the action is dispatched
+    /// * Err(StoreError) : if the dispatch channel is closed
+    pub fn dispatch(&self, action: Action) -> Result<(), StoreError> {
         let sender = self.dispatch_tx.lock().unwrap();
         if let Some(tx) = sender.as_ref() {
+            // the number of remaining actions in the channel
             let remains = tx.send(ActionOp::Action(action)).unwrap_or(0);
             self.metrics.queue_size(remains as usize);
-
-            Ok(remains)
+            Ok(())
         } else {
             let err = StoreError::DispatchError("Dispatch channel is closed".to_string());
             self.metrics.error_occurred(&err);
@@ -670,7 +687,7 @@ where
 
 /// close tx channel when the store is dropped, but not the dispatcher
 /// if you want to stop the dispatcher, call the stop method
-impl<State, Action> Drop for Store<State, Action>
+impl<State, Action> Drop for StoreImpl<State, Action>
 where
     State: Send + Sync + Clone + 'static,
     Action: Send + Sync + Clone + 'static,
@@ -686,6 +703,24 @@ where
 
         #[cfg(any(dev))]
         eprintln!("store: '{}' Store done", self.name);
+    }
+}
+
+impl<State, Action> Store<State, Action> for StoreImpl<State, Action>
+where
+    State: Send + Sync + Clone + 'static,
+    Action: Send + Sync + Clone + 'static,
+{
+    fn get_state(&self) -> State {
+        self.get_state()
+    }
+
+    fn dispatch(&self, action: Action) -> Result<(), StoreError> {
+        self.dispatch(action)
+    }
+
+    fn stop(&self) {
+        self.stop();
     }
 }
 
@@ -715,7 +750,7 @@ mod tests {
     #[test]
     fn test_store_creation() {
         let reducer = Box::new(TestReducer);
-        let store = Store::new_with_reducer(0, reducer);
+        let store = StoreImpl::new_with_reducer(0, reducer);
 
         assert_eq!(store.get_state(), 0);
     }
@@ -723,7 +758,7 @@ mod tests {
     #[test]
     fn test_store_dispatch() {
         let reducer = Box::new(TestReducer);
-        let store = Store::new_with_reducer(0, reducer);
+        let store = StoreImpl::new_with_reducer(0, reducer);
 
         store.dispatch(1);
         store.stop();
@@ -734,7 +769,7 @@ mod tests {
     #[test]
     fn test_store_subscriber() {
         let reducer = Box::new(TestReducer);
-        let store = Store::new_with_reducer(0, reducer);
+        let store = StoreImpl::new_with_reducer(0, reducer);
 
         let subscriber = Arc::new(TestSubscriber);
         store.add_subscriber(subscriber);
@@ -748,7 +783,7 @@ mod tests {
     #[test]
     fn test_store_with_initial_state() {
         let reducer = Box::new(TestReducer);
-        let store = Store::new_with_reducer(10, reducer);
+        let store = StoreImpl::new_with_reducer(10, reducer);
 
         assert_eq!(store.get_state(), 10);
     }
@@ -756,7 +791,7 @@ mod tests {
     #[test]
     fn test_store_with_name() {
         let reducer = Box::new(TestReducer);
-        let store = Store::new_with_name(10, reducer, "test_store".to_string()).unwrap();
+        let store = StoreImpl::new_with_name(10, reducer, "test_store".to_string()).unwrap();
 
         assert_eq!(store.get_state(), 10);
     }
@@ -764,7 +799,7 @@ mod tests {
     #[test]
     fn test_store_with_custom_capacity_and_policy() {
         let reducer = Box::new(TestReducer);
-        let store = Store::new_with(
+        let store = StoreImpl::new_with(
             10,
             vec![reducer],
             "test_store".to_string(),
@@ -793,7 +828,7 @@ mod tests {
     fn test_panic_on_reducer() {
         // given
         let reducer: Box<PanicReducer> = Box::new(PanicReducer);
-        let store = Store::new_with_reducer(42, reducer);
+        let store = StoreImpl::new_with_reducer(42, reducer);
 
         // when
         // if the panic occurs in a different thread created within the test function, the #[should_panic] attribute will not catch it
@@ -823,7 +858,7 @@ mod tests {
     fn test_panic_on_subscriber() {
         // given
         let reducer = Box::new(TestReducer);
-        let store = Store::new_with_reducer(42, reducer);
+        let store = StoreImpl::new_with_reducer(42, reducer);
         let panic_subscriber = Arc::new(PanicSubscriber {
             state: Mutex::new(0),
         });
@@ -875,7 +910,7 @@ mod tests {
     #[test]
     fn test_effect() {
         let reducer = Box::new(EffectReducer::new());
-        let store = Store::new_with_reducer(0, reducer);
+        let store = StoreImpl::new_with_reducer(0, reducer);
 
         store.dispatch(EffectAction::ActionProduceEffect(42));
 
@@ -889,7 +924,7 @@ mod tests {
     #[test]
     fn test_store_metrics() {
         // given
-        let store = Store::new_with(
+        let store = StoreImpl::new_with(
             0,
             vec![Box::new(TestReducer)],
             "test_store".to_string(),
@@ -936,7 +971,7 @@ mod tests {
     fn test_store_iter_state() {
         // given
         let store =
-            Store::new_with_name(0, Box::new(TestReducer), "test_store".to_string()).unwrap();
+            StoreImpl::new_with_name(0, Box::new(TestReducer), "test_store".to_string()).unwrap();
 
         // when
         let mut iter = store.iter_state();
@@ -963,7 +998,7 @@ mod tests {
     fn test_store_iter_state_with_policy() {
         // given
         let store =
-            Store::new_with_name(0, Box::new(TestReducer), "test_store".to_string()).unwrap();
+            StoreImpl::new_with_name(0, Box::new(TestReducer), "test_store".to_string()).unwrap();
 
         // when
         let iter = store.iter_state_with_policy(2, BackpressurePolicy::DropOldest);
@@ -991,7 +1026,7 @@ mod tests {
     fn test_store_iter_state_unsubscribe() {
         // given
         let store =
-            Store::new_with_name(0, Box::new(TestReducer), "test_store".to_string()).unwrap();
+            StoreImpl::new_with_name(0, Box::new(TestReducer), "test_store".to_string()).unwrap();
 
         // when
         let iter = store.iter_state();

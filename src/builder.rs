@@ -2,7 +2,7 @@ use crate::channel;
 use crate::BackpressurePolicy;
 use crate::Middleware;
 use crate::Reducer;
-use crate::Store;
+use crate::StoreImpl;
 use crate::StoreError;
 use crate::DEFAULT_CAPACITY;
 use std::sync::Arc;
@@ -137,7 +137,7 @@ where
     }
 
     /// Build the store.
-    pub fn build(self) -> Result<Arc<Store<State, Action>>, StoreError> {
+    pub fn build(self) -> Result<Arc<StoreImpl<State, Action>>, StoreError> {
         if !self.without_reducer && self.reducers.is_empty() {
             return Err(StoreError::ReducerError("reducers are empty".to_string()));
         }
@@ -148,7 +148,7 @@ where
             return Err(StoreError::ReducerError("capacity is 0".to_string()));
         }
 
-        Store::new_with(
+        StoreImpl::new_with(
             self.state,
             self.reducers,
             self.name,
