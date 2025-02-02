@@ -1,5 +1,5 @@
 use rs_store::{DispatchOp, Dispatcher};
-use rs_store::{Reducer, Store, Subscriber};
+use rs_store::{Reducer, StoreImpl, Subscriber};
 use std::sync::{Arc, Mutex};
 
 #[derive(Debug, Clone)]
@@ -93,9 +93,9 @@ impl Subscriber<CalcState, CalcAction> for CalcSubscriber {
 pub fn main() {
     println!("Hello, Basic!");
 
-    let store = Store::<CalcState, CalcAction>::new_with_state(
-        Box::new(CalcReducer::default()),
+    let store = StoreImpl::<CalcState, CalcAction>::new_with_reducer(
         CalcState::default(),
+        Box::new(CalcReducer::default()),
     );
 
     println!("add subscriber");

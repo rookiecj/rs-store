@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use crate::Dispatcher;
 use crate::Effect;
-use crate::StoreError;
+use crate::store::StoreError;
 
 pub enum MiddlewareOp {
     /// ContinueAction is used to continue reducing the action
@@ -465,7 +465,7 @@ mod tests {
         assert!(store_result.is_ok());
 
         // when
-        let store: Arc<crate::Store<EffectState, EffectAction>> = store_result.unwrap();
+        let store: Arc<crate::StoreImpl<EffectState, EffectAction>> = store_result.unwrap();
         let effect_middleware = Arc::new(EffectMiddleware::new());
         store.add_middleware(effect_middleware.clone());
 

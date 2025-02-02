@@ -69,6 +69,7 @@ doc:	## doc
 .PHONY: examples
 examples: ## example all
 	RUSTFLAGS="-D warnings" cargo run --example simple -- --nocapture
+	RUSTFLAGS="-D warnings" cargo run --example store_trait -- --nocapture
 	RUSTFLAGS="-D warnings" cargo run --example calc_basic -- --nocapture
 	RUSTFLAGS="-D warnings" cargo run --example calc_fn_basic -- --nocapture
 	RUSTFLAGS="-D warnings" cargo run --example calc_concurrent -- --nocapture
