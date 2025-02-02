@@ -15,6 +15,7 @@ where
     name: String,
     state: State,
     reducers: Vec<Box<dyn Reducer<State, Action> + Send + Sync>>,
+    without_reducer: bool,
     capacity: usize,
     policy: BackpressurePolicy,
     middlewares: Vec<Arc<dyn Middleware<State, Action> + Send + Sync>>,
@@ -25,17 +26,20 @@ where
     State: Send + Sync + Clone + 'static,
     Action: Send + Sync + Clone + 'static,
 {
+    /// Create a new store builder.
     pub fn new(state: State) -> Self {
         StoreBuilder {
             name: "store".to_string(),
             state,
             reducers: vec![],
+            without_reducer: false,
             capacity: DEFAULT_CAPACITY,
             policy: Default::default(),
             middlewares: Vec::new(),
         }
     }
 
+    /// Create a new store builder with a reducer.
     pub fn new_with_reducer(
         state: State,
         reducer: Box<dyn Reducer<State, Action> + Send + Sync>,
@@ -44,50 +48,68 @@ where
             name: "store".to_string(),
             state,
             reducers: vec![reducer],
+            without_reducer: false,
             capacity: DEFAULT_CAPACITY,
             policy: Default::default(),
             middlewares: Vec::new(),
         }
     }
 
+    /// Set the name of the store.
     pub fn with_name(mut self, name: String) -> Self {
         self.name = name;
         self
     }
 
-    pub fn with_state(mut self, state: State) -> Self {
-        self.state = state;
-        self
-    }
+    // /// Set the state of the store.
+    // pub fn with_state(mut self, state: State) -> Self {
+    //     self.state = state;
+    //     self
+    // }
 
+    /// Set the reducer of the store.
     pub fn with_reducer(mut self, reducer: Box<dyn Reducer<State, Action> + Send + Sync>) -> Self {
         self.reducers = vec![reducer];
+        self.without_reducer = false;
         self
     }
 
+    /// Set the reducers of the store.
     pub fn with_reducers(
         mut self,
         reducers: Vec<Box<dyn Reducer<State, Action> + Send + Sync>>,
     ) -> Self {
         self.reducers = reducers;
+        self.without_reducer = false;
         self
     }
 
+    /// Add a reducer to the store.
     pub fn add_reducer(mut self, reducer: Box<dyn Reducer<State, Action> + Send + Sync>) -> Self {
         self.reducers.push(reducer);
         self
     }
 
-    pub fn with_capacity(mut self, capacity: usize) -> Self {
-        self.capacity = capacity;
+    /// Create a store without reducers.
+    pub fn without_reducer(mut self) -> Self {
+        self.without_reducer = true;
         self
     }
 
+    /// Set the capacity of the store.
+    pub fn with_capacity(mut self, capacity: usize) -> Self {
+        self.capacity = capacity;
+        self.without_reducer = false;
+        self
+    }
+
+    /// Set the backpressure policy of the store.
     pub fn with_policy(mut self, policy: channel::BackpressurePolicy) -> Self {
         self.policy = policy;
         self
     }
 
+    /// Set the middleware of the store.
     pub fn with_middleware(
         mut self,
         middleware: Arc<dyn Middleware<State, Action> + Send + Sync>,
@@ -96,6 +118,7 @@ where
         self
     }
 
+    /// Set the middlewares of the store.
     pub fn with_middlewares(
         mut self,
         middlewares: Vec<Arc<dyn Middleware<State, Action> + Send + Sync>>,
@@ -104,6 +127,7 @@ where
         self
     }
 
+    /// Add a middleware to the store.
     pub fn add_middleware(
         mut self,
         middleware: Arc<dyn Middleware<State, Action> + Send + Sync>,
@@ -112,8 +136,9 @@ where
         self
     }
 
+    /// Build the store.
     pub fn build(self) -> Result<Arc<Store<State, Action>>, StoreError> {
-        if self.reducers.is_empty() {
+        if !self.without_reducer && self.reducers.is_empty() {
             return Err(StoreError::ReducerError("reducers are empty".to_string()));
         }
         if self.name.is_empty() {
@@ -169,6 +194,12 @@ mod tests {
         let store = StoreBuilder::new(0)
             .with_reducers(vec![Box::new(TestReducer), Box::new(TestReducer)])
             .build();
+        assert!(store.is_ok());
+    }
+
+    #[test]
+    fn test_builder_without_reducer() {
+        let store = StoreBuilder::<i32, i32>::new(0).without_reducer().build();
         assert!(store.is_ok());
     }
 
