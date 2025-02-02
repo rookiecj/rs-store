@@ -25,8 +25,5 @@ pub use effect::*;
 pub mod selector;
 pub use selector::*;
 
-#[cfg(test)]
-pub mod test_mock;
-
 #[cfg(feature = "notify-channel")]
 pub(crate) mod iterator;
