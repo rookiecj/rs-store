@@ -3,9 +3,8 @@ use crate::BackpressurePolicy;
 use crate::Middleware;
 use crate::Reducer;
 use crate::StoreImpl;
-use crate::StoreError;
-use crate::DEFAULT_CAPACITY;
 use std::sync::Arc;
+use crate::store::{StoreError, DEFAULT_CAPACITY};
 
 pub struct StoreBuilder<State, Action>
 where

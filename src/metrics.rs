@@ -1,10 +1,10 @@
-use crate::StoreError;
 use std::any::Any;
 use std::fmt::Formatter;
 use std::ops::Sub;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::{fmt, sync::atomic::AtomicUsize, time::Duration};
+use crate::store::StoreError;
 
 /// Metrics is a trait for metrics that can be used to track the state of the store.
 #[allow(dead_code)]

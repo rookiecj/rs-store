@@ -1,5 +1,5 @@
 use crate::channel::{ReceiverChannel, SenderChannel};
-use crate::store::ActionOp;
+use crate::store_impl::ActionOp;
 use crate::{Subscriber, Subscription};
 
 pub(crate) struct StateSubscriber<State>

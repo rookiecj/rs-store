@@ -6,8 +6,8 @@ pub use middleware::*;
 pub mod reducer;
 pub use reducer::*;
 
-pub mod store;
-pub use store::*;
+pub mod store_impl;
+pub use store_impl::*;
 
 pub mod builder;
 pub use builder::*;
@@ -27,3 +27,4 @@ pub use selector::*;
 
 #[cfg(feature = "notify-channel")]
 pub(crate) mod iterator;
+pub mod store;

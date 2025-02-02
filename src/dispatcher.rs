@@ -1,4 +1,4 @@
-use crate::store::ActionOp;
+use crate::store_impl::ActionOp;
 use crate::StoreImpl;
 use std::sync::Arc;
 

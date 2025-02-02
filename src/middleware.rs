@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use crate::Dispatcher;
 use crate::Effect;
-use crate::StoreError;
+use crate::store::StoreError;
 
 pub enum MiddlewareOp {
     /// ContinueAction is used to continue reducing the action

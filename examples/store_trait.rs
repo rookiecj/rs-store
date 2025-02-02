@@ -1,5 +1,6 @@
+use rs_store::store::Store;
+use rs_store::{DispatchOp, FnReducer, StoreBuilder};
 use std::sync::Arc;
-use rs_store::{DispatchOp, FnReducer, Store, StoreBuilder};
 
 fn main() {
     let store = StoreBuilder::new(0)
