@@ -191,7 +191,7 @@ mod tests {
         // given
         let mock_reducer = MockReducer::new();
         let mock_reducer_clone = mock_reducer.clone();
-        let store = Store::new_with_state(Box::new(mock_reducer), 0);
+        let store = Store::new_with_reducer(0, Box::new(mock_reducer));
 
         // when
         store.dispatch(5);
@@ -212,7 +212,7 @@ mod tests {
             DispatchOp::Dispatch(*state + *action, None)
         });
         let mock_reducer_clone = mock_reducer.clone();
-        let store = Store::new_with_state(Box::new(mock_reducer), 0);
+        let store = Store::new_with_reducer(0, Box::new(mock_reducer));
 
         // when
         store.dispatch(5);

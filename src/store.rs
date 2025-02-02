@@ -17,6 +17,7 @@ use crate::iterator::{StateIterator, StateSubscriber};
 
 /// Default capacity for the channel
 pub const DEFAULT_CAPACITY: usize = 16;
+pub const DEFAULT_STORE_NAME: &str = "store";
 
 /// StoreError represents an error that occurred in the store
 #[derive(Debug, thiserror::Error)]
@@ -85,31 +86,36 @@ where
     State: Send + Sync + Clone + 'static,
     Action: Send + Sync + Clone + 'static,
 {
-    /// create a new store with a reducer
-    pub fn new(
-        reducer: Box<dyn Reducer<State, Action> + Send + Sync>,
-        state: State,
-    ) -> Arc<Store<State, Action>> {
-        Self::new_with_state(reducer, state)
+    /// create a new store with an initial state
+    pub fn new(state: State) -> Arc<Store<State, Action>> {
+        Self::new_with(
+            state,
+            vec![],
+            DEFAULT_STORE_NAME.into(),
+            DEFAULT_CAPACITY,
+            BackpressurePolicy::default(),
+            vec![],
+        )
+        .unwrap()
     }
 
     /// create a new store with a reducer and an initial state
-    pub fn new_with_state(
-        reducer: Box<dyn Reducer<State, Action> + Send + Sync>,
+    pub fn new_with_reducer(
         state: State,
+        reducer: Box<dyn Reducer<State, Action> + Send + Sync>,
     ) -> Arc<Store<State, Action>> {
-        Self::new_with_name(reducer, state, "store".into()).unwrap()
+        Self::new_with_name(state, reducer, DEFAULT_STORE_NAME.into()).unwrap()
     }
 
     /// create a new store with name
     pub fn new_with_name(
-        reducer: Box<dyn Reducer<State, Action> + Send + Sync>,
         state: State,
+        reducer: Box<dyn Reducer<State, Action> + Send + Sync>,
         name: String,
     ) -> Result<Arc<Store<State, Action>>, StoreError> {
         Self::new_with(
-            vec![reducer],
             state,
+            vec![reducer],
             name,
             DEFAULT_CAPACITY,
             BackpressurePolicy::default(),
@@ -117,10 +123,10 @@ where
         )
     }
 
-    /// create a new store with name
+    /// create a new store
     pub fn new_with(
-        reducers: Vec<Box<dyn Reducer<State, Action> + Send + Sync>>,
         state: State,
+        reducers: Vec<Box<dyn Reducer<State, Action> + Send + Sync>>,
         name: String,
         capacity: usize,
         policy: BackpressurePolicy,
@@ -709,7 +715,7 @@ mod tests {
     #[test]
     fn test_store_creation() {
         let reducer = Box::new(TestReducer);
-        let store = Store::new_with_state(reducer, 0);
+        let store = Store::new_with_reducer(0, reducer);
 
         assert_eq!(store.get_state(), 0);
     }
@@ -717,7 +723,7 @@ mod tests {
     #[test]
     fn test_store_dispatch() {
         let reducer = Box::new(TestReducer);
-        let store = Store::new_with_state(reducer, 0);
+        let store = Store::new_with_reducer(0, reducer);
 
         store.dispatch(1);
         store.stop();
@@ -728,7 +734,7 @@ mod tests {
     #[test]
     fn test_store_subscriber() {
         let reducer = Box::new(TestReducer);
-        let store = Store::new_with_state(reducer, 0);
+        let store = Store::new_with_reducer(0, reducer);
 
         let subscriber = Arc::new(TestSubscriber);
         store.add_subscriber(subscriber);
@@ -742,7 +748,7 @@ mod tests {
     #[test]
     fn test_store_with_initial_state() {
         let reducer = Box::new(TestReducer);
-        let store = Store::new_with_state(reducer, 10);
+        let store = Store::new_with_reducer(10, reducer);
 
         assert_eq!(store.get_state(), 10);
     }
@@ -750,7 +756,7 @@ mod tests {
     #[test]
     fn test_store_with_name() {
         let reducer = Box::new(TestReducer);
-        let store = Store::new_with_name(reducer, 10, "test_store".to_string()).unwrap();
+        let store = Store::new_with_name(10, reducer, "test_store".to_string()).unwrap();
 
         assert_eq!(store.get_state(), 10);
     }
@@ -759,8 +765,8 @@ mod tests {
     fn test_store_with_custom_capacity_and_policy() {
         let reducer = Box::new(TestReducer);
         let store = Store::new_with(
-            vec![reducer],
             10,
+            vec![reducer],
             "test_store".to_string(),
             5,
             BackpressurePolicy::DropOldest,
@@ -787,7 +793,7 @@ mod tests {
     fn test_panic_on_reducer() {
         // given
         let reducer: Box<PanicReducer> = Box::new(PanicReducer);
-        let store = Store::new_with_state(reducer, 42);
+        let store = Store::new_with_reducer(42, reducer);
 
         // when
         // if the panic occurs in a different thread created within the test function, the #[should_panic] attribute will not catch it
@@ -817,7 +823,7 @@ mod tests {
     fn test_panic_on_subscriber() {
         // given
         let reducer = Box::new(TestReducer);
-        let store = Store::new_with_state(reducer, 42);
+        let store = Store::new_with_reducer(42, reducer);
         let panic_subscriber = Arc::new(PanicSubscriber {
             state: Mutex::new(0),
         });
@@ -869,7 +875,7 @@ mod tests {
     #[test]
     fn test_effect() {
         let reducer = Box::new(EffectReducer::new());
-        let store = Store::new_with_state(reducer, 0);
+        let store = Store::new_with_reducer(0, reducer);
 
         store.dispatch(EffectAction::ActionProduceEffect(42));
 
@@ -884,8 +890,8 @@ mod tests {
     fn test_store_metrics() {
         // given
         let store = Store::new_with(
-            vec![Box::new(TestReducer)],
             0,
+            vec![Box::new(TestReducer)],
             "test_store".to_string(),
             5,
             BackpressurePolicy::DropOldest,
@@ -930,7 +936,7 @@ mod tests {
     fn test_store_iter_state() {
         // given
         let store =
-            Store::new_with_name(Box::new(TestReducer), 0, "test_store".to_string()).unwrap();
+            Store::new_with_name(0, Box::new(TestReducer), "test_store".to_string()).unwrap();
 
         // when
         let mut iter = store.iter_state();
@@ -957,7 +963,7 @@ mod tests {
     fn test_store_iter_state_with_policy() {
         // given
         let store =
-            Store::new_with_name(Box::new(TestReducer), 0, "test_store".to_string()).unwrap();
+            Store::new_with_name(0, Box::new(TestReducer), "test_store".to_string()).unwrap();
 
         // when
         let iter = store.iter_state_with_policy(2, BackpressurePolicy::DropOldest);
@@ -985,7 +991,7 @@ mod tests {
     fn test_store_iter_state_unsubscribe() {
         // given
         let store =
-            Store::new_with_name(Box::new(TestReducer), 0, "test_store".to_string()).unwrap();
+            Store::new_with_name(0, Box::new(TestReducer), "test_store".to_string()).unwrap();
 
         // when
         let iter = store.iter_state();

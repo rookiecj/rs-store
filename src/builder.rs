@@ -149,8 +149,8 @@ where
         }
 
         Store::new_with(
-            self.reducers,
             self.state,
+            self.reducers,
             self.name,
             self.capacity,
             self.policy,

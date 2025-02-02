@@ -141,12 +141,8 @@ mod tests {
     #[test]
     fn test_state_subscriber() {
         // given
-        let (tx, rx) = BackpressureChannel::<i32>::pair_with(
-            "test",
-            5,
-            BackpressurePolicy::DropOldest,
-            None,
-        );
+        let (tx, rx) =
+            BackpressureChannel::<i32>::pair_with("test", 5, BackpressurePolicy::DropOldest, None);
         let subscriber = StateSubscriber::new(tx);
 
         // when
@@ -163,12 +159,8 @@ mod tests {
     #[test]
     fn test_state_iterator() {
         // given
-        let (tx, rx) = BackpressureChannel::<i32>::pair_with(
-            "test",
-            5,
-            BackpressurePolicy::DropOldest,
-            None,
-        );
+        let (tx, rx) =
+            BackpressureChannel::<i32>::pair_with("test", 5, BackpressurePolicy::DropOldest, None);
 
         let mock_subscription = MockSubscription::new();
         let mut iterator = StateIterator::new(rx, Box::new(mock_subscription));
@@ -205,8 +197,7 @@ mod tests {
 
     impl Subscription for MockSubscription {
         fn unsubscribe(&self) {
-            self.unsubscribed
-                .store(true, std::sync::atomic::Ordering::SeqCst);
+            self.unsubscribed.store(true, std::sync::atomic::Ordering::SeqCst);
         }
     }
 }
