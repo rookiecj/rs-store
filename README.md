@@ -32,14 +32,14 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-rs-store = "1.0"
+rs-store = "1.1"
 ```
 
 with the `notify-channel` feature:
 
 ```toml
 [dependencies]
-rs-store = { version = "1.0", features = ["notify-channel"] }
+rs-store = { version = "1.1", features = ["notify-channel"] }
 ```
 
 ## Quick Start
@@ -110,7 +110,7 @@ The metrics feature provides a way to collect metrics.
 
 For detailed documentation, visit:
 
-- [API Documentation (docs.rs)](https://docs.rs/rs-store/1.0.0/rs_store/)
+- [API Documentation (docs.rs)](https://docs.rs/rs-store/1.1.0/rs_store/)
 - [Crate Page (crates.io)](https://crates.io/crates/rs-store)
 
 ## Implementation Status
