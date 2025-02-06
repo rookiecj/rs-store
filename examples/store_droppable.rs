@@ -1,5 +1,5 @@
 use rs_store::store::Store;
-use rs_store::{DispatchOp, FnReducer, StoreBuilder};
+use rs_store::{DispatchOp, DroppableStore, FnReducer, StoreBuilder};
 use std::sync::Arc;
 
 fn main() {
@@ -10,12 +10,12 @@ fn main() {
         })))
         .build()
         .unwrap();
-
-    do_with_store(store.clone());
+    let droppable_store = DroppableStore::new(store);
+    do_with_store(droppable_store.clone());
 
     // no need to stop or drop, because DroppableStore
-    //store.stop();
-    //drop(store);
+    //droppable_store.stop();
+    //drop(droppable_store);
 }
 
 fn do_with_store(store: Arc<dyn Store<i32, i32>>) {

@@ -105,7 +105,9 @@ fn subtract_effect_thunk(i: i32) -> Box<dyn FnOnce(Box<dyn Dispatcher<CalcAction
         thread::sleep(std::time::Duration::from_secs(1));
 
         println!("effect: dispatching action...");
-        dispatcher.dispatch(CalcAction::SubtractWillProduceEffectFunction(i)).expect("no dispatch failed");
+        dispatcher
+            .dispatch(CalcAction::SubtractWillProduceEffectFunction(i))
+            .expect("no dispatch failed");
     })
 }
 

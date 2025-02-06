@@ -679,6 +679,13 @@ where
         self.dispatch(action)
     }
 
+    fn add_subscriber(
+        &self,
+        subscriber: Arc<dyn Subscriber<State, Action> + Send + Sync>,
+    ) -> Box<dyn Subscription> {
+        self.add_subscriber(subscriber)
+    }
+
     fn stop(&self) {
         self.stop();
     }

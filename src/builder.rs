@@ -1,10 +1,9 @@
+use crate::channel;
 use crate::store::{StoreError, DEFAULT_CAPACITY};
-use crate::store_droppable::DroppableStore;
 use crate::BackpressurePolicy;
 use crate::Middleware;
 use crate::Reducer;
 use crate::StoreImpl;
-use crate::channel;
 use std::sync::Arc;
 
 pub struct StoreBuilder<State, Action>
@@ -137,7 +136,7 @@ where
     }
 
     /// Build a store impl.
-    pub fn build_impl(self) -> Result<Arc<StoreImpl<State, Action>>, StoreError> {
+    pub fn build(self) -> Result<Arc<StoreImpl<State, Action>>, StoreError> {
         if !self.without_reducer && self.reducers.is_empty() {
             return Err(StoreError::ReducerError("reducers are empty".to_string()));
         }
@@ -156,12 +155,6 @@ where
             self.policy,
             self.middlewares,
         )
-    }
-
-    /// Build a droppable store.
-    pub fn build(self) -> Result<DroppableStore<State, Action>, StoreError> {
-        let store = self.build_impl()?;
-        Ok(DroppableStore::new(store))
     }
 }
 
