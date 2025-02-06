@@ -1,3 +1,6 @@
+use crate::{Subscriber, Subscription};
+use std::sync::Arc;
+
 /// Default capacity for the channel
 pub const DEFAULT_CAPACITY: usize = 16;
 pub const DEFAULT_STORE_NAME: &str = "store";
@@ -108,11 +111,13 @@ mod tests {
     }
 
     fn create_test_store() -> DroppableStore<TestState, TestAction> {
-        StoreBuilder::new(TestState::default())
-            .with_reducer(Box::new(TestReducer))
-            .with_name("test-store".into())
-            .build()
-            .unwrap()
+        DroppableStore::new(
+            StoreBuilder::new(TestState::default())
+                .with_reducer(Box::new(TestReducer))
+                .with_name("test-store".into())
+                .build()
+                .unwrap(),
+        )
     }
 
     #[test]
