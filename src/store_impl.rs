@@ -796,8 +796,10 @@ mod tests {
         // you can use the std::panic::catch_unwind function to catch the panic and then propagate it to the main thread.
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             store.dispatch(1).expect("no dispatch failed");
-            store.stop();
+            // give time to the reducer
+            thread::sleep(Duration::from_millis(1000));
         }));
+        //store.stop();
 
         // then
         assert!(result.is_err());

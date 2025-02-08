@@ -199,8 +199,8 @@ mod tests {
         // reduce: 1
         // effect: 1
         assert_eq!(logger.logs.lock().unwrap().len(), 2);
-        assert!(logger.logs.lock().unwrap().first().unwrap().contains("Before reduce"));
-        assert!(logger.logs.lock().unwrap().last().unwrap().contains("Before effect"));
+        assert!(logger.logs.lock().unwrap().first().unwrap().contains("before_reduce"));
+        assert!(logger.logs.lock().unwrap().last().unwrap().contains("before_effect"));
     }
 
     struct ChainMiddlewareContinueAction;
