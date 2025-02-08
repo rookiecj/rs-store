@@ -344,10 +344,8 @@ where
                         // break the middleware chain
                         break;
                     }
-                    Err(_e) => {
-                        #[cfg(dev)]
-                        eprintln!("store: Middleware error: {:?}", _e);
-                        //return (false, None);
+                    Err(e) => {
+                        middleware.on_error(e);
                     }
                 }
             }
@@ -419,10 +417,8 @@ where
                         // break the middleware chain
                         break;
                     }
-                    Err(_e) => {
-                        #[cfg(dev)]
-                        eprintln!("store: Middleware error: {:?}", _e);
-                        //return (false, None);
+                    Err(e) => {
+                        middleware.on_error(e);
                     }
                 }
             }
@@ -491,10 +487,8 @@ where
                         // break the middleware chain
                         break;
                     }
-                    Err(_e) => {
-                        #[cfg(dev)]
-                        eprintln!("store: Middleware error: {:?}", _e);
-                        //return (false, None);
+                    Err(e) => {
+                        middleware.on_error(e);
                     }
                 }
             }
