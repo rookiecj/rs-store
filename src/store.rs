@@ -38,6 +38,7 @@ where
     /// Dispatch an action
     fn dispatch(&self, action: Action) -> Result<(), StoreError>;
 
+    /// Add a subscriber to the store
     fn add_subscriber(
         &self,
         subscriber: Arc<dyn Subscriber<State, Action> + Send + Sync>,

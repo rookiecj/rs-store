@@ -81,6 +81,13 @@ pub trait Middleware<State, Action> {
     ) -> Result<MiddlewareOp, StoreError> {
         Ok(MiddlewareOp::ContinueAction)
     }
+
+    /// called when an error occurs
+    #[allow(unused_variables)]
+    fn on_error(&self, error: StoreError) {
+        #[cfg(dev)]
+        eprintln!("store: Middleware error: {:?}", error);
+    }
 }
 
 #[cfg(test)]
@@ -102,12 +109,14 @@ mod tests {
 
     struct LoggerMiddleware {
         logs: Mutex<Vec<String>>,
+        errors: Mutex<Vec<StoreError>>,
     }
 
     impl LoggerMiddleware {
         fn new() -> Self {
             Self {
                 logs: Mutex::new(vec![]),
+                errors: Mutex::new(vec![]),
             }
         }
     }
@@ -123,10 +132,18 @@ mod tests {
             state: &State,
             _dispatcher: Arc<dyn Dispatcher<Action>>,
         ) -> Result<MiddlewareOp, StoreError> {
-            let log = format!("Before reduce - Action: {:?}, state: {:?}", action, state);
-            println!("{}", log);
-            self.logs.lock().unwrap().push(log);
-            Ok(MiddlewareOp::ContinueAction)
+            match self.logs.lock() {
+                Ok(mut logs) => {
+                    let log = format!("before_reduce: - Action: {:?}, state: {:?}", action, state);
+                    println!("{}", log);
+                    logs.push(log);
+                    Ok(MiddlewareOp::ContinueAction)
+                }
+                Err(e) => Err(StoreError::MiddlewareError(format!(
+                    "before_reduce: Failed to acquire logs lock: {}",
+                    e
+                ))),
+            }
         }
 
         fn before_effect(
@@ -136,10 +153,31 @@ mod tests {
             _effects: &mut Vec<Effect<Action>>,
             _dispatcher: Arc<dyn Dispatcher<Action>>,
         ) -> Result<MiddlewareOp, StoreError> {
-            let log = format!("Before effect - Action: {:?}, state: {:?}", action, state);
-            println!("{}", log);
-            self.logs.lock().unwrap().push(log);
-            Ok(MiddlewareOp::ContinueAction)
+            match self.logs.lock() {
+                Ok(mut logs) => {
+                    let log = format!("before_effect: - Action: {:?}, state: {:?}", action, state);
+                    println!("{}", log);
+                    logs.push(log);
+                    Ok(MiddlewareOp::ContinueAction)
+                }
+                Err(e) => Err(StoreError::MiddlewareError(format!(
+                    "before_effect: Failed to acquire logs lock: {}",
+                    e
+                ))),
+            }
+        }
+
+        fn on_error(&self, error: StoreError) {
+            eprintln!("Middleware error: {:?}", error);
+            match self.errors.lock() {
+                Ok(mut errors) => {
+                    errors.push(error);
+                }
+                Err(e) => {
+                    //
+                    eprintln!("Failed to acquire errors lock: {}", e);
+                }
+            }
         }
     }
 
@@ -161,8 +199,8 @@ mod tests {
         // reduce: 1
         // effect: 1
         assert_eq!(logger.logs.lock().unwrap().len(), 2);
-        assert!(logger.logs.lock().unwrap().first().unwrap().contains("Before reduce"));
-        assert!(logger.logs.lock().unwrap().last().unwrap().contains("Before effect"));
+        assert!(logger.logs.lock().unwrap().first().unwrap().contains("before_reduce"));
+        assert!(logger.logs.lock().unwrap().last().unwrap().contains("before_effect"));
     }
 
     struct ChainMiddlewareContinueAction;
@@ -444,13 +482,16 @@ mod tests {
                                         .expect("no dispatch failed");
                                 }
                                 Err(e) => {
-                                    println!("Error: {:?}", e);
+                                    eprintln!("Error: {:?}", e);
                                 }
                             }
                         }));
                     }
                     _ => {
-                        assert!(false);
+                        //assert!(false);
+                        return Err(StoreError::MiddlewareError(
+                            "Unexpected effect type".to_string(),
+                        ));
                     }
                 }
             }
@@ -479,5 +520,38 @@ mod tests {
 
         // then
         assert_eq!(store.get_state().value, 43);
+    }
+
+    #[test]
+    fn test_middleware_poisoned() {
+        let reducer = Box::new(TestReducer);
+        let store_result = StoreBuilder::new_with_reducer(0, reducer).build();
+        assert!(store_result.is_ok());
+        let store = store_result.unwrap();
+
+        // Add logger middleware
+        let logger = Arc::new(LoggerMiddleware::new());
+
+        store.add_middleware(logger.clone());
+
+        // Poison the mutex by spawning a thread that panics while holding the lock
+        let logger_clone = logger.clone();
+        let handle = thread::spawn(move || {
+            let _lock = logger_clone.logs.lock().unwrap();
+            panic!("Intentionally poison the mutex");
+        });
+
+        // Wait for the thread to panic and poison the mutex
+        let _ = handle.join().expect_err("Thread should panic");
+
+        // Verify the mutex is poisoned
+        assert!(logger.logs.lock().is_err());
+
+        let _ = store.dispatch(1);
+
+        store.stop();
+
+        // 2 = before_reduce, before_effect
+        assert_eq!(logger.errors.lock().unwrap().len(), 2);
     }
 }

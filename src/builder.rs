@@ -138,13 +138,13 @@ where
     /// Build a store impl.
     pub fn build(self) -> Result<Arc<StoreImpl<State, Action>>, StoreError> {
         if !self.without_reducer && self.reducers.is_empty() {
-            return Err(StoreError::ReducerError("reducers are empty".to_string()));
+            return Err(StoreError::InitError("reducers are empty".to_string()));
         }
         if self.name.is_empty() {
-            return Err(StoreError::ReducerError("name is empty".to_string()));
+            return Err(StoreError::InitError("name is empty".to_string()));
         }
         if self.capacity == 0 {
-            return Err(StoreError::ReducerError("capacity is 0".to_string()));
+            return Err(StoreError::InitError("capacity is 0".to_string()));
         }
 
         StoreImpl::new_with(
