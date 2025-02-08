@@ -29,11 +29,13 @@ where
                 Ok(_) => Ok(()),
                 Err(_e) => {
                     // eprintln!("Failed to send action: {}", e);
-                    Err(StoreError::DispatchError(format!("Failed to send action")))
+                    Err(StoreError::DispatchError(
+                        "Failed to send action".to_string(),
+                    ))
                 }
             }
         } else {
-            Err(StoreError::DispatchError(format!("Store is stopped")))
+            Err(StoreError::DispatchError("Store is stopped".to_string()))
         }
     }
 
