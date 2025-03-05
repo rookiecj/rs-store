@@ -1,6 +1,7 @@
 use crate::channel::{ReceiverChannel, SenderChannel};
 use crate::store_impl::ActionOp;
 use crate::{Subscriber, Subscription};
+use std::time::Instant;
 
 pub(crate) struct StateSubscriber<State>
 where
@@ -29,7 +30,7 @@ where
     fn on_unsubscribe(&self) {
         // when the subscriber is unsubscribed, send an exit message to the iterator not to wait forever
         if let Some(iter_tx) = self.iter_tx.as_ref() {
-            let _ = iter_tx.send(ActionOp::Exit);
+            let _ = iter_tx.send(ActionOp::Exit(Instant::now()));
         }
     }
 }
@@ -78,7 +79,7 @@ where
         if let Some(iter_rx) = self.iter_rx.as_ref() {
             match iter_rx.recv() {
                 Some(ActionOp::Action(state)) => return Some(state),
-                Some(ActionOp::Exit) => {
+                Some(ActionOp::Exit(_)) => {
                     #[cfg(any(dev))]
                     eprintln!("store: StateIterator exit");
                 }
@@ -137,6 +138,7 @@ mod tests {
     use super::*;
     use crate::channel::{BackpressureChannel, BackpressurePolicy};
     use std::sync::Arc;
+    use std::time::Instant;
 
     #[test]
     fn test_state_subscriber() {
@@ -174,7 +176,7 @@ mod tests {
         assert_eq!(iterator.next(), Some(2));
 
         // Test exit message
-        tx.send(ActionOp::Exit).unwrap();
+        tx.send(ActionOp::Exit(Instant::now())).unwrap();
         assert_eq!(iterator.next(), None);
     }
 

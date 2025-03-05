@@ -17,6 +17,9 @@ pub(crate) trait Metrics: Send + Sync {
     /// action_dropped is called when an action is dropped.
     fn action_dropped(&self, data: Option<&dyn Any>) {}
 
+    /// action_executed is called when an action is processed in which contains the total time spent to process the action.
+    fn action_executed(&self, data: Option<&dyn Any>, duration: Duration) {}
+
     /// middleware_execution_time is called when a middleware is executed,
     /// it includes the time spent of reducing the action and the time spent in the middleware
     fn middleware_executed(
@@ -29,7 +32,14 @@ pub(crate) trait Metrics: Send + Sync {
     }
 
     /// action_reduced is called when an action is reduced.
-    fn action_reduced(&self, data: Option<&dyn Any>, duration: Duration) {}
+    /// `duration_from_received` contains the total time spent from receiving to reducing.
+    fn action_reduced(
+        &self,
+        data: Option<&dyn Any>,
+        duration: Duration,
+        duration_from_received: Duration,
+    ) {
+    }
 
     /// effect_issued is called when the number of effects issued.
     fn effect_issued(&self, count: usize) {}
@@ -55,8 +65,13 @@ pub(crate) struct CountMetrics {
     pub action_received: AtomicUsize,
     /// total number of actions dropped
     pub action_dropped: AtomicUsize,
+    /// total time spent to process actions which includes reducing and notifying states.
+    pub action_execution_time: AtomicUsize,
     /// total number of actions reduced
     pub action_reduced: AtomicUsize,
+    /// total time spent from receiving and reducing the action
+    pub action_received_and_reduced_execution_time: AtomicUsize,
+
     /// total number of effects issued
     pub effect_issued: AtomicUsize,
     // total number of effects executed
@@ -67,6 +82,7 @@ pub(crate) struct CountMetrics {
     pub reducer_time_min: AtomicUsize,
     /// total time spent in reducers
     pub reducer_execution_time: AtomicUsize,
+
     /// total number of middleware executed
     pub middleware_executed: AtomicUsize,
     /// max time spent in middleware
@@ -100,7 +116,9 @@ impl Default for CountMetrics {
         Self {
             action_received: AtomicUsize::new(0),
             action_dropped: AtomicUsize::new(0),
+            action_execution_time: AtomicUsize::new(0),
             action_reduced: AtomicUsize::new(0),
+            action_received_and_reduced_execution_time: AtomicUsize::new(0),
             effect_issued: AtomicUsize::new(0),
             effect_executed: AtomicUsize::new(0),
             reducer_time_max: AtomicUsize::new(0),
@@ -137,8 +155,18 @@ impl fmt::Display for CountMetrics {
         )?;
         write!(
             f,
+            ", action_execution_time: {:?}",
+            self.action_execution_time.load(Ordering::SeqCst)
+        )?;
+        write!(
+            f,
             ", action_reduced: {:?}",
             self.action_reduced.load(Ordering::SeqCst)
+        )?;
+        write!(
+            f,
+            ", action_received_and_reduced_execution_time: {:?}",
+            self.action_received_and_reduced_execution_time.load(Ordering::SeqCst)
         )?;
         write!(
             f,
@@ -215,6 +243,7 @@ impl fmt::Display for CountMetrics {
             ", error_occurred: {:?}",
             self.error_occurred.load(Ordering::SeqCst)
         )?;
+
         Ok(())
     }
 }
@@ -226,6 +255,10 @@ impl Metrics for CountMetrics {
     }
     fn action_dropped(&self, data: Option<&dyn Any>) {
         self.action_dropped.fetch_add(1, Ordering::SeqCst);
+    }
+    fn action_executed(&self, data: Option<&dyn Any>, duration: Duration) {
+        let duration_ms = duration.as_millis() as usize;
+        self.action_execution_time.fetch_add(duration_ms, Ordering::SeqCst);
     }
 
     fn middleware_executed(
@@ -248,7 +281,12 @@ impl Metrics for CountMetrics {
         self.middleware_execution_time.fetch_add(duration_ms, Ordering::SeqCst);
     }
 
-    fn action_reduced(&self, data: Option<&dyn Any>, duration: Duration) {
+    fn action_reduced(
+        &self,
+        data: Option<&dyn Any>,
+        duration: Duration,
+        duration_from_received: Duration,
+    ) {
         self.action_reduced.fetch_add(1, Ordering::SeqCst);
         let duration_ms = duration.as_millis() as usize;
         if duration_ms > self.reducer_time_max.load(Ordering::SeqCst) {
@@ -260,6 +298,10 @@ impl Metrics for CountMetrics {
             self.reducer_time_min.store(duration_ms, Ordering::SeqCst);
         }
         self.reducer_execution_time.fetch_add(duration_ms, Ordering::SeqCst);
+        self.action_received_and_reduced_execution_time.fetch_add(
+            duration_from_received.as_millis() as usize,
+            Ordering::SeqCst,
+        );
     }
 
     fn effect_issued(&self, count: usize) {
@@ -313,6 +355,7 @@ impl CountMetrics {
         self.action_received.store(0, Ordering::SeqCst);
         self.action_dropped.store(0, Ordering::SeqCst);
         self.action_reduced.store(0, Ordering::SeqCst);
+        self.action_received_and_reduced_execution_time.store(0, Ordering::SeqCst);
         self.effect_issued.store(0, Ordering::SeqCst);
         self.effect_executed.store(0, Ordering::SeqCst);
         self.reducer_time_max.store(0, Ordering::SeqCst);
@@ -340,6 +383,9 @@ pub struct MetricsSnapshot {
     pub action_received: usize,
     /// total number of actions dropped
     pub action_dropped: usize,
+    /// total time spent to process actions which includes received and reduced states.
+    pub action_received_and_reduced_execution_time: usize,
+
     /// total number of actions reduced
     pub action_reduced: usize,
     /// total number of effects issued
@@ -386,6 +432,7 @@ impl Default for MetricsSnapshot {
             action_received: 0,
             action_dropped: 0,
             action_reduced: 0,
+            action_received_and_reduced_execution_time: 0,
             effect_issued: 0,
             effect_executed: 0,
             reducer_time_max: 0,
@@ -413,6 +460,9 @@ impl From<&CountMetrics> for MetricsSnapshot {
             action_received: value.action_received.load(Ordering::SeqCst),
             action_dropped: value.action_dropped.load(Ordering::SeqCst),
             action_reduced: value.action_reduced.load(Ordering::SeqCst),
+            action_received_and_reduced_execution_time: value
+                .action_received_and_reduced_execution_time
+                .load(Ordering::SeqCst),
             effect_issued: value.effect_issued.load(Ordering::SeqCst),
             effect_executed: value.effect_executed.load(Ordering::SeqCst),
             reducer_time_max: value.reducer_time_max.load(Ordering::SeqCst),
@@ -442,6 +492,9 @@ impl Sub<MetricsSnapshot> for MetricsSnapshot {
             action_received: self.action_received - rhs.action_received,
             action_dropped: self.action_dropped - rhs.action_dropped,
             action_reduced: self.action_reduced - rhs.action_reduced,
+            action_received_and_reduced_execution_time: self
+                .action_received_and_reduced_execution_time
+                - rhs.action_received_and_reduced_execution_time,
             effect_issued: self.effect_issued - rhs.effect_issued,
             effect_executed: self.effect_executed - rhs.effect_executed,
             reducer_time_max: self.reducer_time_max - rhs.reducer_time_max,
