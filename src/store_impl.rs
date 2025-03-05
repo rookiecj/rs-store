@@ -2,10 +2,7 @@ use crate::channel::{BackpressureChannel, BackpressurePolicy, SenderChannel};
 use crate::dispatcher::Dispatcher;
 use crate::metrics::{CountMetrics, Metrics, MetricsSnapshot};
 use crate::middleware::Middleware;
-use crate::{
-    DispatchOp, Effect, MiddlewareOp, Reducer, Selector, SelectorSubscriber, Subscriber,
-    Subscription,
-};
+use crate::{DispatchOp, Effect, MiddlewareOp, Reducer, Selector, SelectorSubscriber, StoreChannel, Subscriber, Subscription};
 use fmt::Debug;
 use rusty_pool::ThreadPool;
 use std::fmt;
@@ -526,24 +523,12 @@ where
         }
 
         if need_notify {
-            #[cfg(feature = "notify-channel")]
-            if let Some(notify_tx) = self.notify_tx.lock().unwrap().as_ref() {
-                let _ = notify_tx.send(ActionOp::Action((
-                    _action_received_at,
-                    next_state.clone(),
-                    action.clone(),
-                )));
+            let subscribers = self.subscribers.lock().unwrap().clone();
+            for subscriber in subscribers.iter() {
+                subscriber.on_notify(next_state, action);
             }
-
-            #[cfg(not(feature = "notify-channel"))]
-            {
-                let subscribers = self.subscribers.lock().unwrap().clone();
-                for subscriber in subscribers.iter() {
-                    subscriber.on_notify(next_state, action)
-                }
-                let duration = _notify_start.elapsed();
-                self.metrics.subscriber_notified(Some(action), subscribers.len(), duration);
-            }
+            let duration = _notify_start.elapsed();
+            self.metrics.subscriber_notified(Some(action), subscribers.len(), duration);
         }
     }
 
@@ -669,6 +654,63 @@ where
 
         let subscription = self.add_subscriber(Arc::new(StateSubscriber::new(iter_tx)));
         StateIterator::new(iter_rx, subscription)
+    }
+
+    /// Creates a new channel context for subscribing to store updates
+    ///
+    /// ### Parameters
+    /// * capacity: Channel buffer capacity
+    /// * policy: Backpressure policy for when channel is full
+    pub fn channeled(
+        &self,
+        capacity: usize,
+        policy: BackpressurePolicy,
+    ) -> StoreChannel<State, Action> {
+        let (tx, rx) = BackpressureChannel::<(Instant, State, Action)>::pair_with(
+            "store_channel",
+            capacity,
+            policy,
+            Some(self.metrics.clone()),
+        );
+
+        // Create channel subscriber
+        let subscriber = Arc::new(ChanneledSubscriber::new(tx));
+        let subscription = self.add_subscriber(subscriber);
+
+        StoreChannel {
+            rx,
+            subscription,
+        }
+    }
+}
+
+
+/// Subscriber implementation that forwards store updates to a channel
+pub(crate) struct ChanneledSubscriber<State, Action>
+where
+    State: Send + Sync + Clone + 'static,
+    Action: Send + Sync + Clone + 'static,
+{
+    tx: SenderChannel<(Instant, State, Action)>,
+}
+
+impl<State, Action> ChanneledSubscriber<State, Action>
+where
+    State: Send + Sync + Clone + 'static,
+    Action: Send + Sync + Clone + 'static,
+{
+    pub(crate) fn new(tx: SenderChannel<(Instant, State, Action)>) -> Self {
+        Self { tx }
+    }
+}
+
+impl<State, Action> Subscriber<State, Action> for ChanneledSubscriber<State, Action>
+where
+    State: Send + Sync + Clone + 'static,
+    Action: Send + Sync + Clone + 'static,
+{
+    fn on_notify(&self, state: &State, action: &Action) {
+        let _ = self.tx.send(ActionOp::Action((Instant::now(), state.clone(), action.clone())));
     }
 }
 

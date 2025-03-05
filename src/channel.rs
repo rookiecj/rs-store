@@ -26,13 +26,13 @@ pub(crate) enum SenderError<T> {
 
 /// Channel to hold the sender with backpressure policy
 #[derive(Clone)]
-pub(crate) struct SenderChannel<Action>
+pub(crate) struct SenderChannel<T>
 where
-    Action: Send + Sync + Clone + 'static,
+    T: Send + Sync + Clone + 'static,
 {
     _name: String,
-    sender: Sender<ActionOp<Action>>,
-    receiver: Receiver<ActionOp<Action>>,
+    sender: Sender<ActionOp<T>>,
+    receiver: Receiver<ActionOp<T>>,
     policy: BackpressurePolicy,
     metrics: Option<Arc<dyn Metrics + Send + Sync>>,
 }
@@ -47,11 +47,11 @@ where
     }
 }
 
-impl<Action> SenderChannel<Action>
+impl<T> SenderChannel<T>
 where
-    Action: Send + Sync + Clone + 'static,
+    T: Send + Sync + Clone + 'static,
 {
-    pub fn send(&self, item: ActionOp<Action>) -> Result<i64, SenderError<ActionOp<Action>>> {
+    pub fn send(&self, item: ActionOp<T>) -> Result<i64, SenderError<ActionOp<T>>> {
         let r = match self.policy {
             BackpressurePolicy::BlockOnFull => {
                 match self.sender.send(item).map_err(|e| SenderError::SendError(e.0)) {
@@ -108,12 +108,12 @@ where
 }
 
 #[allow(dead_code)]
-pub(crate) struct ReceiverChannel<Action>
+pub(crate) struct ReceiverChannel<T>
 where
-    Action: Send + Sync + Clone + 'static,
+    T: Send + Sync + Clone + 'static,
 {
     name: String,
-    receiver: Receiver<ActionOp<Action>>,
+    receiver: Receiver<ActionOp<T>>,
     metrics: Option<Arc<dyn Metrics + Send + Sync>>,
 }
 
@@ -127,37 +127,37 @@ where
     }
 }
 
-impl<Action> ReceiverChannel<Action>
+impl<T> ReceiverChannel<T>
 where
-    Action: Send + Sync + Clone + 'static,
+    T: Send + Sync + Clone + 'static,
 {
-    pub fn recv(&self) -> Option<ActionOp<Action>> {
+    pub fn recv(&self) -> Option<ActionOp<T>> {
         self.receiver.recv().ok()
     }
 
     #[allow(dead_code)]
-    pub fn try_recv(&self) -> Option<ActionOp<Action>> {
+    pub fn try_recv(&self) -> Option<ActionOp<T>> {
         self.receiver.try_recv().ok()
     }
 }
 
 /// Channel with back pressure
-pub(crate) struct BackpressureChannel<Action>
+pub(crate) struct BackpressureChannel<MSG>
 where
-    Action: Send + Sync + Clone + 'static,
+    MSG: Send + Sync + Clone + 'static,
 {
-    phantom_data: PhantomData<Action>,
+    phantom_data: PhantomData<MSG>,
 }
 
-impl<Action> BackpressureChannel<Action>
+impl<MSG> BackpressureChannel<MSG>
 where
-    Action: Send + Sync + Clone + 'static,
+    MSG: Send + Sync + Clone + 'static,
 {
     #[allow(dead_code)]
     pub fn pair(
         capacity: usize,
         policy: BackpressurePolicy,
-    ) -> (SenderChannel<Action>, ReceiverChannel<Action>) {
+    ) -> (SenderChannel<MSG>, ReceiverChannel<MSG>) {
         Self::pair_with("<anon>", capacity, policy, None)
     }
 
@@ -166,7 +166,7 @@ where
         capacity: usize,
         policy: BackpressurePolicy,
         metrics: Option<Arc<dyn Metrics + Send + Sync>>,
-    ) -> (SenderChannel<Action>, ReceiverChannel<Action>) {
+    ) -> (SenderChannel<MSG>, ReceiverChannel<MSG>) {
         Self::pair_with("<anon>", capacity, policy, metrics)
     }
 
@@ -176,7 +176,7 @@ where
         capacity: usize,
         policy: BackpressurePolicy,
         metrics: Option<Arc<dyn Metrics + Send + Sync>>,
-    ) -> (SenderChannel<Action>, ReceiverChannel<Action>) {
+    ) -> (SenderChannel<MSG>, ReceiverChannel<MSG>) {
         let (sender, receiver) = channel::bounded(capacity);
         (
             SenderChannel {
