@@ -9,18 +9,18 @@ pub enum MiddlewareOp {
     ContinueAction,
     /// DoneAction is used to stop reducing the action
     DoneAction,
-    /// (experimental) BreakChain is used to break the middleware chain to 'before_reduce' or 'after_reduce'
+    /// (experimental) BreakChain is used to break the middleware chain
     BreakChain,
 }
 
-/// Middleware is a function that is called before and after dispatch
-/// 'before_reduce' -> 'do_reduce' -> 'after_reduce'
+/// Middleware is a function that is called before each step of the dispatch process.
+/// 'before_reduce' -> 'reduce' -> 'before_effect' -> 'effect' -> 'before_notify' -> 'notify'
 ///
 /// if there are multiple middlewares, they are called in the order they are added
-/// 'before_reduce1' -> 'before_reduce2' -> 'do_reduce'
+/// 'before_reduce1' -> 'before_reduce2' -> 'reduce'
 ///
 /// if 'BreakChain' is returned, it breaks the middleware chain to 'before_xxx'
-/// when reducing: 'before_reduce1': 'BreakChain' -> skip 'before_reduce2' -> 'do_reduce'
+/// when reducing: 'before_reduce1': 'BreakChain' -> skip 'before_reduce2' -> 'reduce'
 pub trait Middleware<State, Action> {
     /// called before reduce
     ///

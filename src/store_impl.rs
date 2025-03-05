@@ -22,7 +22,8 @@ where
     Action: Send + Sync + Clone + 'static,
 {
     Action(Action),
-    Exit,
+    #[allow(dead_code)]
+    Exit(Instant),
 }
 
 /// StoreImpl is the default implementation of a Redux store
@@ -42,7 +43,7 @@ where
     pub(crate) metrics: Arc<CountMetrics>,
     pub(crate) pool: Mutex<Option<ThreadPool>>,
     #[cfg(feature = "notify-channel")]
-    notify_tx: Mutex<Option<SenderChannel<(State, Action)>>>,
+    notify_tx: Mutex<Option<SenderChannel<(Instant, State, Action)>>>,
 }
 
 /// Subscription for a subscriber
@@ -117,7 +118,7 @@ where
         );
 
         #[cfg(feature = "notify-channel")]
-        let (notify_tx, notify_rx) = BackpressureChannel::<(State, Action)>::pair_with(
+        let (notify_tx, notify_rx) = BackpressureChannel::<(Instant, State, Action)>::pair_with(
             "notify",
             capacity,
             policy.clone(),
@@ -154,7 +155,7 @@ where
 
                 while let Some(msg) = notify_rx.recv() {
                     match msg {
-                        ActionOp::Action((state, action)) => {
+                        ActionOp::Action((at, state, action)) => {
                             let start = Instant::now();
 
                             let subscribers = notify_store.subscribers.lock().unwrap().clone();
@@ -168,10 +169,13 @@ where
                                 subscribers.len(),
                                 duration,
                             );
+
+                            notify_store.metrics.action_executed(Some(&action), at.elapsed());
                         }
-                        ActionOp::Exit => {
+                        ActionOp::Exit(at) => {
                             #[cfg(any(dev))]
                             eprintln!("store: notify loop exit");
+                            notify_store.metrics.action_executed(None, at.elapsed());
                             break;
                         }
                     }
@@ -190,17 +194,22 @@ where
             #[cfg(dev)]
             eprintln!("store: reducer thread started");
 
-            while let Some(action) = rx.recv() {
-                rx_store.metrics.action_received(Some(&action));
+            while let Some(action_op) = rx.recv() {
+                let action_received_at = Instant::now();
+                rx_store.metrics.action_received(Some(&action_op));
 
-                match action {
+                match action_op {
                     ActionOp::Action(action) => {
                         let the_dispatcher = Arc::new(rx_store.clone());
 
                         // do reduce
                         let current_state = rx_store.state.lock().unwrap().clone();
-                        let (need_dispatch, new_state, effects) =
-                            rx_store.do_reduce(&action, current_state, the_dispatcher.clone());
+                        let (need_dispatch, new_state, effects) = rx_store.do_reduce(
+                            &action,
+                            current_state,
+                            the_dispatcher.clone(),
+                            action_received_at.clone(),
+                        );
                         *rx_store.state.lock().unwrap() = new_state.clone();
 
                         // do effects remain
@@ -215,11 +224,20 @@ where
 
                         // do notify subscribers
                         if need_dispatch {
-                            rx_store.do_notify(&action, &new_state, the_dispatcher.clone());
+                            rx_store.do_notify(
+                                &action,
+                                &new_state,
+                                the_dispatcher.clone(),
+                                action_received_at.clone(),
+                            );
                         }
+
+                        rx_store
+                            .metrics
+                            .action_executed(Some(&action), action_received_at.elapsed());
                     }
-                    ActionOp::Exit => {
-                        rx_store.on_close();
+                    ActionOp::Exit(_) => {
+                        rx_store.on_close(action_received_at.clone());
                         #[cfg(any(dev))]
                         eprintln!("store: reducer loop exit");
                         break;
@@ -322,6 +340,7 @@ where
         action: &Action,
         mut state: State,
         dispatcher: Arc<dyn Dispatcher<Action>>,
+        action_received_at: Instant,
     ) -> (bool, State, Option<Vec<Effect<Action>>>) {
         //let state = self.state.lock().unwrap().clone();
 
@@ -385,7 +404,11 @@ where
 
             // reducer 실행 시간 측정 종료 및 기록
             let reducer_duration = reducer_start.elapsed();
-            self.metrics.action_reduced(Some(action), reducer_duration);
+            self.metrics.action_reduced(
+                Some(action),
+                reducer_duration,
+                action_received_at.elapsed(),
+            );
         }
 
         (need_dispatch, state, Some(effects))
@@ -465,6 +488,7 @@ where
         action: &Action,
         next_state: &State,
         dispatcher: Arc<dyn Dispatcher<Action>>,
+        _action_received_at: Instant,
     ) {
         let _notify_start = Instant::now();
         self.metrics.state_notified(Some(next_state));
@@ -504,7 +528,11 @@ where
         if need_notify {
             #[cfg(feature = "notify-channel")]
             if let Some(notify_tx) = self.notify_tx.lock().unwrap().as_ref() {
-                let _ = notify_tx.send(ActionOp::Action((next_state.clone(), action.clone())));
+                let _ = notify_tx.send(ActionOp::Action((
+                    _action_received_at,
+                    next_state.clone(),
+                    action.clone(),
+                )));
             }
 
             #[cfg(not(feature = "notify-channel"))]
@@ -519,7 +547,7 @@ where
         }
     }
 
-    fn on_close(&self) {
+    fn on_close(&self, action_received_at: Instant) {
         #[cfg(dev)]
         eprintln!("store: on_close");
 
@@ -527,7 +555,7 @@ where
         if let Some(notify_tx) = self.notify_tx.lock().unwrap().take() {
             #[cfg(any(dev))]
             eprintln!("store: closing notify channel");
-            match notify_tx.send(ActionOp::Exit) {
+            match notify_tx.send(ActionOp::Exit(action_received_at)) {
                 Ok(_) => {
                     #[cfg(any(dev))]
                     eprintln!("store: notify channel sent exit");
@@ -539,6 +567,11 @@ where
             }
             drop(notify_tx);
         }
+
+        #[cfg(not(feature = "notify-channel"))]
+        {
+            self.metrics.action_executed(None, action_received_at.elapsed());
+        }
     }
 
     /// close the store
@@ -546,7 +579,7 @@ where
         if let Some(tx) = self.dispatch_tx.lock().unwrap().take() {
             #[cfg(any(dev))]
             eprintln!("store: closing dispatch channel");
-            match tx.send(ActionOp::Exit) {
+            match tx.send(ActionOp::Exit(Instant::now())) {
                 Ok(_) => {
                     #[cfg(any(dev))]
                     eprintln!("store: dispatch channel sent exit");
