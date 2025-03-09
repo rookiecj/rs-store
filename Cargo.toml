@@ -1,6 +1,6 @@
 [package]
 name = "rs-store"
-# 2.0.0 feat: channeled subscription
+# 2.0.2 feat: channeled subscription
 version = "2.0.0"
 edition = "2021"
 authors = ["Changju Lee", "Changju Lee<rookiecj@gmail.com>"]
