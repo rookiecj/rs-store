@@ -1,7 +1,5 @@
-use std::sync::Mutex;
-use std::time::Instant;
-use crate::channel::{ReceiverChannel};
 use crate::Selector;
+use std::sync::Mutex;
 
 /// Subscriber is a trait that can be implemented to receive notifications from the store.
 pub trait Subscriber<State, Action>
@@ -12,7 +10,7 @@ where
     /// on_notify is called when the store is notified of an action.
     fn on_notify(&self, state: &State, action: &Action);
 
-    /// on_unsubscribe is called when the subscriber is unsubscribed from the store.
+    /// on_unsubscribe is called when a subscriber is unsubscribed from the store.
     fn on_unsubscribe(&self) {}
 }
 
@@ -113,18 +111,6 @@ where
             }
         }
     }
-}
-
-/// A channel context that can be used to subscribe to store updates in a separate context
-pub struct StoreChannel<State, Action>
-where
-    State: Send + Sync + Clone + 'static,
-    Action: Send + Sync + Clone + 'static,
-{
-    #[allow(dead_code)]
-    pub(crate) rx: ReceiverChannel<(Instant, State, Action)>,
-    #[allow(dead_code)]
-    pub(crate) subscription: Box<dyn Subscription>,
 }
 
 #[cfg(test)]

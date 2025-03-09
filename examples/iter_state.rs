@@ -1,7 +1,5 @@
-#[cfg(feature = "notify-channel")]
 use rs_store::{DispatchOp, FnReducer, StoreImpl};
 
-#[cfg(feature = "notify-channel")]
 fn main() {
     // new store with reducer
     let store = StoreImpl::new_with_reducer(
@@ -12,23 +10,18 @@ fn main() {
         })),
     );
 
-    let mut iter = store.iter_state();
+    let mut iter = store.iter();
 
     // dispatch actions
     let _ = store.dispatch(41);
     let _ = store.dispatch(1);
 
-    assert_eq!(iter.next(), Some(41));
-    assert_eq!(iter.next(), Some(42));
+    assert_eq!(iter.next(), Some((41, 41)));
+    assert_eq!(iter.next(), Some((42, 1)));
 
     // stop the store
     store.stop();
 
     assert_eq!(iter.next(), None);
     eprintln!("exit");
-}
-
-#[cfg(not(feature = "notify-channel"))]
-fn main() {
-    println!("This example requires the 'notify-channel' feature");
 }

@@ -30,7 +30,7 @@ where
 {
     fn drop(&mut self) {
         self.inner.stop();
-        #[cfg(any(dev))]
+        #[cfg(dev)]
         eprintln!("store: '{}' Store dropped", self.name);
     }
 }

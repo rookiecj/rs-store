@@ -22,9 +22,6 @@ strip = "debuginfo"
 # panic = 'abort'     # Abort on panic
 debug = true # Enable debug symbols. For example, we can use `dwarfdump` to check crash traces.
 
-[features]
-full = ["notify-channel"]
-notify-channel = []
 
 [dependencies]
 thiserror = "1.0"

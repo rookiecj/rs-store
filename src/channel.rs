@@ -37,7 +37,7 @@ where
     metrics: Option<Arc<dyn Metrics + Send + Sync>>,
 }
 
-#[cfg(any(dev))]
+#[cfg(dev)]
 impl<Action> Drop for SenderChannel<Action>
 where
     Action: Send + Sync + Clone + 'static,
@@ -117,7 +117,7 @@ where
     metrics: Option<Arc<dyn Metrics + Send + Sync>>,
 }
 
-#[cfg(any(dev))]
+#[cfg(dev)]
 impl<Action> Drop for ReceiverChannel<Action>
 where
     Action: Send + Sync + Clone + 'static,
