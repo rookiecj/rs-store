@@ -22,6 +22,7 @@ rs-store provides a predictable state container inspired by Redux, featuring thr
 - 🎯 Bounded channel size with sync channels
 - 🔄 Decoupling state updates from notification delivery
 - 📚 State Iterator support
+- 📚 Channeled subscription support
 - 📚 Selector support
 - 📊 Metrics support
 - 🧪 Comprehensive test coverage
@@ -32,14 +33,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-rs-store = "1.1"
-```
-
-with the `notify-channel` feature:
-
-```toml
-[dependencies]
-rs-store = { version = "1.1", features = ["notify-channel"] }
+rs-store = "2.0"
 ```
 
 ## Quick Start
@@ -97,6 +91,10 @@ The notification channel feature provides a dedicated channel for state notifica
 
 You can subscribe to a Store to get the state history, But the state iterator feature provides a way to iterate over the state.
 
+### Channeled Subscription
+
+The channeled subscription feature provides a way to subscribe to a store with a channel.
+
 ### Selector
 
 The selector feature provides a way to select a part of the state.
@@ -110,7 +108,7 @@ The metrics feature provides a way to collect metrics.
 
 For detailed documentation, visit:
 
-- [API Documentation (docs.rs)](https://docs.rs/rs-store/1.1.0/rs_store/)
+- [API Documentation (docs.rs)](https://docs.rs/rs-store/2.0.0/rs_store/)
 - [Crate Page (crates.io)](https://crates.io/crates/rs-store)
 
 ## Implementation Status

@@ -44,6 +44,9 @@ where
         subscriber: Arc<dyn Subscriber<State, Action> + Send + Sync>,
     ) -> Box<dyn Subscription>;
 
+    /// Iterate over the store's state and action pairs
+    //fn iter(&self) -> impl Iterator<Item = (State, Action)>;
+
     /// Stop the store
     fn stop(&self);
 }

@@ -67,8 +67,15 @@ pub(crate) struct CountMetrics {
     pub action_dropped: AtomicUsize,
     /// total time spent to process actions which includes reducing and notifying states.
     pub action_execution_time: AtomicUsize,
+
     /// total number of actions reduced
     pub action_reduced: AtomicUsize,
+    /// max time spent in reducers
+    pub reducer_time_max: AtomicUsize,
+    /// min time spent in reducers
+    pub reducer_time_min: AtomicUsize,
+    /// total time spent in reducers
+    pub reducer_execution_time: AtomicUsize,
     /// total time spent from receiving and reducing the action
     pub action_received_and_reduced_execution_time: AtomicUsize,
 
@@ -76,12 +83,6 @@ pub(crate) struct CountMetrics {
     pub effect_issued: AtomicUsize,
     // total number of effects executed
     pub effect_executed: AtomicUsize,
-    /// max time spent in reducers
-    pub reducer_time_max: AtomicUsize,
-    /// min time spent in reducers
-    pub reducer_time_min: AtomicUsize,
-    /// total time spent in reducers
-    pub reducer_execution_time: AtomicUsize,
 
     /// total number of middleware executed
     pub middleware_executed: AtomicUsize,
@@ -91,6 +92,7 @@ pub(crate) struct CountMetrics {
     pub middleware_time_min: AtomicUsize,
     /// total time spent in middleware
     pub middleware_execution_time: AtomicUsize,
+
     /// total number of states notified
     pub state_notified: AtomicUsize,
     /// total number of subscribers notified
@@ -118,12 +120,12 @@ impl Default for CountMetrics {
             action_dropped: AtomicUsize::new(0),
             action_execution_time: AtomicUsize::new(0),
             action_reduced: AtomicUsize::new(0),
-            action_received_and_reduced_execution_time: AtomicUsize::new(0),
             effect_issued: AtomicUsize::new(0),
             effect_executed: AtomicUsize::new(0),
             reducer_time_max: AtomicUsize::new(0),
             reducer_time_min: AtomicUsize::new(0),
             reducer_execution_time: AtomicUsize::new(0),
+            action_received_and_reduced_execution_time: AtomicUsize::new(0),
             middleware_executed: AtomicUsize::new(0),
             middleware_time_max: AtomicUsize::new(0),
             middleware_time_min: AtomicUsize::new(0),
@@ -273,9 +275,9 @@ impl Metrics for CountMetrics {
         if duration_ms > self.middleware_time_max.load(Ordering::SeqCst) {
             self.middleware_time_max.store(duration_ms, Ordering::SeqCst);
         }
-        if self.middleware_time_min.load(Ordering::SeqCst) == 0 {
-            self.middleware_time_min.store(duration_ms, Ordering::SeqCst);
-        } else if duration_ms < self.middleware_time_min.load(Ordering::SeqCst) {
+        if self.middleware_time_min.load(Ordering::SeqCst) == 0
+            || duration_ms < self.middleware_time_min.load(Ordering::SeqCst)
+        {
             self.middleware_time_min.store(duration_ms, Ordering::SeqCst);
         }
         self.middleware_execution_time.fetch_add(duration_ms, Ordering::SeqCst);
@@ -292,9 +294,9 @@ impl Metrics for CountMetrics {
         if duration_ms > self.reducer_time_max.load(Ordering::SeqCst) {
             self.reducer_time_max.store(duration_ms, Ordering::SeqCst);
         }
-        if self.reducer_time_min.load(Ordering::SeqCst) == 0 {
-            self.reducer_time_min.store(duration_ms, Ordering::SeqCst);
-        } else if duration_ms < self.reducer_time_min.load(Ordering::SeqCst) {
+        if self.reducer_time_min.load(Ordering::SeqCst) == 0
+            || duration_ms < self.reducer_time_min.load(Ordering::SeqCst)
+        {
             self.reducer_time_min.store(duration_ms, Ordering::SeqCst);
         }
         self.reducer_execution_time.fetch_add(duration_ms, Ordering::SeqCst);
@@ -322,9 +324,9 @@ impl Metrics for CountMetrics {
         if duration_ms > self.subscriber_time_max.load(Ordering::SeqCst) {
             self.subscriber_time_max.store(duration_ms, Ordering::SeqCst);
         }
-        if self.subscriber_time_min.load(Ordering::SeqCst) == 0 {
-            self.subscriber_time_min.store(duration_ms, Ordering::SeqCst);
-        } else if duration_ms < self.subscriber_time_min.load(Ordering::SeqCst) {
+        if self.subscriber_time_min.load(Ordering::SeqCst) == 0
+            || duration_ms < self.subscriber_time_min.load(Ordering::SeqCst)
+        {
             self.subscriber_time_min.store(duration_ms, Ordering::SeqCst);
         }
         self.subscriber_execution_time.fetch_add(duration_ms, Ordering::SeqCst);
@@ -378,6 +380,7 @@ impl CountMetrics {
 
 /// MetricsSnapshot is a snapshot of the metrics.
 #[allow(dead_code)]
+#[derive(Default)]
 pub struct MetricsSnapshot {
     /// total number of actions received
     pub action_received: usize,
@@ -424,34 +427,6 @@ pub struct MetricsSnapshot {
     //pub remaining_queue_min: usize,
     /// total number of errors occurred
     pub error_occurred: usize,
-}
-
-impl Default for MetricsSnapshot {
-    fn default() -> Self {
-        Self {
-            action_received: 0,
-            action_dropped: 0,
-            action_reduced: 0,
-            action_received_and_reduced_execution_time: 0,
-            effect_issued: 0,
-            effect_executed: 0,
-            reducer_time_max: 0,
-            reducer_time_min: 0,
-            reducer_execution_time: 0,
-            middleware_executed: 0,
-            middleware_time_max: 0,
-            middleware_time_min: 0,
-            middleware_execution_time: 0,
-            state_notified: 0,
-            subscriber_notified: 0,
-            subscriber_time_max: 0,
-            subscriber_time_min: 0,
-            subscriber_execution_time: 0,
-            remaining_queue: 0,
-            remaining_queue_max: 0,
-            error_occurred: 0,
-        }
-    }
 }
 
 impl From<&CountMetrics> for MetricsSnapshot {

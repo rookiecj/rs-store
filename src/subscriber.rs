@@ -1,6 +1,5 @@
-use std::sync::Mutex;
-
 use crate::Selector;
+use std::sync::Mutex;
 
 /// Subscriber is a trait that can be implemented to receive notifications from the store.
 pub trait Subscriber<State, Action>
@@ -11,7 +10,7 @@ where
     /// on_notify is called when the store is notified of an action.
     fn on_notify(&self, state: &State, action: &Action);
 
-    /// on_unsubscribe is called when the subscriber is unsubscribed from the store.
+    /// on_unsubscribe is called when a subscriber is unsubscribed from the store.
     fn on_unsubscribe(&self) {}
 }
 
