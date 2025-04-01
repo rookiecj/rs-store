@@ -33,7 +33,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-rs-store = "2.0"
+rs-store = "2.1"
 ```
 
 ## Quick Start
@@ -108,7 +108,7 @@ The metrics feature provides a way to collect metrics.
 
 For detailed documentation, visit:
 
-- [API Documentation (docs.rs)](https://docs.rs/rs-store/2.0.0/rs_store/)
+- [API Documentation (docs.rs)](https://docs.rs/rs-store/2.10.0/rs_store/)
 - [Crate Page (crates.io)](https://crates.io/crates/rs-store)
 
 ## Implementation Status
