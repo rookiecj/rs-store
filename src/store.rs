@@ -1,4 +1,4 @@
-use crate::{Subscriber, Subscription};
+use crate::{BackpressurePolicy, Subscriber, Subscription};
 use std::sync::Arc;
 
 /// Default capacity for the channel
@@ -46,6 +46,27 @@ where
 
     /// Iterate over the store's state and action pairs
     //fn iter(&self) -> impl Iterator<Item = (State, Action)>;
+
+    /// subscribe to the store in new context
+    fn subscribed(
+        &self,
+        subscriber: Box<dyn Subscriber<State, Action> + Send + Sync>,
+    ) -> Result<Box<dyn Subscription>, StoreError>;
+
+    /// subscribe to the store in new context
+    ///
+    /// ### Parameters
+    /// * capacity: Channel buffer capacity
+    /// * policy: Backpressure policy for when channel is full
+    ///
+    /// ### Return
+    /// * Subscription: Subscription for the store,
+    fn subscribed_with(
+        &self,
+        capacity: usize,
+        policy: BackpressurePolicy,
+        subscriber: Box<dyn Subscriber<State, Action> + Send + Sync>,
+    ) -> Result<Box<dyn Subscription>, StoreError>;
 
     /// Stop the store
     fn stop(&self);

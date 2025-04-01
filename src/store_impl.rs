@@ -8,9 +8,10 @@ use crate::{
 };
 use fmt::Debug;
 use rusty_pool::ThreadPool;
-use std::fmt;
 use std::sync::{Arc, Mutex};
+use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
+use std::{fmt, thread};
 
 use crate::iterator::{StateIterator, StateIteratorSubscriber};
 use crate::store::{Store, StoreError, DEFAULT_CAPACITY, DEFAULT_STORE_NAME};
@@ -42,7 +43,6 @@ where
     pub(crate) metrics: Arc<CountMetrics>,
     /// thread pool for the store
     pub(crate) pool: Mutex<Option<ThreadPool>>,
-    pub(crate) pool_channel: Mutex<Option<ThreadPool>>,
 }
 
 /// Subscription for a subscriber
@@ -126,9 +126,6 @@ where
             metrics,
             pool: Mutex::new(Some(
                 rusty_pool::Builder::new().name(format!("{}-pool", name)).build(),
-            )),
-            pool_channel: Mutex::new(Some(
-                rusty_pool::Builder::new().name(format!("{}-channel-pool", name)).build(),
             )),
         };
 
@@ -264,12 +261,21 @@ where
     pub(crate) fn clear_subscribers(&self) {
         #[cfg(dev)]
         eprintln!("store: clear_subscribers");
-
-        let subscribers = self.subscribers.lock().unwrap().clone();
-        self.subscribers.lock().unwrap().clear();
-
-        for subscriber in subscribers.iter() {
-            subscriber.on_unsubscribe();
+        match self.subscribers.lock() {
+            Ok(mut subscribers) => {
+                for subscriber in subscribers.iter() {
+                    subscriber.on_unsubscribe();
+                }
+                subscribers.clear();
+            }
+            Err(mut e) => {
+                #[cfg(dev)]
+                eprintln!("store: Error while locking subscribers: {:?}", e);
+                for subscriber in e.get_ref().iter() {
+                    subscriber.on_unsubscribe();
+                }
+                e.get_mut().clear();
+            }
         }
     }
 
@@ -511,8 +517,6 @@ where
         // Shutdown the thread pool with timeout
         // lock pool
         let pool_took = self.pool.lock().unwrap().take();
-        // shutdown the store channel pool
-        let pool_channel_took = self.pool_channel.lock().unwrap().take();
         // unlock pool
         if let Some(pool) = pool_took {
             if cfg!(dev) {
@@ -523,17 +527,6 @@ where
             }
             #[cfg(dev)]
             eprintln!("store: shutdown pool");
-        }
-
-        if let Some(pool) = pool_channel_took {
-            if cfg!(dev) {
-                // wait forever
-                pool.shutdown_join();
-            } else {
-                pool.shutdown_join_timeout(Duration::from_secs(3));
-            }
-            #[cfg(dev)]
-            eprintln!("store: shutdown channel pool");
         }
 
         #[cfg(dev)]
@@ -594,12 +587,16 @@ where
     }
 
     /// Creates a new channel context for subscribing to store updates
-    /// with default capacity and drop the oldest policy when channel is full
-    pub fn channeled(
+    /// with default capacity and block on full policy when the channel is full
+    pub fn subscribed(
         &self,
         subscriber: Box<dyn Subscriber<State, Action> + Send + Sync>,
     ) -> Result<Box<dyn Subscription>, StoreError> {
-        self.channeled_with(DEFAULT_CAPACITY, BackpressurePolicy::DropOldest, subscriber)
+        self.subscribed_with(
+            DEFAULT_CAPACITY,
+            BackpressurePolicy::BlockOnFull,
+            subscriber,
+        )
     }
 
     /// Creates a new channel context for subscribing to store updates
@@ -610,53 +607,54 @@ where
     ///
     /// ### Return
     /// * Subscription: Subscription for the store,
-    pub fn channeled_with(
+    pub fn subscribed_with(
         &self,
         capacity: usize,
         policy: BackpressurePolicy,
         subscriber: Box<dyn Subscriber<State, Action> + Send + Sync>,
     ) -> Result<Box<dyn Subscription>, StoreError> {
         let (tx, rx) = BackpressureChannel::<(Instant, State, Action)>::pair_with(
-            "store_channel",
+            format!("{}-channel", self.name).as_str(),
             capacity,
             policy,
             Some(self.metrics.clone()),
         );
 
-        // thread for the store channel
+        // channeled thread
+        let thread_name = format!("{}-channeled-subscriber", self.name);
         let metrics_clone = self.metrics.clone();
-        match self.pool_channel.lock().unwrap().as_ref() {
-            Some(pool) => {
-                pool.execute(move || {
-                    #[cfg(dev)]
-                    eprintln!("store: store channel thread started");
-                    Self::subscribed(rx, subscriber, metrics_clone);
-                });
-            }
-            None => {
+        let builder = thread::Builder::new().name(thread_name.clone());
+        let handle = match builder.spawn(move || {
+            // subscribe to the store
+            Self::subscribed_loop(thread_name, rx, subscriber, metrics_clone);
+        }) {
+            Ok(h) => h,
+            Err(e) => {
                 #[cfg(dev)]
-                eprintln!("store: Error while getting pool");
-                return Err(StoreError::InitError(
-                    "store channel error while getting pool".to_string(),
-                ));
+                eprintln!("store: Error while spawning channel thread: {:?}", e);
+                return Err(StoreError::SubscriptionError(format!(
+                    "Error while spawning channel thread: {:?}",
+                    e
+                )));
             }
-        }
+        };
 
         // subscribe to the store
-        let channel_subscriber = Arc::new(ChanneledSubscriber::new(tx));
+        let channel_subscriber = Arc::new(ChanneledSubscriber::new(handle, tx));
         let subscription = self.add_subscriber(channel_subscriber.clone());
 
-        Ok(Box::new(ChanneledSubscription::new(
-            channel_subscriber,
-            subscription,
-        )))
+        Ok(subscription)
     }
 
-    fn subscribed(
+    fn subscribed_loop(
+        _name: String,
         rx: ReceiverChannel<(Instant, State, Action)>,
         subscriber: Box<dyn Subscriber<State, Action>>,
         metrics: Arc<dyn Metrics>,
     ) {
+        #[cfg(dev)]
+        eprintln!("store: {} channel thread started", _name);
+
         while let Some(msg) = rx.recv() {
             match msg {
                 ActionOp::Action((created_at, state, action)) => {
@@ -672,118 +670,85 @@ where
                 ActionOp::Exit(created_at) => {
                     metrics.action_executed(None, created_at.elapsed());
                     #[cfg(dev)]
-                    eprintln!("store: channel thread loop exit");
+                    eprintln!("store: {} channel thread loop exit", _name);
                     break;
                 }
             }
         }
 
         #[cfg(dev)]
-        eprintln!("store: channel thread done");
-    }
-}
-
-struct ChanneledSubscription<State, Action>
-where
-    State: Send + Sync + Clone + 'static,
-    Action: Send + Sync + Clone + 'static,
-{
-    // subscriber
-    subscriber: Arc<ChanneledSubscriber<State, Action>>,
-    // subscription for the store
-    subscription: Box<dyn Subscription>,
-}
-
-impl<State, Action> Subscription for ChanneledSubscription<State, Action>
-where
-    State: Send + Sync + Clone + 'static,
-    Action: Send + Sync + Clone + 'static,
-{
-    fn unsubscribe(&self) {
-        // unsubscribe from the store
-        self.subscription.unsubscribe();
-
-        // close the channel
-        self.subscriber.unsubscribe();
-    }
-}
-
-impl<State, Action> ChanneledSubscription<State, Action>
-where
-    State: Send + Sync + Clone + 'static,
-    Action: Send + Sync + Clone + 'static,
-{
-    fn new(
-        subscriber: Arc<ChanneledSubscriber<State, Action>>,
-        subscription: Box<dyn Subscription>,
-    ) -> Self {
-        Self {
-            subscriber,
-            subscription,
-        }
+        eprintln!("store: {} channel thread done", _name);
     }
 }
 
 /// Subscriber implementation that forwards store updates to a channel
-struct ChanneledSubscriber<State, Action>
+struct ChanneledSubscriber<T>
 where
-    State: Send + Sync + Clone + 'static,
-    Action: Send + Sync + Clone + 'static,
+    T: Send + Sync + Clone + 'static,
 {
-    tx: SenderChannel<(Instant, State, Action)>,
+    handle: Mutex<Option<JoinHandle<()>>>,
+    tx: Mutex<Option<SenderChannel<T>>>,
 }
 
-impl<State, Action> ChanneledSubscriber<State, Action>
+impl<T> ChanneledSubscriber<T>
 where
-    State: Send + Sync + Clone + 'static,
-    Action: Send + Sync + Clone + 'static,
+    T: Send + Sync + Clone + 'static,
 {
-    pub(crate) fn new(tx: SenderChannel<(Instant, State, Action)>) -> Self {
-        Self { tx }
+    pub(crate) fn new(handle: JoinHandle<()>, tx: SenderChannel<T>) -> Self {
+        Self {
+            handle: Mutex::new(Some(handle)),
+            tx: Mutex::new(Some(tx)),
+        }
+    }
+
+    fn clear_resource(&self) {
+        // drop channel
+        if let Ok(mut tx) = self.tx.lock() {
+            drop(tx.take());
+        }
+        // join the thread
+        if let Ok(mut handle) = self.handle.lock() {
+            if let Some(h) = handle.take() {
+                let _ = h.join();
+            }
+        }
     }
 }
 
-impl<State, Action> Subscriber<State, Action> for ChanneledSubscriber<State, Action>
+impl<State, Action> Subscriber<State, Action> for ChanneledSubscriber<(Instant, State, Action)>
 where
     State: Send + Sync + Clone + 'static,
     Action: Send + Sync + Clone + 'static,
 {
     fn on_notify(&self, state: &State, action: &Action) {
-        match self.tx.send(ActionOp::Action((
-            Instant::now(),
-            state.clone(),
-            action.clone(),
-        ))) {
-            Ok(_) => {}
+        match self.tx.lock() {
+            Ok(tx) => {
+                tx.as_ref().map(|tx| {
+                    tx.send(ActionOp::Action((
+                        Instant::now(),
+                        state.clone(),
+                        action.clone(),
+                    )))
+                });
+            }
             Err(_e) => {
                 #[cfg(dev)]
-                eprintln!("store: Error while sending to subscriber channel: {:?}", _e);
+                eprintln!("store: Error while locking channel: {:?}", _e);
             }
         }
     }
 
     fn on_unsubscribe(&self) {
-        // send exit message to the channel to stop the thread
-        let _ = self.tx.send(ActionOp::Exit(Instant::now()));
+        self.clear_resource();
     }
 }
 
-impl<State, Action> Subscription for ChanneledSubscriber<State, Action>
+impl<T> Subscription for ChanneledSubscriber<T>
 where
-    State: Send + Sync + Clone + 'static,
-    Action: Send + Sync + Clone + 'static,
+    T: Send + Sync + Clone + 'static,
 {
     fn unsubscribe(&self) {
-        match self.tx.send(ActionOp::Exit(Instant::now())) {
-            Ok(_) => {}
-            Err(_e) => {
-                #[cfg(dev)]
-                eprintln!(
-                    "store: Error while sending exit to subscriber channel: {:?}",
-                    _e
-                );
-            }
-        }
+        self.clear_resource();
     }
 }
 
@@ -826,6 +791,22 @@ where
         subscriber: Arc<dyn Subscriber<State, Action> + Send + Sync>,
     ) -> Box<dyn Subscription> {
         self.add_subscriber(subscriber)
+    }
+
+    fn subscribed(
+        &self,
+        subscriber: Box<dyn Subscriber<State, Action> + Send + Sync>,
+    ) -> Result<Box<dyn Subscription>, StoreError> {
+        self.subscribed(subscriber)
+    }
+
+    fn subscribed_with(
+        &self,
+        capacity: usize,
+        policy: BackpressurePolicy,
+        subscriber: Box<dyn Subscriber<State, Action> + Send + Sync>,
+    ) -> Result<Box<dyn Subscription>, StoreError> {
+        self.subscribed_with(capacity, policy, subscriber)
     }
 
     fn stop(&self) {
@@ -883,7 +864,7 @@ mod tests {
     }
 
     #[test]
-    fn test_store_channel_basic() {
+    fn test_store_subscribed_basic() {
         // Setup store with a simple counter
         let initial_state = 0;
         let reducer = Box::new(TestReducer);
@@ -893,7 +874,7 @@ mod tests {
         let received_states = Arc::new(Mutex::new(Vec::new()));
         let subscriber1 = Box::new(TestChannelSubscriber::new(received_states.clone()));
         // Create channel
-        let subscription = store.channeled_with(10, BackpressurePolicy::DropOldest, subscriber1);
+        let subscription = store.subscribed_with(10, BackpressurePolicy::DropOldest, subscriber1);
 
         // Dispatch some actions
         store.dispatch(1).unwrap();
@@ -914,7 +895,7 @@ mod tests {
     }
 
     #[test]
-    fn test_store_channel_backpressure() {
+    fn test_store_subscribed_backpressure() {
         let store = StoreImpl::new_with_reducer(0, Box::new(TestReducer));
 
         let received = Arc::new(Mutex::new(Vec::new()));
@@ -924,7 +905,7 @@ mod tests {
             Duration::from_millis(100),
         ));
         // Create channel with small capacity
-        let subscription = store.channeled_with(1, BackpressurePolicy::DropOldest, subscriber);
+        let subscription = store.subscribed_with(1, BackpressurePolicy::DropOldest, subscriber);
 
         // Fill the channel
         for i in 0..5 {
@@ -947,12 +928,12 @@ mod tests {
     }
 
     #[test]
-    fn test_store_channel_subscription() {
+    fn test_store_subscribed_subscription() {
         let store = StoreImpl::new_with_reducer(0, Box::new(TestReducer));
 
         let received = Arc::new(Mutex::new(Vec::new()));
         let subscriber1 = Box::new(TestChannelSubscriber::new(received.clone()));
-        let subscription = store.channeled_with(10, BackpressurePolicy::DropOldest, subscriber1);
+        let subscription = store.subscribed_with(10, BackpressurePolicy::DropOldest, subscriber1);
 
         // Dispatch some actions
         store.dispatch(1).unwrap();
