@@ -85,7 +85,7 @@ pub trait Middleware<State, Action> {
     /// called when an error occurs
     #[allow(unused_variables)]
     fn on_error(&self, error: StoreError) {
-        #[cfg(dev)]
+        #[cfg(debug_assertions)]
         eprintln!("store: Middleware error: {:?}", error);
     }
 }

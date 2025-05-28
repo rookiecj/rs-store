@@ -20,7 +20,7 @@ where
             match iter_tx.send(ActionOp::Action((state.clone(), action.clone()))) {
                 Ok(_) => {}
                 Err(_e) => {
-                    #[cfg(dev)]
+                    #[cfg(debug_assertions)]
                     eprintln!("store: Error while sending state to iterator");
                 }
             }
@@ -43,7 +43,7 @@ where
         if let Some(iter_tx) = self.iter_tx.take() {
             drop(iter_tx);
         }
-        #[cfg(dev)]
+        #[cfg(debug_assertions)]
         eprintln!("store: StateSubscriber done");
     }
 }
@@ -75,19 +75,19 @@ where
     type Item = (State, Action);
 
     fn next(&mut self) -> Option<Self::Item> {
-        #[cfg(dev)]
+        #[cfg(debug_assertions)]
         eprintln!("store: StateIterator next");
 
         if let Some(iter_rx) = self.iter_rx.as_ref() {
             match iter_rx.recv() {
                 Some(ActionOp::Action((state, action))) => return Some((state, action)),
                 Some(ActionOp::Exit(_)) => {
-                    #[cfg(dev)]
+                    #[cfg(debug_assertions)]
                     eprintln!("store: StateIterator exit");
                     // fall through
                 }
                 None => {
-                    #[cfg(dev)]
+                    #[cfg(debug_assertions)]
                     eprintln!("store: StateIterator error");
                     // fall through
                 }
@@ -104,7 +104,7 @@ where
             drop(rx);
         }
 
-        #[cfg(dev)]
+        #[cfg(debug_assertions)]
         eprintln!("store: StateIterator done");
 
         None
@@ -123,7 +123,7 @@ where
         if let Some(subscription) = self.subscription.take() {
             subscription.unsubscribe();
         }
-        #[cfg(dev)]
+        #[cfg(debug_assertions)]
         eprintln!("store: StateIterator drop");
     }
 }

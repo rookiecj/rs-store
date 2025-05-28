@@ -16,6 +16,8 @@ use std::{fmt, thread};
 use crate::iterator::{StateIterator, StateIteratorSubscriber};
 use crate::store::{Store, StoreError, DEFAULT_CAPACITY, DEFAULT_STORE_NAME};
 
+const DEFAULT_STOP_TIMEOUT: Duration = Duration::from_secs(10);
+
 #[derive(Debug)]
 pub(crate) enum ActionOp<Action>
 where
@@ -34,7 +36,7 @@ where
     Action: Send + Sync + Clone + 'static,
 {
     #[allow(dead_code)]
-    name: String,
+    pub(crate) name: String,
     state: Mutex<State>,
     pub(crate) reducers: Mutex<Vec<Box<dyn Reducer<State, Action> + Send + Sync>>>,
     pub(crate) subscribers: Arc<Mutex<Vec<Arc<dyn Subscriber<State, Action> + Send + Sync>>>>,
@@ -135,7 +137,7 @@ where
 
         // reducer 스레드
         tx_store.pool.lock().unwrap().as_ref().unwrap().execute(move || {
-            #[cfg(dev)]
+            #[cfg(debug_assertions)]
             eprintln!("store: reducer thread started");
 
             while let Some(action_op) = rx.recv() {
@@ -182,7 +184,7 @@ where
                     }
                     ActionOp::Exit(_) => {
                         rx_store.on_close(action_received_at);
-                        #[cfg(dev)]
+                        #[cfg(debug_assertions)]
                         eprintln!("store: reducer loop exit");
                         break;
                     }
@@ -192,7 +194,7 @@ where
             // drop all subscribers
             rx_store.clear_subscribers();
 
-            #[cfg(dev)]
+            #[cfg(debug_assertions)]
             eprintln!("store: reducer thread done");
         });
 
@@ -259,7 +261,7 @@ where
 
     /// clear all subscribers
     pub(crate) fn clear_subscribers(&self) {
-        #[cfg(dev)]
+        #[cfg(debug_assertions)]
         eprintln!("store: clear_subscribers");
         match self.subscribers.lock() {
             Ok(mut subscribers) => {
@@ -269,7 +271,7 @@ where
                 subscribers.clear();
             }
             Err(mut e) => {
-                #[cfg(dev)]
+                #[cfg(debug_assertions)]
                 eprintln!("store: Error while locking subscribers: {:?}", e);
                 for subscriber in e.get_ref().iter() {
                     subscriber.on_unsubscribe();
@@ -485,29 +487,43 @@ where
     }
 
     fn on_close(&self, action_received_at: Instant) {
-        #[cfg(dev)]
+        #[cfg(debug_assertions)]
         eprintln!("store: on_close");
 
         self.metrics.action_executed(None, action_received_at.elapsed());
     }
 
     /// close the store
+    ///
+    /// send an exit action to the store and drop the dispatch channel
     pub fn close(&self) {
-        if let Some(tx) = self.dispatch_tx.lock().unwrap().take() {
-            #[cfg(dev)]
-            eprintln!("store: closing dispatch channel");
-            match tx.send(ActionOp::Exit(Instant::now())) {
-                Ok(_) => {
-                    #[cfg(dev)]
-                    eprintln!("store: dispatch channel sent exit");
-                }
-                Err(_e) => {
-                    #[cfg(dev)]
-                    eprintln!("store: Error while closing dispatch channel");
+        match self.dispatch_tx.lock() {
+            Ok(mut tx) => {
+                if let Some(tx) = tx.take() {
+                    #[cfg(debug_assertions)]
+                    eprintln!("store: closing dispatch channel");
+                    match tx.send(ActionOp::Exit(Instant::now())) {
+                        Ok(_) => {
+                            #[cfg(debug_assertions)]
+                            eprintln!("store: dispatch channel sent exit");
+                        }
+                        Err(_e) => {
+                            #[cfg(debug_assertions)]
+                            eprintln!("store: Error while closing dispatch channel");
+                        }
+                    }
+                    drop(tx);
                 }
             }
-            drop(tx);
+            Err(_e) => {
+                #[cfg(debug_assertions)]
+                eprintln!("store: Error while locking dispatch channel: {:?}", _e);
+                return;
+            }
         }
+
+        #[cfg(debug_assertions)]
+        eprintln!("store: dispatch channel closed");
     }
 
     /// close the store and wait for the dispatcher to finish
@@ -516,20 +532,47 @@ where
 
         // Shutdown the thread pool with timeout
         // lock pool
-        let pool_took = self.pool.lock().unwrap().take();
-        // unlock pool
-        if let Some(pool) = pool_took {
-            if cfg!(dev) {
-                // wait forever
-                pool.shutdown_join();
-            } else {
-                pool.shutdown_join_timeout(Duration::from_secs(3));
+        match self.pool.lock() {
+            Ok(mut pool) => {
+                if let Some(pool) = pool.take() {
+                    pool.shutdown_join();
+                }
+                #[cfg(debug_assertions)]
+                eprintln!("store: shutdown pool");
             }
-            #[cfg(dev)]
-            eprintln!("store: shutdown pool");
+            Err(_e) => {
+                #[cfg(debug_assertions)]
+                eprintln!("store: Error while locking pool: {:?}", _e);
+                return;
+            }
         }
 
-        #[cfg(dev)]
+        #[cfg(debug_assertions)]
+        eprintln!("store: Store stopped");
+    }
+
+    /// close the store and wait for the dispatcher to finish
+    pub fn stop_with_timeout(&self, timeout: Duration) {
+        self.close();
+
+        // Shutdown the thread pool with timeout
+        // lock pool
+        match self.pool.lock() {
+            Ok(mut pool) => {
+                if let Some(pool) = pool.take() {
+                    pool.shutdown_join_timeout(timeout);
+                }
+                #[cfg(debug_assertions)]
+                eprintln!("store: shutdown pool");
+            }
+            Err(_e) => {
+                #[cfg(debug_assertions)]
+                eprintln!("store: Error while locking pool: {:?}", _e);
+                return;
+            }
+        }
+
+        #[cfg(debug_assertions)]
         eprintln!("store: Store stopped");
     }
 
@@ -630,7 +673,7 @@ where
         }) {
             Ok(h) => h,
             Err(e) => {
-                #[cfg(dev)]
+                #[cfg(debug_assertions)]
                 eprintln!("store: Error while spawning channel thread: {:?}", e);
                 return Err(StoreError::SubscriptionError(format!(
                     "Error while spawning channel thread: {:?}",
@@ -652,7 +695,7 @@ where
         subscriber: Box<dyn Subscriber<State, Action>>,
         metrics: Arc<dyn Metrics>,
     ) {
-        #[cfg(dev)]
+        #[cfg(debug_assertions)]
         eprintln!("store: {} channel thread started", _name);
 
         while let Some(msg) = rx.recv() {
@@ -669,14 +712,14 @@ where
                 }
                 ActionOp::Exit(created_at) => {
                     metrics.action_executed(None, created_at.elapsed());
-                    #[cfg(dev)]
+                    #[cfg(debug_assertions)]
                     eprintln!("store: {} channel thread loop exit", _name);
                     break;
                 }
             }
         }
 
-        #[cfg(dev)]
+        #[cfg(debug_assertions)]
         eprintln!("store: {} channel thread done", _name);
     }
 }
@@ -732,7 +775,7 @@ where
                 });
             }
             Err(_e) => {
-                #[cfg(dev)]
+                #[cfg(debug_assertions)]
                 eprintln!("store: Error while locking channel: {:?}", _e);
             }
         }
@@ -761,14 +804,16 @@ where
 {
     fn drop(&mut self) {
         self.close();
-        // Shutdown the thread pool with timeout
-        if let Ok(mut lk) = self.pool.lock() {
-            if let Some(pool) = lk.take() {
-                pool.shutdown_join_timeout(Duration::from_secs(3));
-            }
-        }
 
-        #[cfg(dev)]
+        // Shutdown the thread pool with timeout
+        self.stop_with_timeout(DEFAULT_STOP_TIMEOUT);
+        // if let Ok(mut lk) = self.pool.lock() {
+        //     if let Some(pool) = lk.take() {
+        //         pool.shutdown_join_timeout(Duration::from_secs(3));
+        //     }
+        // }
+
+        #[cfg(debug_assertions)]
         eprintln!("store: '{}' Store dropped", self.name);
     }
 }
