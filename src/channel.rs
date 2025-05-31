@@ -37,12 +37,12 @@ where
     metrics: Option<Arc<dyn Metrics + Send + Sync>>,
 }
 
-#[cfg(debug_assertions)]
 impl<Action> Drop for SenderChannel<Action>
 where
     Action: Send + Sync + Clone + 'static,
 {
     fn drop(&mut self) {
+        #[cfg(feature = "store-log")]
         eprintln!("store: drop '{}' sender channel", self._name);
     }
 }
@@ -62,7 +62,7 @@ where
             BackpressurePolicy::DropOldest => {
                 if let Err(TrySendError::Full(item)) = self.sender.try_send(item) {
                     // Drop the oldest item and try sending again
-                    #[cfg(debug_assertions)]
+                    #[cfg(feature = "store-log")]
                     eprintln!("store: dropping the oldest item in channel");
                     // Remove the oldest item
                     let _old = self.receiver.try_recv();
@@ -84,7 +84,7 @@ where
                 match self.sender.try_send(item).map_err(SenderError::TrySendError) {
                     Ok(_) => Ok(self.receiver.len() as i64),
                     Err(err) => {
-                        #[cfg(debug_assertions)]
+                        #[cfg(feature = "store-log")]
                         eprintln!("store: dropping the latest item in channel");
                         if let Some(metrics) = &self.metrics {
                             if let SenderError::TrySendError(TrySendError::Full(
@@ -117,12 +117,12 @@ where
     metrics: Option<Arc<dyn Metrics + Send + Sync>>,
 }
 
-#[cfg(debug_assertions)]
 impl<Action> Drop for ReceiverChannel<Action>
 where
     Action: Send + Sync + Clone + 'static,
 {
     fn drop(&mut self) {
+        #[cfg(feature = "store-log")]
         eprintln!("store: drop '{}' receiver channel", self.name);
     }
 }

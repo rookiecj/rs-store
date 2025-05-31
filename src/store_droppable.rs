@@ -30,7 +30,7 @@ where
 {
     fn drop(&mut self) {
         self.inner.stop();
-        #[cfg(debug_assertions)]
+        #[cfg(feature = "store-log")]
         eprintln!("store: '{}' Store dropped", self.inner.name);
     }
 }

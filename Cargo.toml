@@ -13,6 +13,10 @@ readme = "README.md"
 keywords = ["redux", "store", "rust", "state", "management"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[features]
+default = []
+store-debug = ["store-log"]
+store-log = []
 
 [profile.release]
 strip = "debuginfo"

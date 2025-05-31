@@ -137,7 +137,7 @@ where
 
         // reducer 스레드
         tx_store.pool.lock().unwrap().as_ref().unwrap().execute(move || {
-            #[cfg(debug_assertions)]
+            #[cfg(feature = "store-log")]
             eprintln!("store: reducer thread started");
 
             while let Some(action_op) = rx.recv() {
@@ -184,7 +184,7 @@ where
                     }
                     ActionOp::Exit(_) => {
                         rx_store.on_close(action_received_at);
-                        #[cfg(debug_assertions)]
+                        #[cfg(feature = "store-log")]
                         eprintln!("store: reducer loop exit");
                         break;
                     }
@@ -194,7 +194,7 @@ where
             // drop all subscribers
             rx_store.clear_subscribers();
 
-            #[cfg(debug_assertions)]
+            #[cfg(feature = "store-log")]
             eprintln!("store: reducer thread done");
         });
 
@@ -261,7 +261,7 @@ where
 
     /// clear all subscribers
     pub(crate) fn clear_subscribers(&self) {
-        #[cfg(debug_assertions)]
+        #[cfg(feature = "store-log")]
         eprintln!("store: clear_subscribers");
         match self.subscribers.lock() {
             Ok(mut subscribers) => {
@@ -271,7 +271,7 @@ where
                 subscribers.clear();
             }
             Err(mut e) => {
-                #[cfg(debug_assertions)]
+                #[cfg(feature = "store-log")]
                 eprintln!("store: Error while locking subscribers: {:?}", e);
                 for subscriber in e.get_ref().iter() {
                     subscriber.on_unsubscribe();
@@ -487,7 +487,7 @@ where
     }
 
     fn on_close(&self, action_received_at: Instant) {
-        #[cfg(debug_assertions)]
+        #[cfg(feature = "store-log")]
         eprintln!("store: on_close");
 
         self.metrics.action_executed(None, action_received_at.elapsed());
@@ -500,15 +500,15 @@ where
         match self.dispatch_tx.lock() {
             Ok(mut tx) => {
                 if let Some(tx) = tx.take() {
-                    #[cfg(debug_assertions)]
+                    #[cfg(feature = "store-log")]
                     eprintln!("store: closing dispatch channel");
                     match tx.send(ActionOp::Exit(Instant::now())) {
                         Ok(_) => {
-                            #[cfg(debug_assertions)]
+                            #[cfg(feature = "store-log")]
                             eprintln!("store: dispatch channel sent exit");
                         }
                         Err(_e) => {
-                            #[cfg(debug_assertions)]
+                            #[cfg(feature = "store-log")]
                             eprintln!("store: Error while closing dispatch channel");
                         }
                     }
@@ -516,13 +516,13 @@ where
                 }
             }
             Err(_e) => {
-                #[cfg(debug_assertions)]
+                #[cfg(feature = "store-log")]
                 eprintln!("store: Error while locking dispatch channel: {:?}", _e);
                 return;
             }
         }
 
-        #[cfg(debug_assertions)]
+        #[cfg(feature = "store-log")]
         eprintln!("store: dispatch channel closed");
     }
 
@@ -537,17 +537,17 @@ where
                 if let Some(pool) = pool.take() {
                     pool.shutdown_join();
                 }
-                #[cfg(debug_assertions)]
+                #[cfg(feature = "store-log")]
                 eprintln!("store: shutdown pool");
             }
             Err(_e) => {
-                #[cfg(debug_assertions)]
+                #[cfg(feature = "store-log")]
                 eprintln!("store: Error while locking pool: {:?}", _e);
                 return;
             }
         }
 
-        #[cfg(debug_assertions)]
+        #[cfg(feature = "store-log")]
         eprintln!("store: Store stopped");
     }
 
@@ -562,17 +562,17 @@ where
                 if let Some(pool) = pool.take() {
                     pool.shutdown_join_timeout(timeout);
                 }
-                #[cfg(debug_assertions)]
+                #[cfg(feature = "store-log")]
                 eprintln!("store: shutdown pool");
             }
             Err(_e) => {
-                #[cfg(debug_assertions)]
+                #[cfg(feature = "store-log")]
                 eprintln!("store: Error while locking pool: {:?}", _e);
                 return;
             }
         }
 
-        #[cfg(debug_assertions)]
+        #[cfg(feature = "store-log")]
         eprintln!("store: Store stopped");
     }
 
@@ -673,7 +673,7 @@ where
         }) {
             Ok(h) => h,
             Err(e) => {
-                #[cfg(debug_assertions)]
+                #[cfg(feature = "store-log")]
                 eprintln!("store: Error while spawning channel thread: {:?}", e);
                 return Err(StoreError::SubscriptionError(format!(
                     "Error while spawning channel thread: {:?}",
@@ -695,7 +695,7 @@ where
         subscriber: Box<dyn Subscriber<State, Action>>,
         metrics: Arc<dyn Metrics>,
     ) {
-        #[cfg(debug_assertions)]
+        #[cfg(feature = "store-log")]
         eprintln!("store: {} channel thread started", _name);
 
         while let Some(msg) = rx.recv() {
@@ -712,14 +712,14 @@ where
                 }
                 ActionOp::Exit(created_at) => {
                     metrics.action_executed(None, created_at.elapsed());
-                    #[cfg(debug_assertions)]
+                    #[cfg(feature = "store-log")]
                     eprintln!("store: {} channel thread loop exit", _name);
                     break;
                 }
             }
         }
 
-        #[cfg(debug_assertions)]
+        #[cfg(feature = "store-log")]
         eprintln!("store: {} channel thread done", _name);
     }
 }
@@ -775,7 +775,7 @@ where
                 });
             }
             Err(_e) => {
-                #[cfg(debug_assertions)]
+                #[cfg(feature = "store-log")]
                 eprintln!("store: Error while locking channel: {:?}", _e);
             }
         }
@@ -813,7 +813,7 @@ where
         //     }
         // }
 
-        #[cfg(debug_assertions)]
+        #[cfg(feature = "store-log")]
         eprintln!("store: '{}' Store dropped", self.name);
     }
 }
