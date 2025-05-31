@@ -3,8 +3,7 @@ use crate::dispatcher::Dispatcher;
 use crate::metrics::{CountMetrics, Metrics, MetricsSnapshot};
 use crate::middleware::Middleware;
 use crate::{
-    DispatchOp, Effect, MiddlewareOp, Reducer, Selector, SelectorSubscriber, Subscriber,
-    Subscription,
+    DispatchOp, Effect, MiddlewareOp, Reducer, Subscriber, Subscription,
 };
 use fmt::Debug;
 use rusty_pool::ThreadPool;
@@ -240,23 +239,6 @@ where
                 });
             }),
         })
-    }
-
-    /// add a subscriber with a selector
-    pub fn subscribe_with_selector<Select, Output, F>(
-        &self,
-        selector: Select,
-        on_change: F,
-    ) -> Box<dyn Subscription>
-    where
-        State: Send + Sync + Clone,
-        Action: Send + Sync + Clone,
-        Select: Selector<State, Output> + Send + Sync + 'static,
-        Output: PartialEq + Clone + Send + Sync + 'static,
-        F: Fn(Output, Action) + Send + Sync + 'static,
-    {
-        let subscriber = SelectorSubscriber::new(selector, on_change);
-        self.add_subscriber(Arc::new(subscriber))
     }
 
     /// clear all subscribers
