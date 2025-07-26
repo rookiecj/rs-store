@@ -1,5 +1,6 @@
 use crate::{BackpressurePolicy, Subscriber, Subscription};
 use std::sync::Arc;
+use std::time::Instant;
 
 /// Default capacity for the channel
 pub const DEFAULT_CAPACITY: usize = 16;
@@ -39,6 +40,7 @@ where
     fn dispatch(&self, action: Action) -> Result<(), StoreError>;
 
     /// Add a subscriber to the store
+    /// store updates are delivered to the subscriber in same reducer thread
     fn add_subscriber(
         &self,
         subscriber: Arc<dyn Subscriber<State, Action> + Send + Sync>,
@@ -48,23 +50,26 @@ where
     //fn iter(&self) -> impl Iterator<Item = (State, Action)>;
 
     /// subscribe to the store in new context
+    /// store updates are delivered to the subscriber in the new context
     fn subscribed(
         &self,
         subscriber: Box<dyn Subscriber<State, Action> + Send + Sync>,
     ) -> Result<Box<dyn Subscription>, StoreError>;
 
     /// subscribe to the store in new context
+    /// store updates are delivered to the subscriber in the new context
     ///
     /// ### Parameters
     /// * capacity: Channel buffer capacity
-    /// * policy: Backpressure policy for when channel is full
+    /// * policy: Backpressure policy for when channel is full,
+    ///     `BlockOnFull` or `DropLatestIf` is supported to prevent from dropping the ActionOp::Exit
     ///
     /// ### Return
     /// * Subscription: Subscription for the store,
     fn subscribed_with(
         &self,
         capacity: usize,
-        policy: BackpressurePolicy,
+        policy: BackpressurePolicy<(Instant, State, Action)>,
         subscriber: Box<dyn Subscriber<State, Action> + Send + Sync>,
     ) -> Result<Box<dyn Subscription>, StoreError>;
 

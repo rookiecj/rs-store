@@ -18,6 +18,7 @@ rs-store provides a predictable state container inspired by Redux, featuring thr
 - 📊 Side effect handling in reducers
 - 📊 Middleware handles actions and effects
 - 📊 Backpressure handling with configurable policies
+- 🎯 Predicate-based backpressure policies for intelligent message dropping
 - 🔄 Droppable store
 - 🎯 Bounded channel size with sync channels
 - 🔄 Decoupling state updates from notification delivery
@@ -75,6 +76,42 @@ pub fn main() {
 Backpressure is a feature that allows you to control the rate of state updates.
 and it also can be used to prevent slow subscribers from blocking state updates.
 
+#### Backpressure Policies
+
+rs-store supports multiple backpressure policies:
+
+- **BlockOnFull**: Blocks the sender when the queue is full (default)
+- **DropOldest**: Drops the oldest item when the queue is full
+- **DropLatest**: Drops the latest item when the queue is full
+- **DropLatestIf**: Drops items based on a custom predicate when the queue is full
+
+#### Predicate-based Backpressure
+
+The `DropLatestIf` policy allows you to implement intelligent message dropping based on custom criteria:
+
+```rust
+use rs_store::{BackpressurePolicy, StoreBuilder};
+use std::sync::Arc;
+
+// Create a predicate that drops low-priority messages
+let predicate = Arc::new(|action_op: &rs_store::ActionOp<i32>| {
+    match action_op {
+        rs_store::ActionOp::Action(value) => *value < 5, // Drop values less than 5
+        rs_store::ActionOp::Exit(_) => false, // Never drop exit messages
+    }
+});
+
+let policy = BackpressurePolicy::DropLatestIf { predicate };
+
+let store = StoreBuilder::new(0)
+    .with_capacity(3) // Small capacity to trigger backpressure
+    .with_policy(policy)
+    .build()
+    .unwrap();
+```
+
+This allows you to prioritize important messages and drop less critical ones when the system is under load.
+
 ### Side Effects in Reducers
 
 Unlike traditional Redux implementations, rs-store allows reducers to produce side effects directly. This means reducers can produce asynchronous operations.
@@ -83,26 +120,13 @@ Unlike traditional Redux implementations, rs-store allows reducers to produce si
 
 Middleware is a powerful feature that allows you to intercept and modify actions before they reach the reducer, or to handle side effects, logging, metrics, etc.
 
-### Notification Channel
-
-The notification channel feature provides a dedicated channel for state notifications to subscribers, separating the concerns of state updates and notification delivery. 
-
-### State Iterator
-
-You can subscribe to a Store to get the state history, But the state iterator feature provides a way to iterate over the state.
-
 ### Channeled Subscription
 
-The channeled subscription feature provides a way to subscribe to a store with a channel.
-
-### Selector
-
-The selector feature provides a way to select a part of the state.
+The channeled subscription feature provides a way to subscribe to a store in new context with a channel.
 
 ### Metrics
 
 The metrics feature provides a way to collect metrics.
-
 
 ## Documentation
 

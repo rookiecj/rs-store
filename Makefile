@@ -68,6 +68,7 @@ examples: ## example all
 	RUSTFLAGS="-D warnings" cargo run --example calc_thunk -- --nocapture
 	RUSTFLAGS="-D warnings" cargo run --example calc_basic_builder -- --nocapture
 	RUSTFLAGS="-D warnings" cargo run --example iter_state -- --nocapture
+	RUSTFLAGS="-D warnings" cargo run --example dropoldest_if -- --nocapture
 
 VERSION := $(shell cargo pkgid -p "rs-store" | cut -d\# -f2 | cut -d@ -f2)
 

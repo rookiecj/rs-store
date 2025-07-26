@@ -30,5 +30,4 @@ debug = true # Enable debug symbols. For example, we can use `dwarfdump` to chec
 
 [dependencies]
 thiserror = "1.0"
-crossbeam = "0.8"
 rusty_pool = { version = "0.7" }
