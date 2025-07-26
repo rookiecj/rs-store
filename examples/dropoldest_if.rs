@@ -8,6 +8,7 @@ fn main() {
         match action_op {
             rs_store::ActionOp::Action(value) => *value < 5, // 5보다 작은 값들은 drop
             rs_store::ActionOp::Exit(_) => false,            // Exit는 drop하지 않음
+            rs_store::ActionOp::AddSubscriber => false,      // AddSubscriber는 drop하지 않음
         }
     });
 

@@ -79,19 +79,19 @@ where
         eprintln!("store: StateIterator next");
 
         if let Some(iter_rx) = self.iter_rx.as_ref() {
-            match iter_rx.recv() {
-                Some(ActionOp::Action((state, action))) => return Some((state, action)),
-                Some(ActionOp::Exit(_)) => {
-                    #[cfg(feature = "store-log")]
-                    eprintln!("store: StateIterator exit");
-                    // fall through
+            while let Some(action) = iter_rx.recv() {
+                match action {
+                    ActionOp::Action((state, action)) => return Some((state, action)),
+                    ActionOp::Exit(_) => {
+                        #[cfg(feature = "store-log")]
+                        eprintln!("store: StateIterator exit");
+                        break;
+                    }
+                    ActionOp::AddSubscriber => {
+                        continue;
+                    }
                 }
-                None => {
-                    #[cfg(feature = "store-log")]
-                    eprintln!("store: StateIterator error");
-                    // fall through
-                }
-            };
+            }
         };
 
         if let Some(subscription) = self.subscription.take() {

@@ -88,7 +88,7 @@ add_tag:	## add tag
 	git tag -a "v$(VERSION)" -m "v$(VERSION)"
 
 .PHONY: publish
-publish: check_version_tag build publish_cargo add_tag	## publish
+publish: check_version_tag build test-all publish_cargo add_tag	## publish
 	@echo "published v$(VERSION)"
 	@echo push tag v$(VERSION) to origin
 	@git push origin v$(VERSION)

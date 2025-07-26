@@ -486,6 +486,7 @@ mod tests {
         let predicate = Arc::new(|action_op: &ActionOp<i32>| match action_op {
             ActionOp::Action(value) => *value < 5,
             ActionOp::Exit(_) => false,
+            ActionOp::AddSubscriber => false,
         });
 
         let (sender, receiver) =
@@ -514,6 +515,98 @@ mod tests {
         assert!(received_item.is_some());
         if let Some(ActionOp::Action(value)) = received_item {
             assert_eq!(value, 7, "Should receive 7");
+        }
+    }
+
+    #[test]
+    fn test_add_subscriber_action() {
+        let (sender, receiver) =
+            BackpressureChannel::<i32>::pair(5, BackpressurePolicy::BlockOnFull);
+
+        // AddSubscriber 액션 전송
+        sender.send(ActionOp::AddSubscriber).unwrap();
+
+        // 수신 확인
+        let received = receiver.recv();
+        assert!(received.is_some());
+        match received.unwrap() {
+            ActionOp::AddSubscriber => {
+                // AddSubscriber 액션이 정상적으로 수신됨
+            }
+            _ => panic!("Expected AddSubscriber action"),
+        }
+    }
+
+    #[test]
+    fn test_add_subscriber_with_predicate() {
+        // AddSubscriber는 절대 drop되지 않도록 하는 predicate
+        let predicate = Arc::new(|action_op: &ActionOp<i32>| match action_op {
+            ActionOp::Action(value) => *value < 5,
+            ActionOp::Exit(_) => false,
+            ActionOp::AddSubscriber => false, // AddSubscriber는 절대 drop하지 않음
+        });
+
+        let (sender, receiver) =
+            BackpressureChannel::<i32>::pair(2, BackpressurePolicy::DropLatestIf { predicate });
+
+        // 채널을 가득 채우기
+        sender.send(ActionOp::Action(1)).unwrap(); // drop 대상
+        sender.send(ActionOp::Action(6)).unwrap(); // 유지 대상
+
+        // AddSubscriber 액션을 보내면 predicate에 의해 다른 액션이 drop되어야 함
+        let result = sender.send(ActionOp::AddSubscriber);
+        assert!(result.is_ok(), "AddSubscriber should be sent successfully");
+
+        // 수신 확인
+        let received_items: Vec<_> = std::iter::from_fn(|| receiver.try_recv()).collect();
+        assert_eq!(received_items.len(), 2);
+
+        // AddSubscriber가 포함되어 있는지 확인
+        let has_add_subscriber =
+            received_items.iter().any(|item| matches!(item, ActionOp::AddSubscriber));
+        assert!(has_add_subscriber, "AddSubscriber should be received");
+    }
+
+    #[test]
+    fn test_mixed_action_types() {
+        let (sender, receiver) =
+            BackpressureChannel::<i32>::pair(10, BackpressurePolicy::BlockOnFull);
+
+        // 다양한 타입의 액션들을 전송
+        sender.send(ActionOp::Action(1)).unwrap();
+        sender.send(ActionOp::AddSubscriber).unwrap();
+        sender.send(ActionOp::Action(2)).unwrap();
+        sender.send(ActionOp::AddSubscriber).unwrap();
+        sender.send(ActionOp::Action(3)).unwrap();
+
+        // 수신 확인
+        let received_items: Vec<_> = std::iter::from_fn(|| receiver.try_recv()).collect();
+        assert_eq!(received_items.len(), 5);
+
+        // 순서 확인
+        match &received_items[0] {
+            ActionOp::Action(value) => assert_eq!(*value, 1),
+            _ => panic!("Expected Action(1)"),
+        }
+        match &received_items[1] {
+            ActionOp::AddSubscriber => {
+                // AddSubscriber 액션
+            }
+            _ => panic!("Expected AddSubscriber"),
+        }
+        match &received_items[2] {
+            ActionOp::Action(value) => assert_eq!(*value, 2),
+            _ => panic!("Expected Action(2)"),
+        }
+        match &received_items[3] {
+            ActionOp::AddSubscriber => {
+                // AddSubscriber 액션
+            }
+            _ => panic!("Expected AddSubscriber"),
+        }
+        match &received_items[4] {
+            ActionOp::Action(value) => assert_eq!(*value, 3),
+            _ => panic!("Expected Action(3)"),
         }
     }
 

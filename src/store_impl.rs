@@ -21,6 +21,7 @@ where
     Action: Send + Sync + Clone + 'static,
 {
     Action(Action),
+    AddSubscriber,
     #[allow(dead_code)]
     Exit(Instant),
 }
@@ -37,6 +38,8 @@ where
     state: Mutex<State>,
     pub(crate) reducers: Mutex<Vec<Box<dyn Reducer<State, Action> + Send + Sync>>>,
     pub(crate) subscribers: Arc<Mutex<Vec<Arc<dyn Subscriber<State, Action> + Send + Sync>>>>,
+    /// 임시로 추가될 subscriber들을 저장하는 벡터
+    adding_subscribers: Arc<Mutex<Vec<Arc<dyn Subscriber<State, Action> + Send + Sync>>>>,
     pub(crate) dispatch_tx: Mutex<Option<SenderChannel<Action>>>,
     middlewares: Mutex<Vec<Arc<dyn Middleware<State, Action> + Send + Sync>>>,
     pub(crate) metrics: Arc<CountMetrics>,
@@ -120,6 +123,7 @@ where
             state: Mutex::new(state),
             reducers: Mutex::new(reducers),
             subscribers: Arc::new(Mutex::new(Vec::default())),
+            adding_subscribers: Arc::new(Mutex::new(Vec::default())),
             middlewares: Mutex::new(middlewares),
             dispatch_tx: Mutex::new(Some(tx)),
             metrics,
@@ -179,6 +183,21 @@ where
                             .metrics
                             .action_executed(Some(&action), action_received_at.elapsed());
                     }
+                    ActionOp::AddSubscriber => {
+                        let current_state = rx_store.state.lock().unwrap().clone();
+                        let mut adding_subscribers = rx_store.adding_subscribers.lock().unwrap();
+                        let mut subscribers = rx_store.subscribers.lock().unwrap();
+
+                        // 새로운 subscriber들에게 최신 상태를 전달하고 subscribers에 추가
+                        for subscriber in adding_subscribers.drain(..) {
+                            // 새로운 subscriber에게 최신 상태를 전달
+                            subscriber.on_subscribe(&current_state);
+                            subscribers.push(subscriber);
+                        }
+
+                        #[cfg(feature = "store-log")]
+                        eprintln!("store: new subscribers added");
+                    }
                     ActionOp::Exit(_) => {
                         rx_store.on_close(action_received_at);
                         #[cfg(feature = "store-log")]
@@ -220,11 +239,17 @@ where
         &self,
         subscriber: Arc<dyn Subscriber<State, Action> + Send + Sync>,
     ) -> Box<dyn Subscription> {
-        // append a subscriber
-        self.subscribers.lock().unwrap().push(subscriber.clone());
+        // 새로운 subscriber를 adding_subscribers에 추가
+        self.adding_subscribers.lock().unwrap().push(subscriber.clone());
+
+        // ActionOp::AddSubscriber 액션을 전달하여 reducer에서 처리하도록 함
+        if let Some(tx) = self.dispatch_tx.lock().unwrap().as_ref() {
+            let _ = tx.send(ActionOp::AddSubscriber);
+        }
 
         // disposer for the subscriber
         let subscribers = self.subscribers.clone();
+        let adding_subscribers = self.adding_subscribers.clone();
         Box::new(SubscriberSubscription {
             unsubscribe: Box::new(move || {
                 let mut subscribers = subscribers.lock().unwrap();
@@ -235,6 +260,10 @@ where
                     }
                     retain
                 });
+
+                // adding_subscribers에서도 제거
+                let mut adding = adding_subscribers.lock().unwrap();
+                adding.retain(|s| !Arc::ptr_eq(s, &subscriber));
             }),
         })
     }
@@ -698,6 +727,12 @@ where
                     // action executed
                     metrics.action_executed(Some(&action), created_at.elapsed());
                 }
+                ActionOp::AddSubscriber => {
+                    // AddSubscriber는 채널된 subscriber에서는 처리하지 않음
+                    // 이는 메인 reducer 스레드에서만 처리됨
+                    #[cfg(feature = "store-log")]
+                    eprintln!("store: {} received AddSubscriber (ignored)", _name);
+                }
                 ActionOp::Exit(created_at) => {
                     metrics.action_executed(None, created_at.elapsed());
                     #[cfg(feature = "store-log")]
@@ -990,5 +1025,275 @@ mod tests {
         store.stop();
         // subscriber should not receive the state
         assert_eq!(received.lock().unwrap().len(), 1);
+    }
+
+    // 새로운 subscriber가 추가될 때 최신 상태를 받는지 테스트
+    #[test]
+    fn test_new_subscriber_receives_latest_state() {
+        let store = StoreImpl::new_with_reducer(0, Box::new(TestReducer));
+
+        // 첫 번째 subscriber 추가
+        let received1 = Arc::new(Mutex::new(Vec::new()));
+        let subscriber1 = Arc::new(TestChannelSubscriber::new(received1.clone()));
+        store.add_subscriber(subscriber1);
+
+        // 액션을 dispatch하여 상태 변경
+        store.dispatch(5).unwrap();
+        store.dispatch(10).unwrap();
+
+        // 잠시 대기하여 액션이 처리되도록 함
+        thread::sleep(Duration::from_millis(100));
+
+        // 두 번째 subscriber 추가 (현재 상태는 15)
+        let received2 = Arc::new(Mutex::new(Vec::new()));
+        let subscriber2 = Arc::new(TestChannelSubscriber::new(received2.clone()));
+        store.add_subscriber(subscriber2);
+
+        // 잠시 대기하여 AddSubscriber 액션이 처리되도록 함
+        thread::sleep(Duration::from_millis(100));
+
+        // 새로운 액션을 dispatch
+        store.dispatch(20).unwrap();
+
+        // 잠시 대기하여 액션이 처리되도록 함
+        thread::sleep(Duration::from_millis(100));
+
+        // 첫 번째 subscriber는 모든 상태 변경을 받아야 함
+        let received1 = received1.lock().unwrap();
+        assert_eq!(received1.len(), 3);
+        assert_eq!(received1[0], (5, 5));
+        assert_eq!(received1[1], (15, 10));
+        assert_eq!(received1[2], (35, 20));
+
+        // 두 번째 subscriber는 추가된 후의 상태 변경만 받아야 함
+        let received2 = received2.lock().unwrap();
+        assert_eq!(received2.len(), 1);
+        assert_eq!(received2[0], (35, 20));
+    }
+
+    // 새로운 subscriber가 추가될 때 on_subscribe가 호출되는지 테스트
+    #[test]
+    fn test_new_subscriber_on_subscribe_called() {
+        let store = StoreImpl::new_with_reducer(0, Box::new(TestReducer));
+
+        // 액션을 dispatch하여 상태 변경
+        store.dispatch(5).unwrap();
+
+        // on_subscribe를 구현한 subscriber 추가
+        let received_states = Arc::new(Mutex::new(Vec::new()));
+        let subscribe_called = Arc::new(Mutex::new(false));
+
+        struct TestSubscribeSubscriber {
+            received_states: Arc<Mutex<Vec<i32>>>,
+            subscribe_called: Arc<Mutex<bool>>,
+        }
+
+        impl Subscriber<i32, i32> for TestSubscribeSubscriber {
+            fn on_subscribe(&self, state: &i32) {
+                self.received_states.lock().unwrap().push(*state);
+                *self.subscribe_called.lock().unwrap() = true;
+            }
+
+            fn on_notify(&self, state: &i32, _action: &i32) {
+                self.received_states.lock().unwrap().push(*state);
+            }
+        }
+
+        let subscriber = Arc::new(TestSubscribeSubscriber {
+            received_states: received_states.clone(),
+            subscribe_called: subscribe_called.clone(),
+        });
+
+        store.add_subscriber(subscriber);
+
+        // 잠시 대기하여 AddSubscriber 액션이 처리되도록 함
+        thread::sleep(Duration::from_millis(100));
+
+        // on_subscribe가 호출되었는지 확인
+        assert!(*subscribe_called.lock().unwrap());
+
+        // 최신 상태(5)를 받았는지 확인
+        let states = received_states.lock().unwrap();
+        assert_eq!(states.len(), 1);
+        assert_eq!(states[0], 5);
+    }
+
+    // 여러 subscriber가 동시에 추가될 때 테스트
+    #[test]
+    fn test_multiple_subscribers_added_simultaneously() {
+        let store = StoreImpl::new_with_reducer(0, Box::new(TestReducer));
+
+        // 액션을 dispatch하여 상태 변경
+        store.dispatch(10).unwrap();
+        store.dispatch(20).unwrap();
+
+        // 잠시 대기하여 액션이 처리되도록 함
+        thread::sleep(Duration::from_millis(100));
+
+        // 여러 subscriber를 동시에 추가
+        let subscribers = vec![
+            Arc::new(TestChannelSubscriber::new(Arc::new(Mutex::new(Vec::new())))),
+            Arc::new(TestChannelSubscriber::new(Arc::new(Mutex::new(Vec::new())))),
+            Arc::new(TestChannelSubscriber::new(Arc::new(Mutex::new(Vec::new())))),
+        ];
+
+        for subscriber in &subscribers {
+            store.add_subscriber(subscriber.clone());
+        }
+
+        // 잠시 대기하여 AddSubscriber 액션이 처리되도록 함
+        thread::sleep(Duration::from_millis(100));
+
+        // 새로운 액션을 dispatch
+        store.dispatch(30).unwrap();
+
+        // 잠시 대기하여 액션이 처리되도록 함
+        thread::sleep(Duration::from_millis(100));
+
+        // 모든 subscriber가 새로운 액션을 받았는지 확인
+        for subscriber in &subscribers {
+            let received = subscriber.received.lock().unwrap();
+            assert_eq!(received.len(), 1);
+            assert_eq!(received[0], (60, 30)); // state: 30+30, action: 30
+        }
+    }
+
+    // subscriber 추가 후 즉시 unsubscribe하는 테스트
+    #[test]
+    fn test_subscriber_unsubscribe_after_add() {
+        let store = StoreImpl::new_with_reducer(0, Box::new(TestReducer));
+
+        // 액션을 dispatch하여 상태 변경
+        store.dispatch(5).unwrap();
+
+        // subscriber 추가
+        let received = Arc::new(Mutex::new(Vec::new()));
+        let subscriber = Arc::new(TestChannelSubscriber::new(received.clone()));
+        let subscription = store.add_subscriber(subscriber);
+
+        // 잠시 대기하여 AddSubscriber 액션이 처리되도록 함
+        thread::sleep(Duration::from_millis(100));
+
+        // 즉시 unsubscribe
+        subscription.unsubscribe();
+
+        // 새로운 액션을 dispatch
+        store.dispatch(10).unwrap();
+
+        // 잠시 대기하여 액션이 처리되도록 함
+        thread::sleep(Duration::from_millis(100));
+
+        // subscriber가 새로운 액션을 받지 않았는지 확인
+        let received = received.lock().unwrap();
+        assert_eq!(received.len(), 0);
+    }
+
+    // store가 중지된 후 subscriber를 추가하는 테스트
+    #[test]
+    fn test_add_subscriber_after_store_stop() {
+        let store = StoreImpl::new_with_reducer(0, Box::new(TestReducer));
+
+        // store 중지
+        store.stop();
+
+        // subscriber 추가 시도
+        let received = Arc::new(Mutex::new(Vec::new()));
+        let subscriber = Arc::new(TestChannelSubscriber::new(received.clone()));
+        let _subscription = store.add_subscriber(subscriber);
+
+        // 잠시 대기
+        thread::sleep(Duration::from_millis(100));
+
+        // subscriber가 추가되었지만 store가 중지되어 있으므로 액션을 받지 않음
+        let received = received.lock().unwrap();
+        assert_eq!(received.len(), 0);
+    }
+
+    // on_subscribe에서 상태를 수정하는 subscriber 테스트
+    #[test]
+    fn test_subscriber_modifies_state_in_on_subscribe() {
+        let store = StoreImpl::new_with_reducer(0, Box::new(TestReducer));
+
+        // 액션을 dispatch하여 상태 변경
+        store.dispatch(5).unwrap();
+
+        struct ModifyingSubscriber {
+            received_states: Arc<Mutex<Vec<i32>>>,
+            subscribe_called: Arc<Mutex<bool>>,
+        }
+
+        impl Subscriber<i32, i32> for ModifyingSubscriber {
+            fn on_subscribe(&self, state: &i32) {
+                // on_subscribe에서 상태를 수정해도 store의 상태는 변경되지 않음
+                self.received_states.lock().unwrap().push(*state);
+                *self.subscribe_called.lock().unwrap() = true;
+            }
+
+            fn on_notify(&self, state: &i32, _action: &i32) {
+                self.received_states.lock().unwrap().push(*state);
+            }
+        }
+
+        let subscriber = Arc::new(ModifyingSubscriber {
+            received_states: Arc::new(Mutex::new(Vec::new())),
+            subscribe_called: Arc::new(Mutex::new(false)),
+        });
+
+        store.add_subscriber(subscriber.clone());
+
+        // 잠시 대기하여 AddSubscriber 액션이 처리되도록 함
+        thread::sleep(Duration::from_millis(100));
+
+        // on_subscribe가 호출되었는지 확인
+        assert!(*subscriber.subscribe_called.lock().unwrap());
+
+        // 최신 상태(5)를 받았는지 확인
+        let states = subscriber.received_states.lock().unwrap();
+        assert_eq!(states.len(), 1);
+        assert_eq!(states[0], 5);
+
+        // store의 상태가 변경되지 않았는지 확인
+        assert_eq!(store.get_state(), 5);
+    }
+
+    // 여러 번의 AddSubscriber 액션이 연속으로 발생하는 테스트
+    #[test]
+    fn test_consecutive_add_subscriber_actions() {
+        let store = StoreImpl::new_with_reducer(0, Box::new(TestReducer));
+
+        // 첫 번째 subscriber 추가
+        let received1 = Arc::new(Mutex::new(Vec::new()));
+        let subscriber1 = Arc::new(TestChannelSubscriber::new(received1.clone()));
+        store.add_subscriber(subscriber1);
+
+        // 잠시 대기
+        thread::sleep(Duration::from_millis(50));
+
+        // 두 번째 subscriber 추가
+        let received2 = Arc::new(Mutex::new(Vec::new()));
+        let subscriber2 = Arc::new(TestChannelSubscriber::new(received2.clone()));
+        store.add_subscriber(subscriber2);
+
+        // 잠시 대기
+        thread::sleep(Duration::from_millis(50));
+
+        // 세 번째 subscriber 추가
+        let received3 = Arc::new(Mutex::new(Vec::new()));
+        let subscriber3 = Arc::new(TestChannelSubscriber::new(received3.clone()));
+        store.add_subscriber(subscriber3);
+
+        // 잠시 대기하여 모든 AddSubscriber 액션이 처리되도록 함
+        thread::sleep(Duration::from_millis(100));
+
+        // 새로운 액션을 dispatch
+        store.dispatch(10).unwrap();
+
+        // 잠시 대기하여 액션이 처리되도록 함
+        thread::sleep(Duration::from_millis(100));
+
+        // 모든 subscriber가 새로운 액션을 받았는지 확인
+        assert_eq!(received1.lock().unwrap().len(), 1);
+        assert_eq!(received2.lock().unwrap().len(), 1);
+        assert_eq!(received3.lock().unwrap().len(), 1);
     }
 }
