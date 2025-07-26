@@ -1,4 +1,3 @@
-
 /// Subscriber is a trait that can be implemented to receive notifications from the store.
 pub trait Subscriber<State, Action>
 where
@@ -56,6 +55,8 @@ where
 
 #[cfg(test)]
 mod tests {
+
+    #[allow(dead_code)]
     // 테스트용 상태 구조체
     #[derive(Default, Clone)]
     struct TestState {
@@ -64,11 +65,11 @@ mod tests {
     }
 
     // 테스트용 액션 enum
+    #[allow(dead_code)]
     #[derive(Clone)]
     enum TestAction {
         IncrementCounter,
         #[allow(dead_code)]
         SetName(String),
     }
-
 }

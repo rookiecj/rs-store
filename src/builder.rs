@@ -16,7 +16,7 @@ where
     reducers: Vec<Box<dyn Reducer<State, Action> + Send + Sync>>,
     without_reducer: bool,
     capacity: usize,
-    policy: BackpressurePolicy,
+    policy: BackpressurePolicy<Action>,
     middlewares: Vec<Arc<dyn Middleware<State, Action> + Send + Sync>>,
 }
 
@@ -103,7 +103,7 @@ where
     }
 
     /// Set the backpressure policy of the store.
-    pub fn with_policy(mut self, policy: channel::BackpressurePolicy) -> Self {
+    pub fn with_policy(mut self, policy: channel::BackpressurePolicy<Action>) -> Self {
         self.policy = policy;
         self
     }

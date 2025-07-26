@@ -2,9 +2,7 @@ use crate::channel::{BackpressureChannel, BackpressurePolicy, ReceiverChannel, S
 use crate::dispatcher::Dispatcher;
 use crate::metrics::{CountMetrics, Metrics, MetricsSnapshot};
 use crate::middleware::Middleware;
-use crate::{
-    DispatchOp, Effect, MiddlewareOp, Reducer, Subscriber, Subscription,
-};
+use crate::{DispatchOp, Effect, MiddlewareOp, Reducer, Subscriber, Subscription};
 use fmt::Debug;
 use rusty_pool::ThreadPool;
 use std::sync::{Arc, Mutex};
@@ -17,8 +15,8 @@ use crate::store::{Store, StoreError, DEFAULT_CAPACITY, DEFAULT_STORE_NAME};
 
 const DEFAULT_STOP_TIMEOUT: Duration = Duration::from_secs(10);
 
-#[derive(Debug)]
-pub(crate) enum ActionOp<Action>
+#[derive(Debug, Clone, PartialEq)]
+pub enum ActionOp<Action>
 where
     Action: Send + Sync + Clone + 'static,
 {
@@ -106,7 +104,7 @@ where
         reducers: Vec<Box<dyn Reducer<State, Action> + Send + Sync>>,
         name: String,
         capacity: usize,
-        policy: BackpressurePolicy,
+        policy: BackpressurePolicy<Action>,
         middlewares: Vec<Arc<dyn Middleware<State, Action> + Send + Sync>>,
     ) -> Result<Arc<StoreImpl<State, Action>>, StoreError> {
         let metrics = Arc::new(CountMetrics::default());
@@ -598,7 +596,7 @@ where
     pub(crate) fn iter_with(
         &self,
         capacity: usize,
-        policy: BackpressurePolicy,
+        policy: BackpressurePolicy<(State, Action)>,
     ) -> impl Iterator<Item = (State, Action)> {
         let (iter_tx, iter_rx) = BackpressureChannel::<(State, Action)>::pair_with(
             "store_iter",
@@ -611,8 +609,14 @@ where
         StateIterator::new(iter_rx, subscription)
     }
 
-    /// Creates a new channel context for subscribing to store updates
-    /// with default capacity and block on full policy when the channel is full
+    /// subscribing to store updates in new context
+    /// with default capacity and `BlockOnFull` policy when the channel is full
+    ///
+    /// ## Parameters
+    /// * subscriber: The subscriber to subscribe to the store
+    ///
+    /// ## Return
+    /// * Subscription: Subscription for the store,
     pub fn subscribed(
         &self,
         subscriber: Box<dyn Subscriber<State, Action> + Send + Sync>,
@@ -624,20 +628,22 @@ where
         )
     }
 
-    /// Creates a new channel context for subscribing to store updates
+    /// subscribing to store updates in new context
     ///
     /// ### Parameters
     /// * capacity: Channel buffer capacity
-    /// * policy: Backpressure policy for when channel is full
+    /// * policy: Backpressure policy for when channel is full,
+    ///     `BlockOnFull` or `DropLatestIf` is supported to prevent from dropping the ActionOp::Exit
     ///
     /// ### Return
     /// * Subscription: Subscription for the store,
     pub fn subscribed_with(
         &self,
         capacity: usize,
-        policy: BackpressurePolicy,
+        policy: BackpressurePolicy<(Instant, State, Action)>,
         subscriber: Box<dyn Subscriber<State, Action> + Send + Sync>,
     ) -> Result<Box<dyn Subscription>, StoreError> {
+        // spsc channel
         let (tx, rx) = BackpressureChannel::<(Instant, State, Action)>::pair_with(
             format!("{}-channel", self.name).as_str(),
             capacity,
@@ -728,9 +734,13 @@ where
 
     fn clear_resource(&self) {
         // drop channel
-        if let Ok(mut tx) = self.tx.lock() {
-            drop(tx.take());
+        if let Ok(mut tx_locked) = self.tx.lock() {
+            if let Some(tx) = tx_locked.take() {
+                let _ = tx.send(ActionOp::Exit(Instant::now()));
+                drop(tx);
+            };
         }
+
         // join the thread
         if let Ok(mut handle) = self.handle.lock() {
             if let Some(h) = handle.take() {
@@ -830,7 +840,7 @@ where
     fn subscribed_with(
         &self,
         capacity: usize,
-        policy: BackpressurePolicy,
+        policy: BackpressurePolicy<(Instant, State, Action)>,
         subscriber: Box<dyn Subscriber<State, Action> + Send + Sync>,
     ) -> Result<Box<dyn Subscription>, StoreError> {
         self.subscribed_with(capacity, policy, subscriber)

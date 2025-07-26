@@ -1,27 +1,243 @@
 use crate::metrics::Metrics;
 use crate::ActionOp;
-use crossbeam::channel::{self, Receiver, Sender, TrySendError};
+use std::collections::VecDeque;
 use std::marker::PhantomData;
-use std::sync::Arc;
+use std::sync::{Arc, Condvar, Mutex};
 
 /// the Backpressure policy
-#[derive(Clone, Default)]
-pub enum BackpressurePolicy {
+#[derive(Clone)]
+pub enum BackpressurePolicy<T>
+where
+    T: Send + Sync + Clone + 'static,
+{
     /// Block the sender when the queue is full
-    #[default]
     BlockOnFull,
     /// Drop the oldest item when the queue is full
     DropOldest,
     /// Drop the latest item when the queue is full
     DropLatest,
+    /// Drop items based on predicate when the queue is full
+    DropLatestIf {
+        predicate: Arc<dyn Fn(&ActionOp<T>) -> bool + Send + Sync>,
+    },
+    /// Drop items based on predicate when the queue is full
+    DropOldestIf {
+        predicate: Arc<dyn Fn(&ActionOp<T>) -> bool + Send + Sync>,
+    },
+}
+
+impl<T> Default for BackpressurePolicy<T>
+where
+    T: Send + Sync + Clone + 'static,
+{
+    fn default() -> Self {
+        BackpressurePolicy::BlockOnFull
+    }
 }
 
 #[derive(thiserror::Error, Debug)]
 pub(crate) enum SenderError<T> {
     #[error("Failed to send: {0}")]
     SendError(T),
-    #[error("Failed to try_send: {0}")]
-    TrySendError(TrySendError<T>),
+    #[error("Channel is closed")]
+    ChannelClosed,
+}
+
+/// Internal MPSC Queue implementation
+struct MpscQueue<T>
+where
+    T: Send + Sync + Clone + 'static,
+{
+    queue: Mutex<VecDeque<ActionOp<T>>>,
+    condvar: Condvar,
+    capacity: usize,
+    policy: BackpressurePolicy<T>,
+    metrics: Option<Arc<dyn Metrics + Send + Sync>>,
+    closed: Mutex<bool>,
+}
+
+impl<T> MpscQueue<T>
+where
+    T: Send + Sync + Clone + 'static,
+{
+    fn new(
+        capacity: usize,
+        policy: BackpressurePolicy<T>,
+        metrics: Option<Arc<dyn Metrics + Send + Sync>>,
+    ) -> Self {
+        Self {
+            queue: Mutex::new(VecDeque::new()),
+            condvar: Condvar::new(),
+            capacity,
+            policy,
+            metrics,
+            closed: Mutex::new(false),
+        }
+    }
+
+    fn send(&self, item: ActionOp<T>) -> Result<i64, SenderError<ActionOp<T>>> {
+        let mut queue = self.queue.lock().unwrap();
+
+        // Check if channel is closed
+        if *self.closed.lock().unwrap() {
+            return Err(SenderError::ChannelClosed);
+        }
+
+        if queue.len() >= self.capacity {
+            match &self.policy {
+                BackpressurePolicy::BlockOnFull => {
+                    // Wait until space is available
+                    while queue.len() >= self.capacity {
+                        queue = self.condvar.wait(queue).unwrap();
+                        if *self.closed.lock().unwrap() {
+                            return Err(SenderError::ChannelClosed);
+                        }
+                    }
+                    queue.push_back(item);
+                }
+                BackpressurePolicy::DropOldest => {
+                    // Drop the oldest item
+                    if let Some(dropped_item) = queue.pop_front() {
+                        if let Some(metrics) = &self.metrics {
+                            if let ActionOp::Action(action) = &dropped_item {
+                                metrics.action_dropped(Some(action as &dyn std::any::Any));
+                            }
+                        }
+                    }
+                    queue.push_back(item);
+                }
+                BackpressurePolicy::DropLatest => {
+                    // Drop the new item
+                    if let Some(metrics) = &self.metrics {
+                        if let ActionOp::Action(action) = &item {
+                            metrics.action_dropped(Some(action as &dyn std::any::Any));
+                        }
+                    }
+                    return Ok(queue.len() as i64);
+                }
+                BackpressurePolicy::DropLatestIf { predicate } => {
+                    // Find and drop items that match the predicate
+                    let mut dropped_count = 0;
+                    let mut i = 0;
+                    while i < queue.len() {
+                        if predicate(&queue[i]) {
+                            if let Some(dropped_item) = queue.remove(i) {
+                                dropped_count += 1;
+                                if let Some(metrics) = &self.metrics {
+                                    if let ActionOp::Action(action) = &dropped_item {
+                                        metrics.action_dropped(Some(action as &dyn std::any::Any));
+                                    }
+                                }
+                                break;
+                            }
+                        } else {
+                            i += 1;
+                        }
+                    }
+
+                    if dropped_count > 0 {
+                        queue.push_back(item);
+                    } else {
+                        return Err(SenderError::SendError(item));
+                    }
+                }
+                BackpressurePolicy::DropOldestIf { predicate } => {
+                    // Find and drop items that match the predicate
+                    let mut dropped_count = 0;
+                    let mut i = 0;
+                    while i < queue.len() {
+                        let index = queue.len() - i - 1;
+                        if predicate(&queue[index]) {
+                            if let Some(dropped_item) = queue.remove(index) {
+                                dropped_count += 1;
+                                if let Some(metrics) = &self.metrics {
+                                    if let ActionOp::Action(action) = &dropped_item {
+                                        metrics.action_dropped(Some(action as &dyn std::any::Any));
+                                    }
+                                }
+                                break;
+                            }
+                        } else {
+                            i += 1;
+                        }
+                    }
+
+                    if dropped_count > 0 {
+                        queue.push_back(item);
+                    } else {
+                        return Err(SenderError::SendError(item));
+                    }
+                }
+            }
+        } else {
+            queue.push_back(item);
+        }
+
+        // Update metrics
+        if let Some(metrics) = &self.metrics {
+            metrics.queue_size(queue.len());
+        }
+
+        self.condvar.notify_one();
+        Ok(queue.len() as i64)
+    }
+
+    fn try_send(&self, item: ActionOp<T>) -> Result<i64, SenderError<ActionOp<T>>> {
+        // Check if channel is closed
+        if *self.closed.lock().unwrap() {
+            return Err(SenderError::ChannelClosed);
+        }
+
+        let mut queue = self.queue.lock().unwrap();
+
+        if queue.len() >= self.capacity {
+            return Err(SenderError::SendError(item));
+        } else {
+            queue.push_back(item);
+        }
+
+        // Update metrics
+        if let Some(metrics) = &self.metrics {
+            metrics.queue_size(queue.len());
+        }
+
+        self.condvar.notify_one();
+        Ok(queue.len() as i64)
+    }
+
+    fn recv(&self) -> Option<ActionOp<T>> {
+        let mut queue = self.queue.lock().unwrap();
+
+        // Wait until there's an item or channel is closed
+        while queue.is_empty() {
+            if *self.closed.lock().unwrap() {
+                return None;
+            }
+            queue = self.condvar.wait(queue).unwrap();
+        }
+
+        let item = queue.pop_front();
+        self.condvar.notify_one();
+        item
+    }
+
+    fn try_recv(&self) -> Option<ActionOp<T>> {
+        let mut queue = self.queue.lock().unwrap();
+        let item = queue.pop_front();
+        if item.is_some() {
+            self.condvar.notify_one();
+        }
+        item
+    }
+
+    fn len(&self) -> usize {
+        self.queue.lock().unwrap().len()
+    }
+
+    fn close(&self) {
+        *self.closed.lock().unwrap() = true;
+        self.condvar.notify_all();
+    }
 }
 
 /// Channel to hold the sender with backpressure policy
@@ -31,10 +247,7 @@ where
     T: Send + Sync + Clone + 'static,
 {
     _name: String,
-    sender: Sender<ActionOp<T>>,
-    receiver: Receiver<ActionOp<T>>,
-    policy: BackpressurePolicy,
-    metrics: Option<Arc<dyn Metrics + Send + Sync>>,
+    queue: Arc<MpscQueue<T>>,
 }
 
 impl<Action> Drop for SenderChannel<Action>
@@ -47,63 +260,17 @@ where
     }
 }
 
+#[allow(dead_code)]
 impl<T> SenderChannel<T>
 where
     T: Send + Sync + Clone + 'static,
 {
     pub fn send(&self, item: ActionOp<T>) -> Result<i64, SenderError<ActionOp<T>>> {
-        let r = match self.policy {
-            BackpressurePolicy::BlockOnFull => {
-                match self.sender.send(item).map_err(|e| SenderError::SendError(e.0)) {
-                    Ok(_) => Ok(self.receiver.len() as i64),
-                    Err(e) => Err(e),
-                }
-            }
-            BackpressurePolicy::DropOldest => {
-                if let Err(TrySendError::Full(item)) = self.sender.try_send(item) {
-                    // Drop the oldest item and try sending again
-                    #[cfg(feature = "store-log")]
-                    eprintln!("store: dropping the oldest item in channel");
-                    // Remove the oldest item
-                    let _old = self.receiver.try_recv();
-                    if let Some(metrics) = &self.metrics {
-                        if let Ok(ActionOp::Action(action)) = _old.as_ref() {
-                            metrics.action_dropped(Some(action));
-                        }
-                    }
-                    match self.sender.try_send(item).map_err(SenderError::TrySendError) {
-                        Ok(_) => Ok(self.receiver.len() as i64),
-                        Err(e) => Err(e),
-                    }
-                } else {
-                    Ok(0)
-                }
-            }
-            BackpressurePolicy::DropLatest => {
-                // Try to send the item, if the queue is full, just ignore the item (drop the latest)
-                match self.sender.try_send(item).map_err(SenderError::TrySendError) {
-                    Ok(_) => Ok(self.receiver.len() as i64),
-                    Err(err) => {
-                        #[cfg(feature = "store-log")]
-                        eprintln!("store: dropping the latest item in channel");
-                        if let Some(metrics) = &self.metrics {
-                            if let SenderError::TrySendError(TrySendError::Full(
-                                ActionOp::Action(action_drop),
-                            )) = &err
-                            {
-                                metrics.action_dropped(Some(action_drop));
-                            }
-                        }
-                        Err(err)
-                    }
-                }
-            }
-        };
+        self.queue.send(item)
+    }
 
-        if let Some(metrics) = &self.metrics {
-            metrics.queue_size(self.receiver.len());
-        }
-        r
+    pub fn try_send(&self, item: ActionOp<T>) -> Result<i64, SenderError<ActionOp<T>>> {
+        self.queue.try_send(item)
     }
 }
 
@@ -113,7 +280,7 @@ where
     T: Send + Sync + Clone + 'static,
 {
     name: String,
-    receiver: Receiver<ActionOp<T>>,
+    queue: Arc<MpscQueue<T>>,
     metrics: Option<Arc<dyn Metrics + Send + Sync>>,
 }
 
@@ -124,20 +291,30 @@ where
     fn drop(&mut self) {
         #[cfg(feature = "store-log")]
         eprintln!("store: drop '{}' receiver channel", self.name);
+        self.close();
     }
 }
 
+#[allow(dead_code)]
 impl<T> ReceiverChannel<T>
 where
     T: Send + Sync + Clone + 'static,
 {
     pub fn recv(&self) -> Option<ActionOp<T>> {
-        self.receiver.recv().ok()
+        self.queue.recv()
     }
 
     #[allow(dead_code)]
     pub fn try_recv(&self) -> Option<ActionOp<T>> {
-        self.receiver.try_recv().ok()
+        self.queue.try_recv()
+    }
+
+    pub fn len(&self) -> usize {
+        self.queue.len()
+    }
+
+    pub fn close(&self) {
+        self.queue.close();
     }
 }
 
@@ -156,7 +333,7 @@ where
     #[allow(dead_code)]
     pub fn pair(
         capacity: usize,
-        policy: BackpressurePolicy,
+        policy: BackpressurePolicy<MSG>,
     ) -> (SenderChannel<MSG>, ReceiverChannel<MSG>) {
         Self::pair_with("<anon>", capacity, policy, None)
     }
@@ -164,7 +341,7 @@ where
     #[allow(dead_code)]
     pub fn pair_with_metrics(
         capacity: usize,
-        policy: BackpressurePolicy,
+        policy: BackpressurePolicy<MSG>,
         metrics: Option<Arc<dyn Metrics + Send + Sync>>,
     ) -> (SenderChannel<MSG>, ReceiverChannel<MSG>) {
         Self::pair_with("<anon>", capacity, policy, metrics)
@@ -174,22 +351,20 @@ where
     pub fn pair_with(
         name: &str,
         capacity: usize,
-        policy: BackpressurePolicy,
+        policy: BackpressurePolicy<MSG>,
         metrics: Option<Arc<dyn Metrics + Send + Sync>>,
     ) -> (SenderChannel<MSG>, ReceiverChannel<MSG>) {
-        let (sender, receiver) = channel::bounded(capacity);
+        let queue = Arc::new(MpscQueue::new(capacity, policy, metrics.clone()));
+
         (
             SenderChannel {
                 _name: name.to_string(),
-                sender,
-                receiver: receiver.clone(),
-                policy,
-                metrics: metrics.clone(),
+                queue: queue.clone(),
             },
             ReceiverChannel {
                 name: name.to_string(),
-                receiver,
-                metrics: metrics.clone(),
+                queue,
+                metrics,
             },
         )
     }
@@ -198,106 +373,101 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::thread;
-    use std::time::Duration;
 
     #[test]
-    fn test_channel_backpressure_drop_old() {
+    fn test_basic_send_recv() {
         let (sender, receiver) =
-            BackpressureChannel::<i32>::pair(5, BackpressurePolicy::DropOldest);
+            BackpressureChannel::<i32>::pair(5, BackpressurePolicy::BlockOnFull);
 
-        let producer = {
-            let sender_channel = sender.clone();
-            thread::spawn(move || {
-                for i in 0..20 {
-                    // Send more messages than the channel can hold
-                    println!("Sending: {}", i);
-                    if let Err(err) = sender_channel.send(ActionOp::Action(i)) {
-                        eprintln!("Failed to send: {:?}", err);
-                    }
-                    thread::sleep(Duration::from_millis(50)); // Slow down to observe full condition
-                }
-            })
-        };
+        sender.send(ActionOp::Action(1)).unwrap();
+        sender.send(ActionOp::Action(2)).unwrap();
 
-        let consumer = {
-            thread::spawn(move || {
-                let mut received_items = vec![];
-                while let Some(value) = receiver.recv() {
-                    println!("Received: {:?}", value);
-                    match value {
-                        ActionOp::Action(i) => received_items.push(i),
-                        _ => {}
-                    }
-                    thread::sleep(Duration::from_millis(150)); // Slow down the consumer to create a backlog
-                }
-                println!("Channel closed, consumer thread exiting.");
-                assert!(receiver.try_recv().is_none());
-
-                received_items
-            })
-        };
-
-        // Wait for the producer to finish
-        producer.join().unwrap();
-        drop(sender); // Close the channel after the producer is done
-
-        // Collect the results from the consumer thread
-        let received_items = consumer.join().unwrap();
-
-        // Check the length of received items; it should be less than the total sent (20) due to drops
-        assert!(received_items.len() < 20);
-        // Ensure the last items were not dropped (based on the DropOld policy)
-        assert_eq!(received_items.last(), Some(&19));
+        assert_eq!(receiver.recv(), Some(ActionOp::Action(1)));
+        assert_eq!(receiver.recv(), Some(ActionOp::Action(2)));
+        assert_eq!(receiver.try_recv(), None);
     }
 
     #[test]
-    fn test_channel_backpressure_drop_latest() {
+    fn test_drop_oldest() {
         let (sender, receiver) =
-            BackpressureChannel::<i32>::pair(5, BackpressurePolicy::DropLatest);
+            BackpressureChannel::<i32>::pair(2, BackpressurePolicy::DropOldest);
 
-        let producer = {
-            let sender_channel = sender.clone();
-            thread::spawn(move || {
-                for i in 0..20 {
-                    // Send more messages than the channel can hold
-                    println!("Sending: {}", i);
-                    if let Err(err) = sender_channel.send(ActionOp::Action(i)) {
-                        eprintln!("Failed to send: {:?}", err);
-                    }
-                    thread::sleep(Duration::from_millis(50)); // Slow down to observe full condition
-                }
-            })
-        };
+        sender.send(ActionOp::Action(1)).unwrap();
+        sender.send(ActionOp::Action(2)).unwrap();
+        sender.send(ActionOp::Action(3)).unwrap(); // Should drop 1
 
-        let consumer = {
-            thread::spawn(move || {
-                let mut received_items = vec![];
-                while let Some(value) = receiver.recv() {
-                    eprintln!("Received: {:?}", value);
-                    match value {
-                        ActionOp::Action(i) => received_items.push(i),
-                        _ => {}
-                    }
-                    thread::sleep(Duration::from_millis(150)); // Slow down the consumer to create a backlog
-                }
-                println!("Channel closed, consumer thread exiting.");
-                received_items
-            })
-        };
+        assert_eq!(receiver.recv(), Some(ActionOp::Action(2)));
+        assert_eq!(receiver.recv(), Some(ActionOp::Action(3)));
+        assert_eq!(receiver.try_recv(), None);
+    }
 
-        // Wait for the producer to finish
-        producer.join().unwrap();
-        drop(sender); // Close the channel after the producer is done
+    #[test]
+    fn test_drop_latest() {
+        let (sender, receiver) =
+            BackpressureChannel::<i32>::pair(2, BackpressurePolicy::DropLatest);
 
-        // Collect the results from the consumer thread
-        let received_items = consumer.join().unwrap();
+        sender.send(ActionOp::Action(1)).unwrap();
+        sender.send(ActionOp::Action(2)).unwrap();
+        sender.send(ActionOp::Action(3)).unwrap(); // Should drop 3
 
-        // Check the length of received items; it should be less than the total sent (20) due to drops
-        assert!(received_items.len() < 20);
+        assert_eq!(receiver.recv(), Some(ActionOp::Action(1)));
+        assert_eq!(receiver.recv(), Some(ActionOp::Action(2)));
+        assert_eq!(receiver.try_recv(), None);
+    }
 
-        // Ensure the last item received is not necessarily the last one sent, based on the DropLatest policy
-        assert!(received_items.contains(&0)); // The earliest items should be present
-        assert!(received_items.last().unwrap() < &19); // The latest items might be dropped
+    #[test]
+    fn test_predicate_dropping() {
+        // predicate: 5보다 작은 값들은 drop
+        let predicate = Arc::new(|action_op: &ActionOp<i32>| match action_op {
+            ActionOp::Action(value) => *value < 5,
+            ActionOp::Exit(_) => false,
+        });
+
+        let (sender, receiver) =
+            BackpressureChannel::<i32>::pair(2, BackpressurePolicy::DropLatestIf { predicate });
+
+        // 채널을 가득 채우기
+        sender.send(ActionOp::Action(1)).unwrap(); // 첫 번째 아이템 (drop 대상)
+        sender.send(ActionOp::Action(6)).unwrap(); // 두 번째 아이템 (유지 대상)
+
+        // 세 번째 아이템을 보내면 채널이 가득 차서 predicate가 적용됨
+        let result = sender.send(ActionOp::Action(7)); // 세 번째 아이템 (유지 대상)
+        assert!(
+            result.is_ok(),
+            "Should succeed because predicate should drop the first item"
+        );
+
+        // 소비자에서 아이템 확인
+        let received_item = receiver.recv();
+        assert!(received_item.is_some());
+        if let Some(ActionOp::Action(value)) = received_item {
+            // predicate에 의해 1이 drop되고 6이 유지되어야 함
+            assert_eq!(value, 6, "Should receive 6, not 1");
+        }
+
+        let received_item = receiver.recv();
+        assert!(received_item.is_some());
+        if let Some(ActionOp::Action(value)) = received_item {
+            assert_eq!(value, 7, "Should receive 7");
+        }
+    }
+
+    #[test]
+    fn test_block_on_full() {
+        let (sender, receiver) =
+            BackpressureChannel::<i32>::pair(1, BackpressurePolicy::BlockOnFull);
+
+        sender.send(ActionOp::Action(1)).unwrap();
+
+        // Try to send another item - should block or fail
+        let result = sender.try_send(ActionOp::Action(2));
+        assert!(result.is_err(), "Should fail because channel is full");
+
+        // Receive the first item
+        assert_eq!(receiver.recv(), Some(ActionOp::Action(1)));
+
+        // Now we can send again
+        sender.send(ActionOp::Action(2)).unwrap();
+        assert_eq!(receiver.recv(), Some(ActionOp::Action(2)));
     }
 }
