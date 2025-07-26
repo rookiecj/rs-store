@@ -124,6 +124,62 @@ Middleware is a powerful feature that allows you to intercept and modify actions
 
 The channeled subscription feature provides a way to subscribe to a store in new context with a channel.
 
+### Latest State Notification for New Subscribers
+
+When a new subscriber is added to the store, it automatically receives the current state through the `on_subscribe` method. This ensures that new subscribers don't miss the current state and can start with the latest information.
+
+```rust
+use rs_store::{Subscriber, StoreBuilder};
+use std::sync::{Arc, Mutex};
+
+#[derive(Clone, Debug)]
+struct MyState {
+    counter: i32,
+}
+
+#[derive(Clone)]
+enum MyAction {
+    Increment,
+    Decrement,
+}
+
+struct MySubscriber {
+    received_states: Arc<Mutex<Vec<MyState>>>,
+}
+
+impl Subscriber<MyState, MyAction> for MySubscriber {
+    fn on_subscribe(&self, state: &MyState) {
+        // Called when the subscriber is first added to the store
+        // Receives the current state immediately
+        println!("New subscriber received initial state: {:?}", state);
+        self.received_states.lock().unwrap().push(state.clone());
+    }
+
+    fn on_notify(&self, state: &MyState, action: &MyAction) {
+        // Called when the state changes due to an action
+        println!("State updated: {:?}", state);
+        self.received_states.lock().unwrap().push(state.clone());
+    }
+}
+
+// Usage
+let store = StoreBuilder::new_with_reducer(MyState { counter: 0 }, reducer)
+    .build()
+    .unwrap();
+
+// Dispatch some actions to change the state
+store.dispatch(MyAction::Increment).unwrap();
+store.dispatch(MyAction::Increment).unwrap();
+
+// Add a new subscriber - it will receive the current state (counter: 2)
+let subscriber = Arc::new(MySubscriber {
+    received_states: Arc::new(Mutex::new(Vec::new())),
+});
+store.add_subscriber(subscriber);
+```
+
+This feature ensures that new subscribers are immediately synchronized with the current state of the store.
+
 ### Metrics
 
 The metrics feature provides a way to collect metrics.
@@ -138,7 +194,7 @@ For detailed documentation, visit:
 ## Implementation Status
 
 ### In Progress 🚧
-- [ ] Latest state notification for new subscribers
+- [x] Latest state notification for new subscribers
 - [x] Notification scheduler (CurrentThread, ThreadPool)
 - [X] Stream-based pull model(Iterator)
 - [ ] Stop store after all effects are scheduled
