@@ -5,34 +5,26 @@ use std::marker::PhantomData;
 use std::sync::{Arc, Condvar, Mutex};
 
 /// the Backpressure policy
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub enum BackpressurePolicy<T>
 where
     T: Send + Sync + Clone + 'static,
 {
     /// Block the sender when the queue is full
+    #[default]
     BlockOnFull,
     /// Drop the oldest item when the queue is full
     DropOldest,
     /// Drop the latest item when the queue is full
     DropLatest,
-    /// Drop items based on predicate when the queue is full
+    /// Drop items based on predicate when the queue is full, it drops from the latest
     DropLatestIf {
         predicate: Arc<dyn Fn(&ActionOp<T>) -> bool + Send + Sync>,
     },
-    /// Drop items based on predicate when the queue is full
+    /// Drop items based on predicate when the queue is full, it drops from the oldest
     DropOldestIf {
         predicate: Arc<dyn Fn(&ActionOp<T>) -> bool + Send + Sync>,
     },
-}
-
-impl<T> Default for BackpressurePolicy<T>
-where
-    T: Send + Sync + Clone + 'static,
-{
-    fn default() -> Self {
-        BackpressurePolicy::BlockOnFull
-    }
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -130,9 +122,8 @@ where
                                 }
                                 break;
                             }
-                        } else {
-                            i += 1;
                         }
+                        i += 1;
                     }
 
                     if dropped_count > 0 {
@@ -157,9 +148,8 @@ where
                                 }
                                 break;
                             }
-                        } else {
-                            i += 1;
                         }
+                        i += 1;
                     }
 
                     if dropped_count > 0 {
@@ -191,7 +181,82 @@ where
         let mut queue = self.queue.lock().unwrap();
 
         if queue.len() >= self.capacity {
-            return Err(SenderError::SendError(item));
+            match &self.policy {
+                BackpressurePolicy::BlockOnFull => {
+                    return Err(SenderError::SendError(item));
+                }
+                BackpressurePolicy::DropOldest => {
+                    // Drop the oldest item
+                    if let Some(dropped_item) = queue.pop_front() {
+                        if let Some(metrics) = &self.metrics {
+                            if let ActionOp::Action(action) = &dropped_item {
+                                metrics.action_dropped(Some(action as &dyn std::any::Any));
+                            }
+                        }
+                    }
+                    queue.push_back(item);
+                }
+                BackpressurePolicy::DropLatest => {
+                    // Drop the new item
+                    if let Some(metrics) = &self.metrics {
+                        if let ActionOp::Action(action) = &item {
+                            metrics.action_dropped(Some(action as &dyn std::any::Any));
+                        }
+                    }
+                    return Ok(queue.len() as i64);
+                }
+                BackpressurePolicy::DropLatestIf { predicate } => {
+                    // Find and drop items that match the predicate
+                    let mut dropped_count = 0;
+                    let mut i = 0;
+                    while i < queue.len() {
+                        if predicate(&queue[i]) {
+                            if let Some(dropped_item) = queue.remove(i) {
+                                dropped_count += 1;
+                                if let Some(metrics) = &self.metrics {
+                                    if let ActionOp::Action(action) = &dropped_item {
+                                        metrics.action_dropped(Some(action as &dyn std::any::Any));
+                                    }
+                                }
+                                break;
+                            }
+                        }
+                        i += 1;
+                    }
+
+                    if dropped_count > 0 {
+                        queue.push_back(item);
+                    } else {
+                        return Err(SenderError::SendError(item));
+                    }
+                }
+                BackpressurePolicy::DropOldestIf { predicate } => {
+                    // Find and drop items that match the predicate
+                    let mut dropped_count = 0;
+                    let mut i = 0;
+                    while i < queue.len() {
+                        let index = queue.len() - i - 1;
+                        if predicate(&queue[index]) {
+                            if let Some(dropped_item) = queue.remove(index) {
+                                dropped_count += 1;
+                                if let Some(metrics) = &self.metrics {
+                                    if let ActionOp::Action(action) = &dropped_item {
+                                        metrics.action_dropped(Some(action as &dyn std::any::Any));
+                                    }
+                                }
+                                break;
+                            }
+                        }
+                        i += 1;
+                    }
+
+                    if dropped_count > 0 {
+                        queue.push_back(item);
+                    } else {
+                        return Err(SenderError::SendError(item));
+                    }
+                }
+            }
         } else {
             queue.push_back(item);
         }
@@ -469,5 +534,77 @@ mod tests {
         // Now we can send again
         sender.send(ActionOp::Action(2)).unwrap();
         assert_eq!(receiver.recv(), Some(ActionOp::Action(2)));
+    }
+
+    #[test]
+    fn test_drop_oldest_if_predicate_always_false() {
+        let (sender, receiver) = BackpressureChannel::pair(
+            3,
+            BackpressurePolicy::DropOldestIf {
+                predicate: Arc::new(|_| false), // Predicate always returns false
+            },
+        );
+
+        // Fill the channel to capacity
+        assert!(sender.try_send(ActionOp::Action(1)).is_ok());
+        assert!(sender.try_send(ActionOp::Action(2)).is_ok());
+        assert!(sender.try_send(ActionOp::Action(3)).is_ok());
+        assert_eq!(receiver.len(), 3);
+
+        // Try to send one more item - should fail since predicate is false
+        // and no items can be dropped
+        let result = sender.try_send(ActionOp::Action(4));
+        assert!(
+            result.is_err(),
+            "Should fail because no items match the predicate"
+        );
+
+        // Verify the channel contents are unchanged
+        assert_eq!(receiver.len(), 3);
+        assert_eq!(receiver.recv(), Some(ActionOp::Action(1)));
+        assert_eq!(receiver.recv(), Some(ActionOp::Action(2)));
+        assert_eq!(receiver.recv(), Some(ActionOp::Action(3)));
+    }
+
+    #[test]
+    fn test_drop_oldest_if_predicate_sometimes_true() {
+        let (sender, receiver) = BackpressureChannel::pair(
+            3,
+            BackpressurePolicy::DropOldestIf {
+                predicate: Arc::new(|action_op: &ActionOp<i32>| {
+                    if let ActionOp::Action(value) = action_op {
+                        *value < 5 // Drop values less than 5
+                    } else {
+                        false
+                    }
+                }),
+            },
+        );
+
+        // Fill the channel to capacity with values that don't match predicate
+        assert!(sender.try_send(ActionOp::Action(6)).is_ok()); // >= 5, not droppable
+        assert!(sender.try_send(ActionOp::Action(2)).is_ok()); // < 5, droppable
+        assert!(sender.try_send(ActionOp::Action(8)).is_ok()); // >= 5, not droppable
+        assert_eq!(receiver.len(), 3);
+
+        // Try to send a value that doesn't match predicate - should fail
+        let result = sender.try_send(ActionOp::Action(9));
+        assert!(
+            result.is_ok(),
+            "Should fail because no items match the predicate"
+        );
+
+        // Now send a value that matches predicate - should fail because no items match predicate
+        let result = sender.try_send(ActionOp::Action(10)); // This should fail because no items < 5
+        assert!(
+            result.is_err(),
+            "Should fail because no items match the predicate"
+        );
+
+        // Verify the channel contents are unchanged
+        assert_eq!(receiver.len(), 3);
+        assert_eq!(receiver.recv(), Some(ActionOp::Action(6)));
+        assert_eq!(receiver.recv(), Some(ActionOp::Action(8)));
+        assert_eq!(receiver.recv(), Some(ActionOp::Action(9)));
     }
 }
