@@ -23,7 +23,12 @@ pub fn main() {
     store.dispatch(1).expect("no error");
 
     // stop the store
-    store.stop();
+    match store.stop() {
+        Ok(_) => println!("store stopped"),
+        Err(e) => {
+            panic!("store stop failed  : {:?}", e);
+        }
+    }
 
     assert_eq!(store.get_state(), 42);
 }

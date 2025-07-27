@@ -6,9 +6,12 @@ fn main() {
     // 작은 값들을 우선적으로 drop하는 predicate
     let predicate = Arc::new(|action_op: &rs_store::ActionOp<i32>| {
         match action_op {
-            rs_store::ActionOp::Action(value) => *value < 5, // 5보다 작은 값들은 drop
-            rs_store::ActionOp::Exit(_) => false,            // Exit는 drop하지 않음
-            rs_store::ActionOp::AddSubscriber => false,      // AddSubscriber는 drop하지 않음
+            rs_store::ActionOp::Action(value) => {
+                println!("droppable {} ? {}", *value, *value < 5);
+                *value < 5 // 5보다 작은 값들은 drop
+            }
+            rs_store::ActionOp::Exit(_) => false, // Exit는 drop하지 않음
+            rs_store::ActionOp::AddSubscriber => false, // AddSubscriber는 drop하지 않음
         }
     });
 
@@ -53,7 +56,23 @@ fn main() {
     }
 
     // 처리 완료 대기
-    std::thread::sleep(std::time::Duration::from_millis(3000));
+    // std::thread::sleep(std::time::Duration::from_millis(3000));
+
+    // stop can be failed when the queue is full , the Exit action can not be delivered
+    match store.stop() {
+        Ok(_) => println!("store stopped"),
+        Err(e) => {
+            println!("store stop failed  : {:?}", e);
+            // wait for the queue to be empty, try again
+            std::thread::sleep(std::time::Duration::from_millis(1000));
+            match store.stop() {
+                Ok(_) => println!("store stopped"),
+                Err(e) => {
+                    panic!("store stop failed  : {:?}", e);
+                }
+            }
+        }
+    }
 
     // 최종 상태 확인
     let final_state = store.get_state();
@@ -66,6 +85,4 @@ fn main() {
     println!("  - 받은 액션: {}", metrics.action_received);
     println!("  - 처리된 액션: {}", metrics.action_reduced);
     println!("  - drop된 액션: {}", metrics.action_dropped);
-
-    store.stop();
 }
