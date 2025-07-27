@@ -11,8 +11,8 @@ pub enum DispatchOp<State, Action> {
 /// Reducer reduces the state based on the action.
 pub trait Reducer<State, Action>
 where
-    State: Send + Sync + Clone,
-    Action: Send + Sync + 'static,
+    State: Send + Sync + Clone + std::fmt::Debug,
+    Action: Send + Sync + std::fmt::Debug + 'static,
 {
     fn reduce(&self, state: &State, action: &Action) -> DispatchOp<State, Action>;
 }
@@ -21,8 +21,8 @@ where
 pub struct FnReducer<F, State, Action>
 where
     F: Fn(&State, &Action) -> DispatchOp<State, Action>,
-    State: Send + Sync + Clone,
-    Action: Send + Sync + 'static,
+    State: Send + Sync + Clone + std::fmt::Debug,
+    Action: Send + Sync + std::fmt::Debug + 'static,
 {
     func: F,
     _marker: std::marker::PhantomData<(State, Action)>,
@@ -31,8 +31,8 @@ where
 impl<F, State, Action> Reducer<State, Action> for FnReducer<F, State, Action>
 where
     F: Fn(&State, &Action) -> DispatchOp<State, Action>,
-    State: Send + Sync + Clone,
-    Action: Send + Sync + 'static,
+    State: Send + Sync + Clone + std::fmt::Debug,
+    Action: Send + Sync + std::fmt::Debug + 'static,
 {
     fn reduce(&self, state: &State, action: &Action) -> DispatchOp<State, Action> {
         (self.func)(state, action)
@@ -42,8 +42,8 @@ where
 impl<F, State, Action> From<F> for FnReducer<F, State, Action>
 where
     F: Fn(&State, &Action) -> DispatchOp<State, Action>,
-    State: Send + Sync + Clone,
-    Action: Send + Sync + 'static,
+    State: Send + Sync + Clone + std::fmt::Debug,
+    Action: Send + Sync + std::fmt::Debug + 'static,
 {
     fn from(func: F) -> Self {
         Self {
@@ -117,7 +117,12 @@ mod tests {
         store.dispatch(2).unwrap(); // Should work: 1 -> 3
 
         // Give time for all actions to be processed
-        store.stop();
+        match store.stop() {
+            Ok(_) => println!("store stopped"),
+            Err(e) => {
+                panic!("store stop failed  : {:?}", e);
+            }
+        }
 
         // then
         // Verify final state
@@ -164,7 +169,12 @@ mod tests {
         store.dispatch(1).unwrap();
         store.dispatch(2).unwrap();
 
-        store.stop();
+        match store.stop() {
+            Ok(_) => println!("store stopped"),
+            Err(e) => {
+                panic!("store stop failed  : {:?}", e);
+            }
+        }
 
         // then
         // Even though PanicReducer panics, NormalReducer should still process actions
@@ -181,7 +191,12 @@ mod tests {
         // when
         store.dispatch(5).unwrap();
         store.dispatch(3).unwrap();
-        store.stop();
+        match store.stop() {
+            Ok(_) => println!("store stopped"),
+            Err(e) => {
+                panic!("store stop failed  : {:?}", e);
+            }
+        }
 
         // then
         assert_eq!(store.get_state(), 8); // 0 + 5 + 3 = 8
@@ -190,7 +205,7 @@ mod tests {
     #[test]
     fn test_fn_reducer_with_effect() {
         // given
-        #[derive(Clone)]
+        #[derive(Clone, Debug)]
         enum Action {
             AddWithEffect(i32),
             Add(i32),
@@ -214,7 +229,12 @@ mod tests {
         // when
         store.dispatch(Action::AddWithEffect(2)).unwrap();
         thread::sleep(std::time::Duration::from_millis(1000)); // Wait for effect to be processed
-        store.stop();
+        match store.stop() {
+            Ok(_) => println!("store stopped"),
+            Err(e) => {
+                panic!("store stop failed  : {:?}", e);
+            }
+        }
 
         // then
         // Initial state(0) + action(2) + effect(40) = 42
@@ -247,7 +267,12 @@ mod tests {
         store.dispatch(5).unwrap(); // Should change state
         store.dispatch(-3).unwrap(); // Should keep state
         store.dispatch(2).unwrap(); // Should change state
-        store.stop();
+        match store.stop() {
+            Ok(_) => println!("store stopped"),
+            Err(e) => {
+                panic!("store stop failed  : {:?}", e);
+            }
+        }
 
         // then
         assert_eq!(store.get_state(), 7); // 0 + 5 + 2 = 7
@@ -272,7 +297,12 @@ mod tests {
         // when
         store.dispatch(3).unwrap(); // (((0)  +3) *2) = 6
         store.dispatch(15).unwrap(); // (((6) +15) *2) = 42
-        store.stop();
+        match store.stop() {
+            Ok(_) => println!("store stopped"),
+            Err(e) => {
+                panic!("store stop failed  : {:?}", e);
+            }
+        }
 
         // then
         assert_eq!(store.get_state(), 42);

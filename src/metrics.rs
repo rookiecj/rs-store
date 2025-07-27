@@ -253,9 +253,14 @@ impl fmt::Display for CountMetrics {
 #[allow(unused_variables)]
 impl Metrics for CountMetrics {
     fn action_received(&self, data: Option<&dyn Any>) {
+        // #[cfg(feature = "store-log")]
+        // eprintln!("action_received: {:?}", data);
+
         self.action_received.fetch_add(1, Ordering::SeqCst);
     }
     fn action_dropped(&self, data: Option<&dyn Any>) {
+        // #[cfg(feature = "store-log")]
+        // eprintln!("action_dropped: {:?}", data);
         self.action_dropped.fetch_add(1, Ordering::SeqCst);
     }
     fn action_executed(&self, data: Option<&dyn Any>, duration: Duration) {
@@ -568,7 +573,12 @@ mod tests {
         let _ = store.dispatch(3);
 
         // +1 : ActionExit
-        store.stop();
+        match store.stop() {
+            Ok(_) => println!("store stopped"),
+            Err(e) => {
+                panic!("store stop failed  : {:?}", e);
+            }
+        }
 
         // then
         let metrics = store.get_metrics();
@@ -593,7 +603,12 @@ mod tests {
         for i in 0..5 {
             let _ = store.dispatch(i);
         }
-        store.stop();
+        match store.stop() {
+            Ok(_) => println!("store stopped"),
+            Err(e) => {
+                panic!("store stop failed  : {:?}", e);
+            }
+        }
 
         // then
         let metrics = store.get_metrics();
@@ -616,7 +631,12 @@ mod tests {
 
         // when
         store.dispatch(1).expect("no error");
-        store.stop();
+        match store.stop() {
+            Ok(_) => println!("store stopped"),
+            Err(e) => {
+                panic!("store stop failed  : {:?}", e);
+            }
+        }
 
         // +1 for ActionExit
         let metrics = store.get_metrics();

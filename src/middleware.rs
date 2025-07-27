@@ -194,7 +194,12 @@ mod tests {
         store.add_middleware(logger.clone());
 
         let _ = store.dispatch(1);
-        store.stop();
+        match store.stop() {
+            Ok(_) => println!("store stopped"),
+            Err(e) => {
+                panic!("store stop failed  : {:?}", e);
+            }
+        }
 
         // reduce: 1
         // effect: 1
@@ -272,7 +277,12 @@ mod tests {
 
         // when
         let _ = store.dispatch(42);
-        store.stop();
+        match store.stop() {
+            Ok(_) => println!("store stopped"),
+            Err(e) => {
+                panic!("store stop failed  : {:?}", e);
+            }
+        }
 
         // then
         // the state should not be changed
@@ -290,7 +300,12 @@ mod tests {
         assert!(store.is_ok());
         let store = store.unwrap();
         let _ = store.dispatch(1);
-        store.stop();
+        match store.stop() {
+            Ok(_) => println!("store stopped"),
+            Err(e) => {
+                panic!("store stop failed  : {:?}", e);
+            }
+        }
 
         // break chain, but continue dispatching the action
         assert_eq!(store.get_state(), 1);
@@ -378,13 +393,18 @@ mod tests {
 
         // give time to the effect
         thread::sleep(Duration::from_millis(1000));
-        store.stop();
+        match store.stop() {
+            Ok(_) => println!("store stopped"),
+            Err(e) => {
+                panic!("store stop failed  : {:?}", e);
+            }
+        }
 
         // the state should be changed
         assert_eq!(store.get_state(), 43);
     }
 
-    #[derive(Clone)]
+    #[derive(Debug, Clone)]
     struct EffectState {
         value: i32,
     }
@@ -516,7 +536,12 @@ mod tests {
         // the effect produces another effect
         thread::sleep(Duration::from_millis(1000));
 
-        store.stop();
+        match store.stop() {
+            Ok(_) => println!("store stopped"),
+            Err(e) => {
+                panic!("store stop failed  : {:?}", e);
+            }
+        }
 
         // then
         assert_eq!(store.get_state().value, 43);
@@ -549,7 +574,12 @@ mod tests {
 
         let _ = store.dispatch(1);
 
-        store.stop();
+        match store.stop() {
+            Ok(_) => println!("store stopped"),
+            Err(e) => {
+                panic!("store stop failed  : {:?}", e);
+            }
+        }
 
         // 2 = before_reduce, before_effect
         assert_eq!(logger.errors.lock().unwrap().len(), 2);
