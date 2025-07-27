@@ -8,7 +8,7 @@ use std::sync::{Arc, Condvar, Mutex};
 #[derive(Clone, Default)]
 pub enum BackpressurePolicy<T>
 where
-    T: Send + Sync + Clone + 'static,
+    T: Send + Sync + Clone + std::fmt::Debug + 'static,
 {
     /// Block the sender when the queue is full
     #[default]
@@ -18,18 +18,23 @@ where
     /// Drop the latest item when the queue is full
     DropLatest,
     /// Drop items based on predicate when the queue is full, it drops from the latest
+    /// With this policy, 'send' can be Err when all items are not droppable
     DropLatestIf {
         predicate: Arc<dyn Fn(&ActionOp<T>) -> bool + Send + Sync>,
     },
     /// Drop items based on predicate when the queue is full, it drops from the oldest
+    /// With this policy, 'send' can be Err when all items are not droppable
     DropOldestIf {
         predicate: Arc<dyn Fn(&ActionOp<T>) -> bool + Send + Sync>,
     },
 }
 
 #[derive(thiserror::Error, Debug)]
-pub(crate) enum SenderError<T> {
-    #[error("Failed to send: {0}")]
+pub(crate) enum SenderError<T>
+where
+    T: std::fmt::Debug,
+{
+    #[error("Failed to send: {:?}", .0)]
     SendError(T),
     #[error("Channel is closed")]
     ChannelClosed,
@@ -38,7 +43,7 @@ pub(crate) enum SenderError<T> {
 /// Internal MPSC Queue implementation
 struct MpscQueue<T>
 where
-    T: Send + Sync + Clone + 'static,
+    T: Send + Sync + Clone + std::fmt::Debug + 'static,
 {
     queue: Mutex<VecDeque<ActionOp<T>>>,
     condvar: Condvar,
@@ -50,7 +55,7 @@ where
 
 impl<T> MpscQueue<T>
 where
-    T: Send + Sync + Clone + 'static,
+    T: Send + Sync + Clone + std::fmt::Debug + 'static,
 {
     fn new(
         capacity: usize,
@@ -68,13 +73,13 @@ where
     }
 
     fn send(&self, item: ActionOp<T>) -> Result<i64, SenderError<ActionOp<T>>> {
-        let mut queue = self.queue.lock().unwrap();
-
         // Check if channel is closed
         if *self.closed.lock().unwrap() {
             return Err(SenderError::ChannelClosed);
         }
 
+        let mut queue: std::sync::MutexGuard<'_, VecDeque<ActionOp<T>>> =
+            self.queue.lock().unwrap();
         if queue.len() >= self.capacity {
             match &self.policy {
                 BackpressurePolicy::BlockOnFull => {
@@ -105,13 +110,21 @@ where
                             metrics.action_dropped(Some(action as &dyn std::any::Any));
                         }
                     }
+                    self.condvar.notify_one();
                     return Ok(queue.len() as i64);
                 }
-                BackpressurePolicy::DropLatestIf { predicate } => {
+                BackpressurePolicy::DropOldestIf { predicate } => {
                     // Find and drop items that match the predicate
                     let mut dropped_count = 0;
                     let mut i = 0;
                     while i < queue.len() {
+                        #[cfg(feature = "store-log")]
+                        eprintln!(
+                            "store: check droppable {}/{}: {:?}",
+                            i,
+                            queue.len(),
+                            queue[i]
+                        );
                         if predicate(&queue[i]) {
                             if let Some(dropped_item) = queue.remove(i) {
                                 dropped_count += 1;
@@ -129,15 +142,24 @@ where
                     if dropped_count > 0 {
                         queue.push_back(item);
                     } else {
+                        #[cfg(feature = "store-log")]
+                        eprintln!("store: failed to drop: queue len={}", queue.len());
                         return Err(SenderError::SendError(item));
                     }
                 }
-                BackpressurePolicy::DropOldestIf { predicate } => {
+                BackpressurePolicy::DropLatestIf { predicate } => {
                     // Find and drop items that match the predicate
                     let mut dropped_count = 0;
                     let mut i = 0;
                     while i < queue.len() {
                         let index = queue.len() - i - 1;
+                        #[cfg(feature = "store-log")]
+                        eprintln!(
+                            "store: check droppable {}/{}: {:?}",
+                            index,
+                            queue.len(),
+                            queue[index]
+                        );
                         if predicate(&queue[index]) {
                             if let Some(dropped_item) = queue.remove(index) {
                                 dropped_count += 1;
@@ -155,6 +177,8 @@ where
                     if dropped_count > 0 {
                         queue.push_back(item);
                     } else {
+                        #[cfg(feature = "store-log")]
+                        eprintln!("store: failed to drop: queue len={}", queue.len());
                         return Err(SenderError::SendError(item));
                     }
                 }
@@ -203,13 +227,21 @@ where
                             metrics.action_dropped(Some(action as &dyn std::any::Any));
                         }
                     }
+                    self.condvar.notify_one();
                     return Ok(queue.len() as i64);
                 }
-                BackpressurePolicy::DropLatestIf { predicate } => {
+                BackpressurePolicy::DropOldestIf { predicate } => {
                     // Find and drop items that match the predicate
                     let mut dropped_count = 0;
                     let mut i = 0;
                     while i < queue.len() {
+                        #[cfg(feature = "store-log")]
+                        eprintln!(
+                            "store: check droppable {}/{}: {:?}",
+                            i,
+                            queue.len(),
+                            queue[i]
+                        );
                         if predicate(&queue[i]) {
                             if let Some(dropped_item) = queue.remove(i) {
                                 dropped_count += 1;
@@ -227,15 +259,24 @@ where
                     if dropped_count > 0 {
                         queue.push_back(item);
                     } else {
+                        #[cfg(feature = "store-log")]
+                        eprintln!("store: failed to drop: queue len={}", queue.len());
                         return Err(SenderError::SendError(item));
                     }
                 }
-                BackpressurePolicy::DropOldestIf { predicate } => {
+                BackpressurePolicy::DropLatestIf { predicate } => {
                     // Find and drop items that match the predicate
                     let mut dropped_count = 0;
                     let mut i = 0;
                     while i < queue.len() {
                         let index = queue.len() - i - 1;
+                        #[cfg(feature = "store-log")]
+                        eprintln!(
+                            "store: check droppable {}/{}: {:?}",
+                            index,
+                            queue.len(),
+                            queue[index]
+                        );
                         if predicate(&queue[index]) {
                             if let Some(dropped_item) = queue.remove(index) {
                                 dropped_count += 1;
@@ -253,6 +294,8 @@ where
                     if dropped_count > 0 {
                         queue.push_back(item);
                     } else {
+                        #[cfg(feature = "store-log")]
+                        eprintln!("store: failed to drop: queue len={}", queue.len());
                         return Err(SenderError::SendError(item));
                     }
                 }
@@ -309,7 +352,7 @@ where
 #[derive(Clone)]
 pub(crate) struct SenderChannel<T>
 where
-    T: Send + Sync + Clone + 'static,
+    T: Send + Sync + Clone + std::fmt::Debug + 'static,
 {
     _name: String,
     queue: Arc<MpscQueue<T>>,
@@ -317,7 +360,7 @@ where
 
 impl<Action> Drop for SenderChannel<Action>
 where
-    Action: Send + Sync + Clone + 'static,
+    Action: Send + Sync + Clone + std::fmt::Debug + 'static,
 {
     fn drop(&mut self) {
         #[cfg(feature = "store-log")]
@@ -328,7 +371,7 @@ where
 #[allow(dead_code)]
 impl<T> SenderChannel<T>
 where
-    T: Send + Sync + Clone + 'static,
+    T: Send + Sync + Clone + std::fmt::Debug + 'static,
 {
     pub fn send(&self, item: ActionOp<T>) -> Result<i64, SenderError<ActionOp<T>>> {
         self.queue.send(item)
@@ -342,7 +385,7 @@ where
 #[allow(dead_code)]
 pub(crate) struct ReceiverChannel<T>
 where
-    T: Send + Sync + Clone + 'static,
+    T: Send + Sync + Clone + std::fmt::Debug + 'static,
 {
     name: String,
     queue: Arc<MpscQueue<T>>,
@@ -351,7 +394,7 @@ where
 
 impl<Action> Drop for ReceiverChannel<Action>
 where
-    Action: Send + Sync + Clone + 'static,
+    Action: Send + Sync + Clone + std::fmt::Debug + 'static,
 {
     fn drop(&mut self) {
         #[cfg(feature = "store-log")]
@@ -363,7 +406,7 @@ where
 #[allow(dead_code)]
 impl<T> ReceiverChannel<T>
 where
-    T: Send + Sync + Clone + 'static,
+    T: Send + Sync + Clone + std::fmt::Debug + 'static,
 {
     pub fn recv(&self) -> Option<ActionOp<T>> {
         self.queue.recv()
@@ -393,7 +436,7 @@ where
 
 impl<MSG> BackpressureChannel<MSG>
 where
-    MSG: Send + Sync + Clone + 'static,
+    MSG: Send + Sync + Clone + std::fmt::Debug + 'static,
 {
     #[allow(dead_code)]
     pub fn pair(
