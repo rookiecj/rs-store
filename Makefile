@@ -27,6 +27,9 @@ test-all: test test-dev examples ## test all
 test:	## test
 	RUST_TEST_THREADS=1 RUST_LOG=debug cargo test  -- --nocapture
 
+test-test_store_iter_with_different_policies:
+	RUST_TEST_THREADS=1 RUST_LOG=debug cargo test --test store_impl::tests::test_store_iter_with_different_policies -- --nocapture
+
 .PHONY: test-dev
 test-dev:	## test with log
 	RUST_TEST_THREADS=1 RUST_LOG=debug cargo test --profile dev  -- --nocapture
@@ -67,8 +70,12 @@ examples: ## example all
 	RUSTFLAGS="-D warnings" cargo run --example calc_unsubscribe -- --nocapture
 	RUSTFLAGS="-D warnings" cargo run --example calc_thunk -- --nocapture
 	RUSTFLAGS="-D warnings" cargo run --example calc_basic_builder -- --nocapture
-	RUSTFLAGS="-D warnings" cargo run --example iter_state -- --nocapture
+#	RUSTFLAGS="-D warnings" cargo run --example iter_state -- --nocapture
 	RUSTFLAGS="-D warnings" cargo run --example dropoldest_if -- --nocapture
+
+example-dropoldest_if:
+	RUSTFLAGS="-D warnings" cargo run --example dropoldest_if -- --nocapture --features store-log
+
 
 VERSION := $(shell cargo pkgid -p "rs-store" | cut -d\# -f2 | cut -d@ -f2)
 

@@ -8,8 +8,8 @@ use std::sync::Arc;
 
 pub struct StoreBuilder<State, Action>
 where
-    State: Send + Sync + Clone + 'static,
-    Action: Send + Sync + Clone + 'static,
+    State: Send + Sync + Clone + std::fmt::Debug + 'static,
+    Action: Send + Sync + Clone + std::fmt::Debug + 'static,
 {
     name: String,
     state: State,
@@ -22,8 +22,8 @@ where
 
 impl<State, Action> StoreBuilder<State, Action>
 where
-    State: Send + Sync + Clone + 'static,
-    Action: Send + Sync + Clone + 'static,
+    State: Send + Sync + Clone + std::fmt::Debug + 'static,
+    Action: Send + Sync + Clone + std::fmt::Debug + 'static,
 {
     /// Create a new store builder.
     pub fn new(state: State) -> Self {
