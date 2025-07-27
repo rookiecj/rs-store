@@ -143,5 +143,10 @@ pub fn main() {
     // wait for thunk to finish
     drop(cond_done.wait(lock_done.lock().unwrap()).unwrap());
 
-    store.stop();
+    match store.stop() {
+        Ok(_) => println!("store stopped"),
+        Err(e) => {
+            panic!("store stop failed  : {:?}", e);
+        }
+    }
 }

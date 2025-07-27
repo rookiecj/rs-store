@@ -136,7 +136,12 @@ pub fn main() {
     println!("Send 42...");
     let _ = store.dispatch(CalcAction::Add(42));
 
-    store.stop();
+    match store.stop() {
+        Ok(_) => println!("store stopped"),
+        Err(e) => {
+            panic!("store stop failed  : {:?}", e);
+        }
+    }
 
     println!("Done!");
 }

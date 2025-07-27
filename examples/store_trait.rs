@@ -17,7 +17,12 @@ fn main() {
 fn do_with_store(store: Arc<dyn Store<i32, i32>>) {
     let _ = store.dispatch(41);
     let _ = store.dispatch(1);
-    store.stop();
+    match store.stop() {
+        Ok(_) => println!("store stopped"),
+        Err(e) => {
+            panic!("store stop failed  : {:?}", e);
+        }
+    }
 
     assert_eq!(store.get_state(), 42);
 }

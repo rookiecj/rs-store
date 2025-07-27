@@ -7,16 +7,16 @@ use std::sync::Arc;
 /// that the store is stopped when it goes out of scope.
 pub struct DroppableStore<State, Action>
 where
-    State: Send + Sync + Clone + 'static,
-    Action: Send + Sync + Clone + 'static,
+    State: Send + Sync + Clone + std::fmt::Debug + 'static,
+    Action: Send + Sync + Clone + std::fmt::Debug + 'static,
 {
     inner: Arc<StoreImpl<State, Action>>,
 }
 
 impl<State, Action> DroppableStore<State, Action>
 where
-    State: Send + Sync + Clone + 'static,
-    Action: Send + Sync + Clone + 'static,
+    State: Send + Sync + Clone + std::fmt::Debug + 'static,
+    Action: Send + Sync + Clone + std::fmt::Debug + 'static,
 {
     pub fn new(store: Arc<StoreImpl<State, Action>>) -> Self {
         Self { inner: store }
@@ -25,11 +25,11 @@ where
 
 impl<State, Action> Drop for DroppableStore<State, Action>
 where
-    State: Send + Sync + Clone + 'static,
-    Action: Send + Sync + Clone + 'static,
+    State: Send + Sync + Clone + std::fmt::Debug + 'static,
+    Action: Send + Sync + Clone + std::fmt::Debug + 'static,
 {
     fn drop(&mut self) {
-        self.inner.stop();
+        let _ = self.inner.stop();
         #[cfg(feature = "store-log")]
         eprintln!("store: '{}' Store dropped", self.inner.name);
     }
@@ -37,8 +37,8 @@ where
 
 impl<State, Action> Deref for DroppableStore<State, Action>
 where
-    State: Send + Sync + Clone + 'static,
-    Action: Send + Sync + Clone + 'static,
+    State: Send + Sync + Clone + std::fmt::Debug + 'static,
+    Action: Send + Sync + Clone + std::fmt::Debug + 'static,
 {
     type Target = Arc<StoreImpl<State, Action>>;
 

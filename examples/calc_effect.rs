@@ -133,5 +133,10 @@ pub fn main() {
     store.add_subscriber(Arc::new(CalcSubscriber::default()));
     let _ = store.dispatch(CalcAction::AddWillProduceThunk(1));
 
-    store.stop();
+    match store.stop() {
+        Ok(_) => println!("store stopped"),
+        Err(e) => {
+            panic!("store stop failed  : {:?}", e);
+        }
+    }
 }

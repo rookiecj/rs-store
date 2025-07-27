@@ -30,8 +30,8 @@ pub enum StoreError {
 /// Store trait defines the interface for a Redux-like store
 pub trait Store<State, Action>: Send + Sync
 where
-    State: Send + Sync + Clone + 'static,
-    Action: Send + Sync + Clone + 'static,
+    State: Send + Sync + Clone + std::fmt::Debug + 'static,
+    Action: Send + Sync + Clone + std::fmt::Debug + 'static,
 {
     /// Get the current state
     fn get_state(&self) -> State;
@@ -74,7 +74,7 @@ where
     ) -> Result<Box<dyn Subscription>, StoreError>;
 
     /// Stop the store
-    fn stop(&self);
+    fn stop(&self) -> Result<(), StoreError>;
 }
 
 #[cfg(test)]
@@ -176,7 +176,12 @@ mod tests {
         let state = store.get_state();
         assert_eq!(state.message, "Hello");
 
-        store.stop();
+        match store.stop() {
+            Ok(_) => println!("store stopped"),
+            Err(e) => {
+                panic!("store stop failed  : {:?}", e);
+            }
+        }
     }
 
     #[test]
@@ -195,13 +200,23 @@ mod tests {
         assert_eq!(final_state.counter, 1);
         assert_eq!(final_state.message, "Test");
 
-        store.stop();
+        match store.stop() {
+            Ok(_) => println!("store stopped"),
+            Err(e) => {
+                panic!("store stop failed  : {:?}", e);
+            }
+        }
     }
 
     #[test]
     fn test_store_after_stop() {
         let store = create_test_store();
-        store.stop();
+        match store.stop() {
+            Ok(_) => println!("store stopped"),
+            Err(e) => {
+                panic!("store stop failed  : {:?}", e);
+            }
+        }
 
         // Dispatch should fail after stop
         let result = store.dispatch(TestAction::Increment);
@@ -237,7 +252,12 @@ mod tests {
         // Final counter should be 0 (5 increments and 5 decrements)
         assert_eq!(final_state.counter, 0);
 
-        store.stop();
+        match store.stop() {
+            Ok(_) => println!("store stopped"),
+            Err(e) => {
+                panic!("store stop failed  : {:?}", e);
+            }
+        }
     }
 
     #[test]
@@ -256,13 +276,23 @@ mod tests {
         let state = store.get_state();
         assert_eq!(state.counter, 1);
 
-        store.stop();
+        match store.stop() {
+            Ok(_) => println!("store stopped"),
+            Err(e) => {
+                panic!("store stop failed  : {:?}", e);
+            }
+        }
     }
 
     #[test]
     fn test_store_error_handling() {
         let store = create_test_store();
-        store.stop();
+        match store.stop() {
+            Ok(_) => println!("store stopped"),
+            Err(e) => {
+                panic!("store stop failed  : {:?}", e);
+            }
+        }
 
         // Test various error conditions
         let dispatch_result = store.dispatch(TestAction::Increment);

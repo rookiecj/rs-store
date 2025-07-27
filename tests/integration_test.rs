@@ -1,5 +1,4 @@
-use rs_store::{DispatchOp, StoreBuilder};
-use rs_store::{Reducer, Subscriber};
+use rs_store::{DispatchOp, Reducer, StoreBuilder, Subscriber};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -56,6 +55,7 @@ impl Reducer<TestState, TestAction> for TestReducer {
     }
 }
 
+#[allow(dead_code)]
 struct IntegrationTestSubscriber {
     id: String,
     received_states: Arc<Mutex<Vec<TestState>>>,
@@ -95,17 +95,17 @@ impl IntegrationTestSubscriber {
 
 impl Subscriber<TestState, TestAction> for IntegrationTestSubscriber {
     fn on_subscribe(&self, state: &TestState) {
-        println!("[{}] on_subscribe called with state: {:?}", self.id, state);
+        // println!("[{}] on_subscribe called with state: {:?}", self.id, state);
         *self.subscribe_called.lock().unwrap() = true;
         *self.initial_state.lock().unwrap() = Some(state.clone());
         self.received_states.lock().unwrap().push(state.clone());
     }
 
     fn on_notify(&self, state: &TestState, action: &TestAction) {
-        println!(
-            "[{}] on_notify called with state: {:?}, action: {:?}",
-            self.id, state, action
-        );
+        // println!(
+        //     "[{}] on_notify called with state: {:?}, action: {:?}",
+        //     self.id, state, action
+        // );
         self.received_states.lock().unwrap().push(state.clone());
         self.received_actions.lock().unwrap().push(action.clone());
     }
@@ -113,6 +113,7 @@ impl Subscriber<TestState, TestAction> for IntegrationTestSubscriber {
 
 #[test]
 fn test_integration_new_subscriber_feature() {
+    println!();
     println!("=== Integration Test: New Subscriber Feature ===");
 
     // Store 생성
@@ -127,7 +128,7 @@ fn test_integration_new_subscriber_feature() {
     store.add_subscriber(subscriber1.clone());
 
     // 잠시 대기하여 AddSubscriber 액션이 처리되도록 함
-    thread::sleep(Duration::from_millis(100));
+    thread::sleep(Duration::from_millis(200));
 
     // 첫 번째 subscriber가 초기 상태를 받았는지 확인
     assert!(subscriber1.was_subscribe_called());
@@ -191,6 +192,7 @@ fn test_integration_new_subscriber_feature() {
 
 #[test]
 fn test_integration_concurrent_subscribers() {
+    println!();
     println!("=== Integration Test: Concurrent Subscribers ===");
 
     let store = StoreBuilder::new_with_reducer(TestState::default(), Box::new(TestReducer))
@@ -241,6 +243,7 @@ fn test_integration_concurrent_subscribers() {
 
 #[test]
 fn test_integration_subscriber_lifecycle() {
+    println!();
     println!("=== Integration Test: Subscriber Lifecycle ===");
 
     let store = StoreBuilder::new_with_reducer(TestState::default(), Box::new(TestReducer))

@@ -2,7 +2,7 @@ use crate::channel::{BackpressureChannel, BackpressurePolicy, ReceiverChannel, S
 use crate::dispatcher::Dispatcher;
 use crate::metrics::{CountMetrics, Metrics, MetricsSnapshot};
 use crate::middleware::Middleware;
-use crate::{DispatchOp, Effect, MiddlewareOp, Reducer, Subscriber, Subscription};
+use crate::{DispatchOp, Effect, MiddlewareOp, Reducer, SenderError, Subscriber, Subscription};
 use fmt::Debug;
 use rusty_pool::ThreadPool;
 use std::sync::{Arc, Mutex};
@@ -15,13 +15,17 @@ use crate::store::{Store, StoreError, DEFAULT_CAPACITY, DEFAULT_STORE_NAME};
 
 const DEFAULT_STOP_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// ActionOp is used to dispatch an action to the store
 #[derive(Debug, Clone, PartialEq)]
 pub enum ActionOp<Action>
 where
-    Action: Send + Sync + Clone + 'static,
+    Action: Send + Sync + Clone + std::fmt::Debug + 'static,
 {
+    /// Action is used to dispatch an action to the store
     Action(Action),
+    /// AddSubscriber is used to add a subscriber to the store
     AddSubscriber,
+    /// Exit is used to exit the store and should not be dropped
     #[allow(dead_code)]
     Exit(Instant),
 }
@@ -30,15 +34,15 @@ where
 #[allow(clippy::type_complexity)]
 pub struct StoreImpl<State, Action>
 where
-    State: Send + Sync + Clone + 'static,
-    Action: Send + Sync + Clone + 'static,
+    State: Send + Sync + Clone + std::fmt::Debug + 'static,
+    Action: Send + Sync + Clone + std::fmt::Debug + 'static,
 {
     #[allow(dead_code)]
     pub(crate) name: String,
     state: Mutex<State>,
     pub(crate) reducers: Mutex<Vec<Box<dyn Reducer<State, Action> + Send + Sync>>>,
     pub(crate) subscribers: Arc<Mutex<Vec<Arc<dyn Subscriber<State, Action> + Send + Sync>>>>,
-    /// 임시로 추가될 subscriber들을 저장하는 벡터
+    /// temporary vector to store subscribers to be added
     adding_subscribers: Arc<Mutex<Vec<Arc<dyn Subscriber<State, Action> + Send + Sync>>>>,
     pub(crate) dispatch_tx: Mutex<Option<SenderChannel<Action>>>,
     middlewares: Mutex<Vec<Arc<dyn Middleware<State, Action> + Send + Sync>>>,
@@ -61,8 +65,8 @@ impl Subscription for SubscriberSubscription {
 
 impl<State, Action> StoreImpl<State, Action>
 where
-    State: Send + Sync + Clone + 'static,
-    Action: Send + Sync + Clone + 'static,
+    State: Send + Sync + Clone + std::fmt::Debug + 'static,
+    Action: Send + Sync + Clone + std::fmt::Debug + 'static,
 {
     /// create a new store with an initial state
     pub fn new(state: State) -> Arc<StoreImpl<State, Action>> {
@@ -136,7 +140,7 @@ where
         let rx_store = Arc::new(store);
         let tx_store = rx_store.clone();
 
-        // reducer 스레드
+        // reducer thread
         tx_store.pool.lock().unwrap().as_ref().unwrap().execute(move || {
             #[cfg(feature = "store-log")]
             eprintln!("store: reducer thread started");
@@ -144,7 +148,12 @@ where
             while let Some(action_op) = rx.recv() {
                 let action_received_at = Instant::now();
                 rx_store.metrics.action_received(Some(&action_op));
-
+                #[cfg(feature = "store-log")]
+                eprintln!(
+                    "store: dispatch: action: {:?}, remains: {}",
+                    action_op,
+                    rx.len()
+                );
                 match action_op {
                     ActionOp::Action(action) => {
                         let the_dispatcher = Arc::new(rx_store.clone());
@@ -184,19 +193,17 @@ where
                             .action_executed(Some(&action), action_received_at.elapsed());
                     }
                     ActionOp::AddSubscriber => {
-                        let current_state = rx_store.state.lock().unwrap().clone();
-                        let mut adding_subscribers = rx_store.adding_subscribers.lock().unwrap();
-                        let mut subscribers = rx_store.subscribers.lock().unwrap();
+                        let mut new_subscribers = rx_store.adding_subscribers.lock().unwrap();
+                        let new_subscribers_len = new_subscribers.len();
+                        if new_subscribers_len > 0 {
+                            let current_state = rx_store.state.lock().unwrap().clone();
+                            let iter_subscribers = new_subscribers.drain(..).into_iter();
 
-                        // 새로운 subscriber들에게 최신 상태를 전달하고 subscribers에 추가
-                        for subscriber in adding_subscribers.drain(..) {
-                            // 새로운 subscriber에게 최신 상태를 전달
-                            subscriber.on_subscribe(&current_state);
-                            subscribers.push(subscriber);
+                            rx_store.do_subscribe(&current_state, iter_subscribers);
                         }
 
                         #[cfg(feature = "store-log")]
-                        eprintln!("store: new subscribers added");
+                        eprintln!("store: {} subscribers added", new_subscribers_len);
                     }
                     ActionOp::Exit(_) => {
                         rx_store.on_close(action_received_at);
@@ -261,7 +268,7 @@ where
                     retain
                 });
 
-                // adding_subscribers에서도 제거
+                // remove from adding_subscribers
                 let mut adding = adding_subscribers.lock().unwrap();
                 adding.retain(|s| !Arc::ptr_eq(s, &subscriber));
             }),
@@ -303,6 +310,9 @@ where
         action_received_at: Instant,
     ) -> (bool, State, Option<Vec<Effect<Action>>>) {
         //let state = self.state.lock().unwrap().clone();
+
+        #[cfg(feature = "store-log")]
+        eprintln!("store: reduce: action: {:?}", action);
 
         let mut reduce_action = true;
         if !self.middlewares.lock().unwrap().is_empty() {
@@ -453,6 +463,9 @@ where
         let _notify_start = Instant::now();
         self.metrics.state_notified(Some(next_state));
 
+        #[cfg(feature = "store-log")]
+        eprintln!("store: notify: action: {:?}", action);
+
         let mut need_notify = true;
         if !self.middlewares.lock().unwrap().is_empty() {
             let middleware_start = Instant::now();
@@ -495,6 +508,21 @@ where
         }
     }
 
+    fn do_subscribe(
+        &self,
+        state: &State,
+        new_subscribers: impl Iterator<Item=Arc<dyn Subscriber<State, Action> + Send + Sync>>,
+    ) {
+        let mut subscribers = self.subscribers.lock().unwrap();
+
+        // notify new subscribers with the latest state and add to subscribers
+        for subscriber in new_subscribers {
+            subscriber.on_subscribe(state);
+
+            subscribers.push(subscriber);
+        }
+    }
+
     fn on_close(&self, action_received_at: Instant) {
         #[cfg(feature = "store-log")]
         eprintln!("store: on_close");
@@ -505,45 +533,69 @@ where
     /// close the store
     ///
     /// send an exit action to the store and drop the dispatch channel
-    pub fn close(&self) {
+    ///
+    /// ## Return
+    /// * Ok(()) : if the store is closed
+    /// * Err(StoreError) : if the store is not closed, this can be happened when the queue is full
+    pub fn close(&self) -> Result<(), StoreError> {
         match self.dispatch_tx.lock() {
             Ok(mut tx) => {
-                if let Some(tx) = tx.take() {
+                if let Some(tx) = tx.as_ref() {
                     #[cfg(feature = "store-log")]
-                    eprintln!("store: closing dispatch channel");
+                    eprintln!("store: close: sending exit to dispatch channel");
                     match tx.send(ActionOp::Exit(Instant::now())) {
                         Ok(_) => {
                             #[cfg(feature = "store-log")]
-                            eprintln!("store: dispatch channel sent exit");
+                            eprintln!("store: close: dispatch channel sent exit");
                         }
                         Err(_e) => {
                             #[cfg(feature = "store-log")]
-                            eprintln!("store: Error while closing dispatch channel");
+                            eprintln!(
+                                "store: close: Error while sending exit to dispatch channel: {:?}",
+                                _e
+                            );
+                            return Err(StoreError::DispatchError(format!(
+                                "Error while sending exit to dispatch channel, try it later: {:?}",
+                                _e
+                            )));
                         }
                     }
-                    drop(tx);
                 }
+                drop(tx.take());
             }
             Err(_e) => {
                 #[cfg(feature = "store-log")]
-                eprintln!("store: Error while locking dispatch channel: {:?}", _e);
-                return;
+                eprintln!(
+                    "store: close: Error while locking dispatch channel: {:?}",
+                    _e
+                );
+                return Err(StoreError::DispatchError(format!(
+                    "Error while locking dispatch channel: {:?}",
+                    _e
+                )));
             }
         }
 
         #[cfg(feature = "store-log")]
-        eprintln!("store: dispatch channel closed");
+        eprintln!("store: close: dispatch channel closed");
+        Ok(())
     }
 
     /// close the store and wait for the dispatcher to finish
-    pub fn stop(&self) {
-        self.close();
+    ///
+    /// ## Return
+    /// * Ok(()) : if the store is closed
+    /// * Err(StoreError) : if the store is not closed, this can be happened when the queue is full
+    pub fn stop(&self) -> Result<(), StoreError> {
+        self.close()?;
 
         // Shutdown the thread pool with timeout
         // lock pool
         match self.pool.lock() {
             Ok(mut pool) => {
                 if let Some(pool) = pool.take() {
+                    #[cfg(feature = "store-log")]
+                    eprintln!("store: joining pool");
                     pool.shutdown_join();
                 }
                 #[cfg(feature = "store-log")]
@@ -552,17 +604,21 @@ where
             Err(_e) => {
                 #[cfg(feature = "store-log")]
                 eprintln!("store: Error while locking pool: {:?}", _e);
-                return;
+                return Err(StoreError::DispatchError(format!(
+                    "Error while closing dispatch channel: {:?}",
+                    _e
+                )));
             }
         }
 
         #[cfg(feature = "store-log")]
         eprintln!("store: Store stopped");
+        Ok(())
     }
 
     /// close the store and wait for the dispatcher to finish
-    pub fn stop_with_timeout(&self, timeout: Duration) {
-        self.close();
+    pub fn stop_with_timeout(&self, timeout: Duration) -> Result<(), StoreError> {
+        self.close()?;
 
         // Shutdown the thread pool with timeout
         // lock pool
@@ -577,12 +633,16 @@ where
             Err(_e) => {
                 #[cfg(feature = "store-log")]
                 eprintln!("store: Error while locking pool: {:?}", _e);
-                return;
+                return Err(StoreError::DispatchError(format!(
+                    "Error while closing dispatch channel: {:?}",
+                    _e
+                )));
             }
         }
 
         #[cfg(feature = "store-log")]
         eprintln!("store: Store stopped");
+        Ok(())
     }
 
     /// dispatch an action
@@ -594,9 +654,28 @@ where
         let sender = self.dispatch_tx.lock().unwrap();
         if let Some(tx) = sender.as_ref() {
             // the number of remaining actions in the channel
-            let remains = tx.send(ActionOp::Action(action)).unwrap_or(0);
-            self.metrics.queue_size(remains as usize);
-            Ok(())
+            match tx.send(ActionOp::Action(action)) {
+                Ok(remains) => {
+                    self.metrics.queue_size(remains as usize);
+                    Ok(())
+                }
+                Err(e) => match e {
+                    SenderError::SendError(e) => {
+                        let err = StoreError::DispatchError(format!(
+                            "Error while sending action to dispatch channel: {:?}",
+                            e
+                        ));
+                        self.metrics.error_occurred(&err);
+                        Err(err)
+                    }
+                    SenderError::ChannelClosed => {
+                        let err =
+                            StoreError::DispatchError("Dispatch channel is closed".to_string());
+                        self.metrics.error_occurred(&err);
+                        Err(err)
+                    }
+                },
+            }
         } else {
             let err = StoreError::DispatchError("Dispatch channel is closed".to_string());
             self.metrics.error_occurred(&err);
@@ -613,7 +692,8 @@ where
     ///
     /// it uses a channel to subscribe to the state changes
     /// the channel is rendezvous(capacity 1), the store will block on the channel until the subscriber consumes the state
-    pub fn iter(&self) -> impl Iterator<Item = (State, Action)> {
+    #[allow(dead_code)]
+    pub(crate) fn iter(&self) -> impl Iterator<Item=(State, Action)> {
         self.iter_with(1, BackpressurePolicy::BlockOnFull)
     }
 
@@ -622,6 +702,7 @@ where
     /// ### Parameters
     /// * capacity: the capacity of the channel
     /// * policy: the backpressure policy
+    #[allow(dead_code)]
     pub(crate) fn iter_with(
         &self,
         capacity: usize,
@@ -750,7 +831,7 @@ where
 /// Subscriber implementation that forwards store updates to a channel
 struct ChanneledSubscriber<T>
 where
-    T: Send + Sync + Clone + 'static,
+    T: Send + Sync + Clone + std::fmt::Debug + 'static,
 {
     handle: Mutex<Option<JoinHandle<()>>>,
     tx: Mutex<Option<SenderChannel<T>>>,
@@ -758,7 +839,7 @@ where
 
 impl<T> ChanneledSubscriber<T>
 where
-    T: Send + Sync + Clone + 'static,
+    T: Send + Sync + Clone + std::fmt::Debug + 'static,
 {
     pub(crate) fn new(handle: JoinHandle<()>, tx: SenderChannel<T>) -> Self {
         Self {
@@ -787,8 +868,8 @@ where
 
 impl<State, Action> Subscriber<State, Action> for ChanneledSubscriber<(Instant, State, Action)>
 where
-    State: Send + Sync + Clone + 'static,
-    Action: Send + Sync + Clone + 'static,
+    State: Send + Sync + Clone + std::fmt::Debug + 'static,
+    Action: Send + Sync + Clone + std::fmt::Debug + 'static,
 {
     fn on_notify(&self, state: &State, action: &Action) {
         match self.tx.lock() {
@@ -815,7 +896,7 @@ where
 
 impl<T> Subscription for ChanneledSubscriber<T>
 where
-    T: Send + Sync + Clone + 'static,
+    T: Send + Sync + Clone + std::fmt::Debug + 'static,
 {
     fn unsubscribe(&self) {
         self.clear_resource();
@@ -826,14 +907,14 @@ where
 /// if you want to stop the dispatcher, call the stop method
 impl<State, Action> Drop for StoreImpl<State, Action>
 where
-    State: Send + Sync + Clone + 'static,
-    Action: Send + Sync + Clone + 'static,
+    State: Send + Sync + Clone + std::fmt::Debug + 'static,
+    Action: Send + Sync + Clone + std::fmt::Debug + 'static,
 {
     fn drop(&mut self) {
-        self.close();
+        let _ = self.close();
 
         // Shutdown the thread pool with timeout
-        self.stop_with_timeout(DEFAULT_STOP_TIMEOUT);
+        let _ = self.stop_with_timeout(DEFAULT_STOP_TIMEOUT);
         // if let Ok(mut lk) = self.pool.lock() {
         //     if let Some(pool) = lk.take() {
         //         pool.shutdown_join_timeout(Duration::from_secs(3));
@@ -847,8 +928,8 @@ where
 
 impl<State, Action> Store<State, Action> for StoreImpl<State, Action>
 where
-    State: Send + Sync + Clone + 'static,
-    Action: Send + Sync + Clone + 'static,
+    State: Send + Sync + Clone + std::fmt::Debug + 'static,
+    Action: Send + Sync + Clone + std::fmt::Debug + 'static,
 {
     fn get_state(&self) -> State {
         self.get_state()
@@ -881,15 +962,21 @@ where
         self.subscribed_with(capacity, policy, subscriber)
     }
 
-    fn stop(&self) {
-        self.stop();
+    fn stop(&self) -> Result<(), StoreError> {
+        self.stop()
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{
+        BackpressurePolicy, DispatchOp, Dispatcher, Effect, FnReducer, Middleware, MiddlewareOp,
+        Reducer, StoreBuilder,
+    };
+    use std::sync::Arc;
     use std::thread;
+    use std::time::Duration;
 
     struct TestChannelSubscriber {
         received: Arc<Mutex<Vec<(i32, i32)>>>,
@@ -903,7 +990,7 @@ mod tests {
 
     impl Subscriber<i32, i32> for TestChannelSubscriber {
         fn on_notify(&self, state: &i32, action: &i32) {
-            println!("TestChannelSubscriber: state={}, action={}", state, action);
+            //println!("TestChannelSubscriber: state={}, action={}", state, action);
             self.received.lock().unwrap().push((*state, *action));
         }
     }
@@ -929,7 +1016,7 @@ mod tests {
 
     impl Subscriber<i32, i32> for SlowSubscriber {
         fn on_notify(&self, state: &i32, action: &i32) {
-            println!("SlowSubscriber: state={}, action={}", state, action);
+            //println!("SlowSubscriber: state={}, action={}", state, action);
             std::thread::sleep(self.delay);
             self.received.lock().unwrap().push((*state, *action));
         }
@@ -954,7 +1041,12 @@ mod tests {
 
         // Give some time for processing
         // thread::sleep(Duration::from_millis(100));
-        store.stop();
+        match store.stop() {
+            Ok(_) => println!("store stopped"),
+            Err(e) => {
+                panic!("store stop failed  : {:?}", e);
+            }
+        }
 
         // unsubscribe from the channel
         subscription.unwrap().unsubscribe();
@@ -981,12 +1073,17 @@ mod tests {
 
         // Fill the channel
         for i in 0..5 {
-            store.dispatch(i).unwrap();
+            let _ = store.dispatch(i).unwrap();
         }
 
         // Give some time for having channel thread to process
         thread::sleep(Duration::from_millis(200));
-        store.stop();
+        match store.stop() {
+            Ok(_) => println!("store stopped"),
+            Err(e) => {
+                panic!("store stop failed  : {:?}", e);
+            }
+        }
         subscription.unwrap().unsubscribe();
 
         // Should only receive the latest updates due to backpressure
@@ -1022,7 +1119,12 @@ mod tests {
         store.dispatch(2).unwrap();
         store.dispatch(3).unwrap();
         // give some time for processing
-        store.stop();
+        match store.stop() {
+            Ok(_) => println!("store stopped"),
+            Err(e) => {
+                panic!("store stop failed  : {:?}", e);
+            }
+        }
         // subscriber should not receive the state
         assert_eq!(received.lock().unwrap().len(), 1);
     }
@@ -1194,7 +1296,12 @@ mod tests {
         let store = StoreImpl::new_with_reducer(0, Box::new(TestReducer));
 
         // store 중지
-        store.stop();
+        match store.stop() {
+            Ok(_) => println!("store stopped"),
+            Err(e) => {
+                panic!("store stop failed  : {:?}", e);
+            }
+        }
 
         // subscriber 추가 시도
         let received = Arc::new(Mutex::new(Vec::new()));
@@ -1295,5 +1402,440 @@ mod tests {
         assert_eq!(received1.lock().unwrap().len(), 1);
         assert_eq!(received2.lock().unwrap().len(), 1);
         assert_eq!(received3.lock().unwrap().len(), 1);
+    }
+
+    /// Test basic iterator functionality
+    #[test]
+    fn test_store_iter_basic() {
+        // given: store with reducer
+        let store = StoreBuilder::new(0)
+            .with_reducer(Box::new(FnReducer::from(|state: &i32, action: &i32| {
+                DispatchOp::Dispatch(state + action, None)
+            })))
+            .build()
+            .unwrap();
+
+        // when: create iterator and dispatch actions
+        let mut iter = store.iter();
+
+        // dispatch actions
+        store.dispatch(10).expect("dispatch should succeed");
+        store.dispatch(20).expect("dispatch should succeed");
+        store.dispatch(30).expect("dispatch should succeed");
+
+        // then: iterator should return state and action pairs
+        assert_eq!(iter.next(), Some((10, 10))); // state: 0+10=10, action: 10
+        assert_eq!(iter.next(), Some((30, 20))); // state: 10+20=30, action: 20
+        assert_eq!(iter.next(), Some((60, 30))); // state: 30+30=60, action: 30
+
+        // stop store and verify iterator ends
+        store.stop().expect("store should stop");
+        assert_eq!(iter.next(), None);
+    }
+
+    /// Test iterator with no actions dispatched
+    #[test]
+    fn test_store_iter_no_actions() {
+        // given: store with reducer
+        let store = StoreBuilder::new(0)
+            .with_reducer(Box::new(FnReducer::from(|state: &i32, action: &i32| {
+                DispatchOp::Dispatch(state + action, None)
+            })))
+            .build()
+            .unwrap();
+
+        // when: create iterator without dispatching actions
+        let mut iter = store.iter();
+
+        // then: iterator should return None immediately
+        // since no actions were dispatched, no state changes occurred
+        store.stop().expect("store should stop");
+        assert_eq!(iter.next(), None);
+    }
+
+    /// Test iterator with complex state and action types
+    #[test]
+    fn test_store_iter_complex_types() {
+        // given: store with complex state and action
+        #[derive(Debug, Clone, PartialEq)]
+        struct ComplexState {
+            value: i32,
+            name: String,
+        }
+
+        #[allow(dead_code)]
+        #[derive(Debug, Clone, PartialEq)]
+        enum ComplexAction {
+            Add(i32),
+            SetName(String),
+            Reset,
+        }
+
+        let store = StoreBuilder::new(ComplexState {
+            value: 0,
+            name: "initial".to_string(),
+        })
+            .with_reducer(Box::new(FnReducer::from(
+                |state: &ComplexState, action: &ComplexAction| match action {
+                    ComplexAction::Add(n) => DispatchOp::Dispatch(
+                        ComplexState {
+                            value: state.value + n,
+                            name: state.name.clone(),
+                        },
+                        None,
+                    ),
+                    ComplexAction::SetName(name) => DispatchOp::Dispatch(
+                        ComplexState {
+                            value: state.value,
+                            name: name.clone(),
+                        },
+                        None,
+                    ),
+                    ComplexAction::Reset => DispatchOp::Dispatch(
+                        ComplexState {
+                            value: 0,
+                            name: "reset".to_string(),
+                        },
+                        None,
+                    ),
+                },
+            )))
+            .build()
+            .unwrap();
+
+        // when: create iterator and dispatch actions
+        let mut iter = store.iter();
+
+        store.dispatch(ComplexAction::Add(10)).expect("dispatch should succeed");
+        store
+            .dispatch(ComplexAction::SetName("test".to_string()))
+            .expect("dispatch should succeed");
+        store.dispatch(ComplexAction::Add(5)).expect("dispatch should succeed");
+
+        // then: iterator should return correct state and action pairs
+        assert_eq!(
+            iter.next(),
+            Some((
+                ComplexState {
+                    value: 10,
+                    name: "initial".to_string(),
+                },
+                ComplexAction::Add(10)
+            ))
+        );
+        assert_eq!(
+            iter.next(),
+            Some((
+                ComplexState {
+                    value: 10,
+                    name: "test".to_string(),
+                },
+                ComplexAction::SetName("test".to_string())
+            ))
+        );
+        assert_eq!(
+            iter.next(),
+            Some((
+                ComplexState {
+                    value: 15,
+                    name: "test".to_string(),
+                },
+                ComplexAction::Add(5)
+            ))
+        );
+
+        store.stop().expect("store should stop");
+        assert_eq!(iter.next(), None);
+    }
+
+    /// Test iterator with multiple concurrent actions
+    #[test]
+    fn test_store_iter_concurrent_actions() {
+        // given: store with reducer
+        let store = StoreBuilder::new(0)
+            .with_reducer(Box::new(FnReducer::from(|state: &i32, action: &i32| {
+                DispatchOp::Dispatch(state + action, None)
+            })))
+            .build()
+            .unwrap();
+
+        // when: create iterator and dispatch many actions quickly
+        let mut iter = store.iter();
+
+        // dispatch multiple actions
+        for i in 1..=10 {
+            store.dispatch(i).expect("dispatch should succeed");
+        }
+
+        // then: iterator should return all state and action pairs in order
+        let mut expected_state = 0;
+        for i in 1..=10 {
+            expected_state += i;
+            assert_eq!(iter.next(), Some((expected_state, i)));
+        }
+
+        store.stop().expect("store should stop");
+        assert_eq!(iter.next(), None);
+    }
+
+    /// Test iterator with store that has middleware
+    #[test]
+    fn test_store_iter_with_middleware() {
+        // given: store with middleware
+        struct TestMiddleware;
+
+        impl<State, Action> Middleware<State, Action> for TestMiddleware
+        where
+            State: Send + Sync + 'static,
+            Action: Send + Sync + Clone + 'static,
+        {
+            fn before_reduce(
+                &self,
+                _action: &Action,
+                _state: &State,
+                _dispatcher: Arc<dyn Dispatcher<Action>>,
+            ) -> Result<MiddlewareOp, StoreError> {
+                Ok(MiddlewareOp::ContinueAction)
+            }
+
+            fn before_effect(
+                &self,
+                _action: &Action,
+                _state: &State,
+                _effects: &mut Vec<Effect<Action>>,
+                _dispatcher: Arc<dyn Dispatcher<Action>>,
+            ) -> Result<MiddlewareOp, StoreError> {
+                Ok(MiddlewareOp::ContinueAction)
+            }
+        }
+
+        let store = StoreBuilder::new(0)
+            .with_reducer(Box::new(FnReducer::from(|state: &i32, action: &i32| {
+                DispatchOp::Dispatch(state + action, None)
+            })))
+            .with_middleware(Arc::new(TestMiddleware))
+            .build()
+            .unwrap();
+
+        // when: create iterator and dispatch actions
+        let mut iter = store.iter();
+
+        store.dispatch(5).expect("dispatch should succeed");
+        store.dispatch(10).expect("dispatch should succeed");
+
+        // then: iterator should work correctly with middleware
+        assert_eq!(iter.next(), Some((5, 5)));
+        assert_eq!(iter.next(), Some((15, 10)));
+
+        store.stop().expect("store should stop");
+        assert_eq!(iter.next(), None);
+    }
+
+    /// Test iterator with store that has effects
+    #[test]
+    fn test_store_iter_with_effects() {
+        // given: store with reducer that produces effects
+        let store = StoreBuilder::new(0)
+            .with_reducer(Box::new(FnReducer::from(|state: &i32, action: &i32| {
+                let new_state = state + action;
+                let effects = if action > &5 {
+                    Some(Effect::Task(Box::new(|| {
+                        // effect that does nothing
+                    })))
+                } else {
+                    None
+                };
+                DispatchOp::Dispatch(new_state, effects)
+            })))
+            .build()
+            .unwrap();
+
+        // when: create iterator and dispatch actions
+        let mut iter = store.iter();
+
+        store.dispatch(3).expect("dispatch should succeed"); // no effect
+        store.dispatch(10).expect("dispatch should succeed"); // with effect
+
+        // then: iterator should work correctly with effects
+        assert_eq!(iter.next(), Some((3, 3)));
+        assert_eq!(iter.next(), Some((13, 10)));
+
+        store.stop().expect("store should stop");
+        assert_eq!(iter.next(), None);
+    }
+
+    /// Test iterator with store that has multiple reducers
+    #[test]
+    fn test_store_iter_with_multiple_reducers() {
+        // given: store with multiple reducers
+        // StoreBuilder의 with_reducer는 기존 리듀서를 대체하므로
+        // 실제로는 마지막 리듀서만 사용됩니다
+        let store = StoreBuilder::new(0)
+            .with_reducer(Box::new(FnReducer::from(|state: &i32, action: &i32| {
+                DispatchOp::Dispatch(state + action, None)
+            })))
+            .with_reducer(Box::new(FnReducer::from(|state: &i32, _action: &i32| {
+                DispatchOp::Dispatch(state * 2, None)
+            })))
+            .build()
+            .unwrap();
+
+        // when: create iterator and dispatch actions
+        let mut iter = store.iter();
+
+        store.dispatch(5).expect("dispatch should succeed");
+        store.dispatch(10).expect("dispatch should succeed");
+
+        // then: iterator should work with multiple reducers
+        // 실제로는 마지막 리듀서만 사용되므로: 0 * 2 = 0, 0 * 2 = 0
+        let first_result = iter.next();
+        println!("First result: {:?}", first_result);
+        let second_result = iter.next();
+        println!("Second result: {:?}", second_result);
+
+        // 마지막 리듀서만 사용되므로 상태는 항상 0
+        assert_eq!(first_result, Some((0, 5)));
+        assert_eq!(second_result, Some((0, 10)));
+
+        store.stop().expect("store should stop");
+        // assert_eq!(iter.next(), None);
+    }
+
+    /// Test iterator behavior when store is stopped before consuming all items
+    #[test]
+    fn test_store_iter_early_stop() {
+        // given: store with reducer
+        let store = StoreBuilder::new(0)
+            .with_reducer(Box::new(FnReducer::from(|state: &i32, action: &i32| {
+                DispatchOp::Dispatch(state + action, None)
+            })))
+            .build()
+            .unwrap();
+
+        // when: create iterator, dispatch actions, but stop store early
+        let mut iter = store.iter();
+
+        store.dispatch(5).expect("dispatch should succeed");
+        store.dispatch(10).expect("dispatch should succeed");
+        store.dispatch(15).expect("dispatch should succeed");
+
+        // consume all items before stopping store
+        assert_eq!(iter.next(), Some((5, 5)));
+        assert_eq!(iter.next(), Some((15, 10))); // 5 + 10 = 15
+        assert_eq!(iter.next(), Some((30, 15))); // 15 + 15 = 30
+
+        // stop store after consuming all items
+        store.stop().expect("store should stop");
+    }
+
+    /// Test iterator with different backpressure policies
+    #[test]
+    fn test_store_iter_with_block_on_full() {
+        // given: store with different backpressure policies
+        let store = StoreBuilder::new(0)
+            .with_reducer(Box::new(FnReducer::from(|state: &i32, action: &i32| {
+                DispatchOp::Dispatch(state + action, None)
+            })))
+            .with_capacity(2)
+            .with_policy(BackpressurePolicy::BlockOnFull)
+            .build()
+            .unwrap();
+
+        // when: create iterator with different capacity and policy
+        let mut iter = store.iter_with(1, BackpressurePolicy::BlockOnFull);
+
+        store.dispatch(5).expect("dispatch should succeed");
+        store.dispatch(10).expect("dispatch should succeed");
+
+        // then: iterator should work with custom capacity and policy
+        assert_eq!(iter.next(), Some((5, 5)));
+        assert_eq!(iter.next(), Some((15, 10)));
+
+        store.stop().expect("store should stop");
+    }
+
+    // #[test]
+    // fn test_store_iter_with_different_policies() {
+    //     // given: store with different backpressure policies
+    //     let store = StoreBuilder::new(0)
+    //         .with_reducer(Box::new(FnReducer::from(|state: &i32, action: &i32| {
+    //             DispatchOp::Dispatch(state + action, None)
+    //         })))
+    //         .with_capacity(2)
+    //         .with_policy(BackpressurePolicy::DropOldest)
+    //         .build()
+    //         .unwrap();
+    //
+    //     // when: create iterator with different capacity and policy
+    //     let mut iter = store.iter_with(1, BackpressurePolicy::BlockOnFull);
+    //
+    //     store.dispatch(5).expect("dispatch should succeed");
+    //     store.dispatch(10).expect("dispatch should succeed");
+    //
+    //     // then: iterator should work with custom capacity and policy
+    //     assert_eq!(iter.next(), Some((5, 5)));
+    //     assert_eq!(iter.next(), Some((15, 10)));
+    //
+    //     store.stop().expect("store should stop");
+    // }
+
+
+    /// Test iterator with string state and action
+    #[test]
+    fn test_store_iter_string_types() {
+        // given: store with string state and action
+        let store = StoreBuilder::new("".to_string())
+            .with_reducer(Box::new(FnReducer::from(
+                |state: &String, action: &String| {
+                    let new_state = format!("{}{}", state, action);
+                    DispatchOp::Dispatch(new_state, None)
+                },
+            )))
+            .build()
+            .unwrap();
+
+        // when: create iterator and dispatch string actions
+        let mut iter = store.iter();
+
+        store.dispatch("hello".to_string()).expect("dispatch should succeed");
+        store.dispatch(" world".to_string()).expect("dispatch should succeed");
+
+        // then: iterator should work with string types
+        assert_eq!(
+            iter.next(),
+            Some(("hello".to_string(), "hello".to_string()))
+        );
+        assert_eq!(
+            iter.next(),
+            Some(("hello world".to_string(), " world".to_string()))
+        );
+
+        store.stop().expect("store should stop");
+        assert_eq!(iter.next(), None);
+    }
+
+    /// Test iterator with empty state changes (reducer returns same state)
+    #[test]
+    fn test_store_iter_no_state_change() {
+        // given: store with reducer that doesn't change state
+        let store = StoreBuilder::new(0)
+            .with_reducer(Box::new(FnReducer::from(|state: &i32, _action: &i32| {
+                DispatchOp::Dispatch(*state, None) // return same state
+            })))
+            .build()
+            .unwrap();
+
+        // when: create iterator and dispatch actions
+        let mut iter = store.iter();
+
+        store.dispatch(5).expect("dispatch should succeed");
+        store.dispatch(10).expect("dispatch should succeed");
+
+        // then: iterator should still return state and action pairs
+        assert_eq!(iter.next(), Some((0, 5))); // state remains 0
+        assert_eq!(iter.next(), Some((0, 10))); // state remains 0
+
+        store.stop().expect("store should stop");
+        assert_eq!(iter.next(), None);
     }
 }

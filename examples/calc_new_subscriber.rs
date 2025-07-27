@@ -164,7 +164,12 @@ pub fn main() {
     println!("  Last state: {:?}", *subscriber2.last.lock().unwrap());
 
     // stop the store
-    store.stop();
+    match store.stop() {
+        Ok(_) => println!("store stopped"),
+        Err(e) => {
+            panic!("store stop failed  : {:?}", e);
+        }
+    }
 
     println!("Done!");
 }

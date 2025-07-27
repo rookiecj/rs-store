@@ -73,5 +73,10 @@ pub fn main() {
     store.add_subscriber(Arc::new(FnSubscriber::from(calc_subscriber)));
     let _ = store.dispatch(CalcAction::Subtract(1));
 
-    store.stop();
+    match store.stop() {
+        Ok(_) => println!("store stopped"),
+        Err(e) => {
+            panic!("store stop failed  : {:?}", e);
+        }
+    }
 }

@@ -109,7 +109,12 @@ pub fn main() {
     let _ = store.dispatch(CalcAction::Subtract(1));
 
     // stop the store
-    store.stop();
+    match store.stop() {
+        Ok(_) => println!("store stopped"),
+        Err(e) => {
+            panic!("store stop failed  : {:?}", e);
+        }
+    }
 
     assert_eq!(store.get_state().count, 0);
 }

@@ -128,5 +128,10 @@ pub fn main() {
     .join()
     .unwrap();
 
-    store.stop();
+    match store.stop() {
+        Ok(_) => println!("store stopped"),
+        Err(e) => {
+            panic!("store stop failed  : {:?}", e);
+        }
+    }
 }

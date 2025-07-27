@@ -3,7 +3,7 @@ use crate::{StoreError, StoreImpl};
 use std::sync::Arc;
 
 /// Dispatcher dispatches actions to the store
-pub trait Dispatcher<Action: Send + Clone> {
+pub trait Dispatcher<Action: Send + Clone + std::fmt::Debug> {
     /// dispatch is used to dispatch an action to the store
     /// the caller can be blocked by the channel
     fn dispatch(&self, action: Action) -> Result<(), StoreError>;
@@ -19,8 +19,8 @@ pub trait Dispatcher<Action: Send + Clone> {
 
 impl<State, Action> Dispatcher<Action> for Arc<StoreImpl<State, Action>>
 where
-    State: Send + Sync + Clone + 'static,
-    Action: Send + Sync + Clone + 'static,
+    State: Send + Sync + Clone + std::fmt::Debug + 'static,
+    Action: Send + Sync + Clone + std::fmt::Debug + 'static,
 {
     fn dispatch(&self, action: Action) -> Result<(), StoreError> {
         let sender = self.dispatch_tx.lock().unwrap();
@@ -28,7 +28,8 @@ where
             match tx.send(ActionOp::Action(action)) {
                 Ok(_) => Ok(()),
                 Err(_e) => {
-                    // eprintln!("Failed to send action: {}", e);
+                    #[cfg(feature = "store-log")]
+                    eprintln!("Failed to send action: {:?}", _e);
                     Err(StoreError::DispatchError(
                         "Failed to send action".to_string(),
                     ))
@@ -51,8 +52,9 @@ where
                     })
                 }
             }
-            Err(e) => {
-                eprintln!("Failed to lock pool: {}", e);
+            Err(_e) => {
+                #[cfg(feature = "store-log")]
+                eprintln!("Failed to lock pool: {}", _e);
             }
         }
     }
@@ -66,8 +68,9 @@ where
                     })
                 }
             }
-            Err(e) => {
-                eprintln!("Failed to lock pool: {}", e);
+            Err(_e) => {
+                #[cfg(feature = "store-log")]
+                eprintln!("Failed to lock pool: {}", _e);
             }
         }
     }
