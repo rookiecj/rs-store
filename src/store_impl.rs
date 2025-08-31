@@ -2,6 +2,7 @@ use crate::channel::{BackpressureChannel, BackpressurePolicy, ReceiverChannel, S
 use crate::dispatcher::{Dispatcher, WeakDispatcher};
 use crate::metrics::{CountMetrics, Metrics, MetricsSnapshot};
 use crate::middleware::Middleware;
+use crate::subscriber::SubscriberWithId;
 use crate::{DispatchOp, Effect, MiddlewareOp, Reducer, SenderError, Subscriber, Subscription};
 use fmt::Debug;
 use rusty_pool::ThreadPool;
@@ -25,6 +26,8 @@ where
     Action(Action),
     /// AddSubscriber is used to add a subscriber to the store
     AddSubscriber,
+    // /// RemoveSubscriber is used to remove a subscriber from the store
+    // RemoveSubscriber(u64),
     /// Exit is used to exit the store and should not be dropped
     #[allow(dead_code)]
     Exit(Instant),
@@ -41,9 +44,9 @@ where
     pub(crate) name: String,
     state: Mutex<State>,
     pub(crate) reducers: Mutex<Vec<Box<dyn Reducer<State, Action> + Send + Sync>>>,
-    pub(crate) subscribers: Arc<Mutex<Vec<Arc<dyn Subscriber<State, Action> + Send + Sync>>>>,
+    pub(crate) subscribers: Arc<Mutex<Vec<SubscriberWithId<State, Action>>>>,
     /// temporary vector to store subscribers to be added
-    adding_subscribers: Arc<Mutex<Vec<Arc<dyn Subscriber<State, Action> + Send + Sync>>>>,
+    adding_subscribers: Arc<Mutex<Vec<SubscriberWithId<State, Action>>>>,
     pub(crate) dispatch_tx: Mutex<Option<SenderChannel<Action>>>,
     middlewares: Mutex<Vec<Arc<dyn Middleware<State, Action> + Send + Sync>>>,
     pub(crate) metrics: Arc<CountMetrics>,
@@ -54,12 +57,14 @@ where
 /// Subscription for a subscriber
 /// the subscriber can use it to unsubscribe from the store
 struct SubscriberSubscription {
-    unsubscribe: Box<dyn Fn() + Send + Sync>,
+    #[allow(dead_code)]
+    subscriber_id: u64, // Store subscriber ID instead of Arc reference
+    unsubscribe: Box<dyn Fn(u64) + Send + Sync>,
 }
 
 impl Subscription for SubscriberSubscription {
     fn unsubscribe(&self) {
-        (self.unsubscribe)();
+        (self.unsubscribe)(self.subscriber_id);
     }
 }
 
@@ -205,6 +210,12 @@ where
                         #[cfg(feature = "store-log")]
                         eprintln!("store: {} subscribers added", new_subscribers_len);
                     }
+
+                    // ActionOp::RemoveSubscriber(subscriber_id) => {
+                    //     rx_store.do_remove_subscriber(subscriber_id);
+                    //     #[cfg(feature = "store-log")]
+                    //     eprintln!("store: {} subscribers removed", subscriber_id);
+                    // }
                     ActionOp::Exit(_) => {
                         rx_store.on_close(action_received_at);
                         #[cfg(feature = "store-log")]
@@ -245,34 +256,58 @@ where
     pub fn add_subscriber(
         &self,
         subscriber: Arc<dyn Subscriber<State, Action> + Send + Sync>,
-    ) -> Box<dyn Subscription> {
+    ) -> Result<Box<dyn Subscription>, StoreError> {
+        // SubscriberWithId로 래핑하여 unique ID 할당
+        let subscriber_with_id = SubscriberWithId::new(subscriber);
+        let subscriber_id = subscriber_with_id.id;
+
         // 새로운 subscriber를 adding_subscribers에 추가
-        self.adding_subscribers.lock().unwrap().push(subscriber.clone());
+        self.adding_subscribers.lock().unwrap().push(subscriber_with_id);
 
         // ActionOp::AddSubscriber 액션을 전달하여 reducer에서 처리하도록 함
         if let Some(tx) = self.dispatch_tx.lock().unwrap().as_ref() {
-            let _ = tx.send(ActionOp::AddSubscriber);
+            match tx.send(ActionOp::AddSubscriber) {
+                Ok(_) => {}
+                Err(_e) => {
+                    #[cfg(feature = "store-log")]
+                    eprintln!(
+                        "store: Error while sending add subscriber to dispatch channel: {:?}",
+                        _e
+                    );
+                    self.adding_subscribers.lock().unwrap().retain(|s| s.id != subscriber_id);
+                    return Err(StoreError::DispatchError(format!(
+                        "Error while sending add subscriber to dispatch channel: {:?}",
+                        _e
+                    )));
+                }
+            }
         }
 
         // disposer for the subscriber
         let subscribers = self.subscribers.clone();
         let adding_subscribers = self.adding_subscribers.clone();
-        Box::new(SubscriberSubscription {
-            unsubscribe: Box::new(move || {
+        let subscription = Box::new(SubscriberSubscription {
+            subscriber_id, // Store the ID for comparison
+            unsubscribe: Box::new(move |subscriber_id| {
+                // dispacher는 Arc<StoreImpl<State, Action>> 이므로 RemoveSubscriber action 을 사용할 수 없는 이유
+                // 그래서 직접 vector에서 제거한다.
+
+                // remove from adding_subscribers
+                let mut adding = adding_subscribers.lock().unwrap();
+                adding.retain(|s| s.id != subscriber_id); // Compare by ID
+
                 let mut subscribers = subscribers.lock().unwrap();
                 subscribers.retain(|s| {
-                    let retain = !Arc::ptr_eq(s, &subscriber);
+                    let retain = s.id != subscriber_id; // Compare by ID
                     if !retain {
                         s.on_unsubscribe();
                     }
                     retain
                 });
-
-                // remove from adding_subscribers
-                let mut adding = adding_subscribers.lock().unwrap();
-                adding.retain(|s| !Arc::ptr_eq(s, &subscriber));
             }),
-        })
+        });
+
+        Ok(subscription)
     }
 
     /// clear all subscribers
@@ -281,16 +316,16 @@ where
         eprintln!("store: clear_subscribers");
         match self.subscribers.lock() {
             Ok(mut subscribers) => {
-                for subscriber in subscribers.iter() {
-                    subscriber.on_unsubscribe();
+                for subscriber_with_id in subscribers.iter() {
+                    subscriber_with_id.on_unsubscribe();
                 }
                 subscribers.clear();
             }
             Err(mut e) => {
                 #[cfg(feature = "store-log")]
                 eprintln!("store: Error while locking subscribers: {:?}", e);
-                for subscriber in e.get_ref().iter() {
-                    subscriber.on_unsubscribe();
+                for subscriber_with_id in e.get_ref().iter() {
+                    subscriber_with_id.on_unsubscribe();
                 }
                 e.get_mut().clear();
             }
@@ -500,8 +535,8 @@ where
 
         if need_notify {
             let subscribers = self.subscribers.lock().unwrap().clone();
-            for subscriber in subscribers.iter() {
-                subscriber.on_notify(next_state, action);
+            for subscriber_with_id in subscribers.iter() {
+                subscriber_with_id.on_notify(next_state, action);
             }
             let duration = _notify_start.elapsed();
             self.metrics.subscriber_notified(Some(action), subscribers.len(), duration);
@@ -511,16 +546,33 @@ where
     fn do_subscribe(
         &self,
         state: &State,
-        new_subscribers: impl Iterator<Item = Arc<dyn Subscriber<State, Action> + Send + Sync>>,
+        new_subscribers: impl Iterator<Item = SubscriberWithId<State, Action>>,
     ) {
         let mut subscribers = self.subscribers.lock().unwrap();
 
         // notify new subscribers with the latest state and add to subscribers
-        for subscriber in new_subscribers {
-            subscriber.on_subscribe(state);
+        for subscriber_with_id in new_subscribers {
+            subscriber_with_id.on_subscribe(state);
 
-            subscribers.push(subscriber);
+            subscribers.push(subscriber_with_id);
         }
+    }
+
+    #[allow(dead_code)]
+    fn do_remove_subscriber(&self, subscriber_id: u64) {
+        // remove from adding_subscribers
+        let mut adding_subscribers = self.adding_subscribers.lock().unwrap();
+        adding_subscribers.retain(|s| s.id != subscriber_id);
+
+        // remove from subscribers
+        let mut subscribers = self.subscribers.lock().unwrap();
+        subscribers.retain(|s| {
+            let retain = s.id != subscriber_id;
+            if !retain {
+                s.on_unsubscribe();
+            }
+            retain
+        });
     }
 
     fn on_close(&self, action_received_at: Instant) {
@@ -680,7 +732,7 @@ where
     /// the channel is rendezvous(capacity 1), the store will block on the channel until the subscriber consumes the state
     #[allow(dead_code)]
     #[doc(hidden)]
-    pub(crate) fn iter(&self) -> impl Iterator<Item = (State, Action)> {
+    pub(crate) fn iter(&self) -> Result<impl Iterator<Item = (State, Action)>, StoreError> {
         self.iter_with(1, BackpressurePolicy::BlockOnFull)
     }
 
@@ -695,7 +747,7 @@ where
         &self,
         capacity: usize,
         policy: BackpressurePolicy<(State, Action)>,
-    ) -> impl Iterator<Item = (State, Action)> {
+    ) -> Result<impl Iterator<Item = (State, Action)>, StoreError> {
         let (iter_tx, iter_rx) = BackpressureChannel::<(State, Action)>::pair_with(
             "store_iter",
             capacity,
@@ -704,7 +756,7 @@ where
         );
 
         let subscription = self.add_subscriber(Arc::new(StateIteratorSubscriber::new(iter_tx)));
-        StateIterator::new(iter_rx, subscription)
+        Ok(StateIterator::new(iter_rx, subscription?))
     }
 
     /// subscribing to store updates in new context
@@ -772,7 +824,7 @@ where
         let channel_subscriber = Arc::new(ChanneledSubscriber::new(handle, tx));
         let subscription = self.add_subscriber(channel_subscriber.clone());
 
-        Ok(subscription)
+        subscription
     }
 
     fn subscribed_loop(
@@ -802,6 +854,7 @@ where
                     #[cfg(feature = "store-log")]
                     eprintln!("store: {} received AddSubscriber (ignored)", _name);
                 }
+
                 ActionOp::Exit(created_at) => {
                     metrics.action_executed(None, created_at.elapsed());
                     #[cfg(feature = "store-log")]
@@ -930,7 +983,7 @@ where
     fn add_subscriber(
         &self,
         subscriber: Arc<dyn Subscriber<State, Action> + Send + Sync>,
-    ) -> Box<dyn Subscription> {
+    ) -> Result<Box<dyn Subscription>, StoreError> {
         self.add_subscriber(subscriber)
     }
 
@@ -1133,7 +1186,7 @@ mod tests {
         // 첫 번째 subscriber 추가
         let received1 = Arc::new(Mutex::new(Vec::new()));
         let subscriber1 = Arc::new(TestChannelSubscriber::new(received1.clone()));
-        store.add_subscriber(subscriber1);
+        store.add_subscriber(subscriber1).unwrap();
 
         // 액션을 dispatch하여 상태 변경
         store.dispatch(5).unwrap();
@@ -1145,7 +1198,7 @@ mod tests {
         // 두 번째 subscriber 추가 (현재 상태는 15)
         let received2 = Arc::new(Mutex::new(Vec::new()));
         let subscriber2 = Arc::new(TestChannelSubscriber::new(received2.clone()));
-        store.add_subscriber(subscriber2);
+        store.add_subscriber(subscriber2).unwrap();
 
         // 잠시 대기하여 AddSubscriber 액션이 처리되도록 함
         thread::sleep(Duration::from_millis(100));
@@ -1202,7 +1255,7 @@ mod tests {
             subscribe_called: subscribe_called.clone(),
         });
 
-        store.add_subscriber(subscriber);
+        store.add_subscriber(subscriber).unwrap();
 
         // 잠시 대기하여 AddSubscriber 액션이 처리되도록 함
         thread::sleep(Duration::from_millis(100));
@@ -1236,7 +1289,7 @@ mod tests {
         ];
 
         for subscriber in &subscribers {
-            store.add_subscriber(subscriber.clone());
+            store.add_subscriber(subscriber.clone()).unwrap();
         }
 
         // 잠시 대기하여 AddSubscriber 액션이 처리되도록 함
@@ -1267,7 +1320,7 @@ mod tests {
         // subscriber 추가
         let received = Arc::new(Mutex::new(Vec::new()));
         let subscriber = Arc::new(TestChannelSubscriber::new(received.clone()));
-        let subscription = store.add_subscriber(subscriber);
+        let subscription = store.add_subscriber(subscriber).unwrap();
 
         // 잠시 대기하여 AddSubscriber 액션이 처리되도록 함
         thread::sleep(Duration::from_millis(100));
@@ -1302,7 +1355,7 @@ mod tests {
         // subscriber 추가 시도
         let received = Arc::new(Mutex::new(Vec::new()));
         let subscriber = Arc::new(TestChannelSubscriber::new(received.clone()));
-        let _subscription = store.add_subscriber(subscriber);
+        let _subscription = store.add_subscriber(subscriber).unwrap();
 
         // 잠시 대기
         thread::sleep(Duration::from_millis(100));
@@ -1342,7 +1395,7 @@ mod tests {
             subscribe_called: Arc::new(Mutex::new(false)),
         });
 
-        store.add_subscriber(subscriber.clone());
+        store.add_subscriber(subscriber.clone()).unwrap();
 
         // 잠시 대기하여 AddSubscriber 액션이 처리되도록 함
         thread::sleep(Duration::from_millis(100));
@@ -1367,7 +1420,7 @@ mod tests {
         // 첫 번째 subscriber 추가
         let received1 = Arc::new(Mutex::new(Vec::new()));
         let subscriber1 = Arc::new(TestChannelSubscriber::new(received1.clone()));
-        store.add_subscriber(subscriber1);
+        store.add_subscriber(subscriber1).unwrap();
 
         // 잠시 대기
         thread::sleep(Duration::from_millis(50));
@@ -1375,7 +1428,7 @@ mod tests {
         // 두 번째 subscriber 추가
         let received2 = Arc::new(Mutex::new(Vec::new()));
         let subscriber2 = Arc::new(TestChannelSubscriber::new(received2.clone()));
-        store.add_subscriber(subscriber2);
+        store.add_subscriber(subscriber2).unwrap();
 
         // 잠시 대기
         thread::sleep(Duration::from_millis(50));
@@ -1383,7 +1436,7 @@ mod tests {
         // 세 번째 subscriber 추가
         let received3 = Arc::new(Mutex::new(Vec::new()));
         let subscriber3 = Arc::new(TestChannelSubscriber::new(received3.clone()));
-        store.add_subscriber(subscriber3);
+        store.add_subscriber(subscriber3).unwrap();
 
         // 잠시 대기하여 모든 AddSubscriber 액션이 처리되도록 함
         thread::sleep(Duration::from_millis(100));
@@ -1413,7 +1466,7 @@ mod tests {
         let store = StoreImpl::new_with_reducer(0, Box::new(TestReducer)).unwrap();
 
         // when: create iterator and dispatch actions
-        let mut iter = store.iter();
+        let mut iter = store.iter().unwrap();
 
         // dispatch actions
         store.dispatch(10).expect("dispatch should succeed");
@@ -1437,7 +1490,7 @@ mod tests {
         let store = StoreImpl::new_with_reducer(0, Box::new(TestReducer)).unwrap();
 
         // when: create iterator without dispatching actions
-        let mut iter = store.iter();
+        let mut iter = store.iter().unwrap();
 
         // then: iterator should return None immediately
         // since no actions were dispatched, no state changes occurred
@@ -1497,7 +1550,7 @@ mod tests {
         .unwrap();
 
         // when: create iterator and dispatch actions
-        let mut iter = store.iter();
+        let mut iter = store.iter().unwrap();
 
         store.dispatch(ComplexAction::Add(10)).expect("dispatch should succeed");
         store
@@ -1548,7 +1601,7 @@ mod tests {
         let store = StoreImpl::new_with_reducer(0, Box::new(TestReducer)).unwrap();
 
         // when: create iterator and dispatch many actions quickly
-        let mut iter = store.iter();
+        let mut iter = store.iter().unwrap();
 
         // dispatch multiple actions
         for i in 1..=10 {
@@ -1610,7 +1663,7 @@ mod tests {
         .unwrap();
 
         // when: create iterator and dispatch actions
-        let mut iter = store.iter();
+        let mut iter = store.iter().unwrap();
 
         store.dispatch(5).expect("dispatch should succeed");
         store.dispatch(10).expect("dispatch should succeed");
@@ -1644,7 +1697,7 @@ mod tests {
         .unwrap();
 
         // when: create iterator and dispatch actions
-        let mut iter = store.iter();
+        let mut iter = store.iter().unwrap();
 
         store.dispatch(3).expect("dispatch should succeed"); // no effect
         store.dispatch(10).expect("dispatch should succeed"); // with effect
@@ -1674,7 +1727,7 @@ mod tests {
             .unwrap();
 
         // when: create iterator and dispatch actions
-        // let mut iter = store.iter();
+        // let mut iter = store.iter().unwrap();
 
         store.dispatch(5).expect("dispatch should succeed");
         store.dispatch(10).expect("dispatch should succeed");
@@ -1701,7 +1754,7 @@ mod tests {
         let store = StoreImpl::new_with_reducer(0, Box::new(TestReducer)).unwrap();
 
         // when: create iterator, dispatch actions, but stop store early
-        let mut iter = store.iter();
+        let mut iter = store.iter().unwrap();
 
         store.dispatch(5).expect("dispatch should succeed");
         store.dispatch(10).expect("dispatch should succeed");
@@ -1733,7 +1786,7 @@ mod tests {
         .unwrap();
 
         // when: create iterator with different capacity and policy
-        let mut iter = store.iter_with(1, BackpressurePolicy::BlockOnFull);
+        let mut iter = store.iter_with(1, BackpressurePolicy::BlockOnFull).unwrap();
 
         store.dispatch(5).expect("dispatch should succeed");
         store.dispatch(10).expect("dispatch should succeed");
@@ -1784,7 +1837,7 @@ mod tests {
         .unwrap();
 
         // when: create iterator and dispatch string actions
-        let mut iter = store.iter();
+        let mut iter = store.iter().unwrap();
 
         store.dispatch("hello".to_string()).expect("dispatch should succeed");
         store.dispatch(" world".to_string()).expect("dispatch should succeed");
@@ -1815,7 +1868,7 @@ mod tests {
         )
         .unwrap();
         // when: create iterator and dispatch actions
-        let mut iter = store.iter();
+        let mut iter = store.iter().unwrap();
 
         store.dispatch(5).expect("dispatch should succeed");
         store.dispatch(10).expect("dispatch should succeed");

@@ -101,7 +101,7 @@ pub fn main() {
     .unwrap();
 
     println!("add subscriber");
-    store.add_subscriber(Arc::new(CalcSubscriber::default()));
+    store.add_subscriber(Arc::new(CalcSubscriber::default())).unwrap();
     store.dispatch(CalcAction::Add(1)).expect("no dispatch failed");
     store.dispatch(CalcAction::Subtract(1)).expect("no dispatch failed");
 

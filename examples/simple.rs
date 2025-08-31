@@ -12,11 +12,13 @@ pub fn main() {
         .unwrap();
 
     // add subscriber
-    store.add_subscriber(Arc::new(FnSubscriber::from(
-        |state: &i32, _action: &i32| {
-            println!("subscriber: state: {}", state);
-        },
-    )));
+    store
+        .add_subscriber(Arc::new(FnSubscriber::from(
+            |state: &i32, _action: &i32| {
+                println!("subscriber: state: {}", state);
+            },
+        )))
+        .unwrap();
 
     // dispatch actions
     store.dispatch(41).expect("no error");

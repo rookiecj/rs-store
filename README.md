@@ -193,10 +193,10 @@ For detailed documentation, visit:
 ### In Progress 🚧
 - [x] Latest state notification for new subscribers
 - [x] Notification scheduler (CurrentThread, ThreadPool)
-- [X] Stream-based pull model(Iterator)
 - [ ] Stop store after all effects are scheduled
-- [X] Separate state interface and implementation
 - [X] drop store after all references are dropped
+- [x] dispatcher has weak reference to the store
+- [ ] effects system
 
 ## Contributing
 

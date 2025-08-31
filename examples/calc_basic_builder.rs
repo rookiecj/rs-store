@@ -100,12 +100,12 @@ pub fn main() {
             .build()
             .unwrap();
     println!("add subscriber");
-    store.add_subscriber(Arc::new(CalcSubscriber::default()));
+    store.add_subscriber(Arc::new(CalcSubscriber::default())).unwrap();
     let _ = store.dispatch(CalcAction::Add(1)).expect("no dispatch failed");
 
     thread::sleep(std::time::Duration::from_secs(1));
     println!("add more subscriber");
-    store.add_subscriber(Arc::new(CalcSubscriber::default()));
+    store.add_subscriber(Arc::new(CalcSubscriber::default())).unwrap();
     let _ = store.dispatch(CalcAction::Subtract(1));
 
     // stop the store

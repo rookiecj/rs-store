@@ -114,7 +114,7 @@ pub fn main() {
             .unwrap();
 
     println!("add subscriber");
-    store.add_subscriber(Arc::new(CalcSubscriber::default()));
+    store.add_subscriber(Arc::new(CalcSubscriber::default())).unwrap();
     let _ = store.dispatch(CalcAction::Add(1));
 
     let store_clone = store.clone();
@@ -123,7 +123,7 @@ pub fn main() {
 
         // subscribe
         println!("add more subscriber");
-        let subscription = store_clone.add_subscriber(Arc::new(CalcSubscriber::new(1)));
+        let subscription = store_clone.add_subscriber(Arc::new(CalcSubscriber::new(1))).unwrap();
         let _ = store_clone.dispatch(CalcAction::Subtract(1));
         subscription
     });

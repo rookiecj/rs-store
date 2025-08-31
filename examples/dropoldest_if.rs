@@ -31,9 +31,11 @@ fn main() {
         .unwrap();
 
     // subscriber 추가
-    store.add_subscriber(Arc::new(FnSubscriber::from(|state: &i32, action: &i32| {
-        println!("subscriber: state: {}, action: {}", state, action);
-    })));
+    store
+        .add_subscriber(Arc::new(FnSubscriber::from(|state: &i32, action: &i32| {
+            println!("subscriber: state: {}, action: {}", state, action);
+        })))
+        .unwrap();
 
     println!("=== Predicate 기반 Backpressure 테스트 ===");
     println!("채널 capacity: 2");

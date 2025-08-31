@@ -108,7 +108,7 @@ mod tests {
         let subscriber = Arc::new(TestSubscriber {
             state_changes: state_changes_clone,
         });
-        store.add_subscriber(subscriber);
+        store.add_subscriber(subscriber).unwrap();
 
         // then
         // Test sequence of actions
@@ -261,7 +261,7 @@ mod tests {
         let subscriber = Arc::new(TestSubscriber {
             state_changes: state_changes_clone,
         });
-        store.add_subscriber(subscriber);
+        store.add_subscriber(subscriber).unwrap();
 
         // when
         store.dispatch(5).unwrap(); // Should change state
