@@ -503,7 +503,7 @@ mod tests {
     use super::*;
     use crate::{
         BackpressurePolicy, DispatchOp, Dispatcher, Effect, Middleware, MiddlewareOp, Reducer,
-        StoreBuilder,
+        StoreImpl,
     };
     use std::sync::Arc;
     use std::thread;
@@ -559,12 +559,15 @@ mod tests {
 
     #[test]
     fn test_count_metrics_basic() {
-        let store = StoreBuilder::new(0)
-            .with_reducer(Box::new(TestReducer))
-            .with_capacity(5)
-            .with_policy(BackpressurePolicy::DropOldest)
-            .build()
-            .unwrap();
+        let store = StoreImpl::new_with(
+            0,
+            vec![Box::new(TestReducer)],
+            "test".to_string(),
+            5,
+            BackpressurePolicy::DropOldest,
+            vec![],
+        )
+        .unwrap();
 
         // when
         // Test multiple actions
@@ -591,12 +594,15 @@ mod tests {
     #[test]
     fn test_count_metrics_with_dropped_actions() {
         // given
-        let store = StoreBuilder::new(0)
-            .with_reducer(Box::new(TestReducer))
-            .with_capacity(2)
-            .with_policy(BackpressurePolicy::DropOldest)
-            .build()
-            .unwrap();
+        let store = StoreImpl::new_with(
+            0,
+            vec![Box::new(TestReducer)],
+            "test".to_string(),
+            2,
+            BackpressurePolicy::DropOldest,
+            vec![],
+        )
+        .unwrap();
 
         // when
         // Dispatch more actions than capacity
@@ -622,12 +628,15 @@ mod tests {
     fn test_count_metrics_with_middleware() {
         // given
         let middleware = Arc::new(TestMiddleware::new("test"));
-        let store = StoreBuilder::new(0)
-            .with_reducer(Box::new(TestReducer))
-            .with_capacity(5)
-            .with_middleware(middleware)
-            .build()
-            .unwrap();
+        let store = StoreImpl::new_with(
+            0,
+            vec![Box::new(TestReducer)],
+            "test".to_string(),
+            5,
+            BackpressurePolicy::DropOldest,
+            vec![middleware],
+        )
+        .unwrap();
 
         // when
         store.dispatch(1).expect("no error");

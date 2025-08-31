@@ -28,6 +28,6 @@ pub(crate) mod iterator;
 pub mod store;
 pub use store::*;
 
-pub mod store_droppable;
-
-pub use store_droppable::*;
+pub(crate) mod store_droppable;
+#[allow(unused_imports)]
+pub(crate) use store_droppable::*;

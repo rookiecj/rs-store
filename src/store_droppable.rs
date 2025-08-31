@@ -5,7 +5,7 @@ use std::sync::Arc;
 /// DroppableStore is a wrapper around a Store that will automatically stop the store when dropped.
 /// It doesn't care about Arc reference count, this is useful when you want to ensure
 /// that the store is stopped when it goes out of scope.
-pub struct DroppableStore<State, Action>
+pub(crate) struct DroppableStore<State, Action>
 where
     State: Send + Sync + Clone + std::fmt::Debug + 'static,
     Action: Send + Sync + Clone + std::fmt::Debug + 'static,
@@ -18,6 +18,7 @@ where
     State: Send + Sync + Clone + std::fmt::Debug + 'static,
     Action: Send + Sync + Clone + std::fmt::Debug + 'static,
 {
+    #[allow(dead_code)]
     pub fn new(store: Arc<StoreImpl<State, Action>>) -> Self {
         Self { inner: store }
     }
@@ -49,8 +50,30 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::{DispatchOp, Dispatcher, DroppableStore, FnReducer, StoreBuilder};
-    use std::time::Duration;
+    use crate::{DispatchOp, DroppableStore, FnReducer, Store, StoreBuilder, StoreImpl};
+    use std::{sync::Arc, time::Duration};
+
+    #[test]
+    fn test_store_droppable() {
+        let store = StoreImpl::new_with_reducer(
+            0,
+            Box::new(FnReducer::from(|state: &i32, action: &i32| {
+                println!("reducer: {} + {}", state, action);
+                DispatchOp::Dispatch(state + action, None)
+            })),
+        );
+        let droppable_store = DroppableStore::new(store);
+        do_with_store(droppable_store.clone());
+
+        // no need to stop or drop, because DroppableStore
+        //droppable_store.stop();
+        //drop(droppable_store);
+    }
+
+    fn do_with_store(store: Arc<dyn Store<i32, i32>>) {
+        let _ = store.dispatch(41);
+        let _ = store.dispatch(1);
+    }
 
     #[test]
     fn test_store_cleanup_on_drop() {
@@ -128,12 +151,12 @@ mod tests {
 
     #[test]
     fn test_store_methods_after_clone() {
-        let _store = StoreBuilder::new(0)
-            .with_reducer(Box::new(FnReducer::from(
-                move |state: &i32, action: &i32| DispatchOp::Dispatch(state + action, None),
-            )))
-            .build()
-            .expect("Failed to build store");
+        let _store = StoreImpl::new_with_reducer(
+            0,
+            Box::new(FnReducer::from(move |state: &i32, action: &i32| {
+                DispatchOp::Dispatch(state + action, None)
+            })),
+        );
 
         let droppable_store = DroppableStore::new(_store);
 

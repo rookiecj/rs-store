@@ -1,6 +1,6 @@
 use crate::{BackpressurePolicy, Subscriber, Subscription};
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 /// Default capacity for the channel
 pub const DEFAULT_CAPACITY: usize = 16;
@@ -74,7 +74,11 @@ where
     ) -> Result<Box<dyn Subscription>, StoreError>;
 
     /// Stop the store
+    /// when the queue is full, the send can be blocked if there is no droppable item
     fn stop(&self) -> Result<(), StoreError>;
+
+    /// Stop the store with timeout
+    fn stop_with_timeout(&self, timeout: Duration) -> Result<(), StoreError>;
 }
 
 #[cfg(test)]
@@ -85,6 +89,7 @@ mod tests {
     use crate::BackpressurePolicy;
     use crate::DispatchOp;
     use crate::Reducer;
+    use crate::StoreImpl;
     use std::sync::Arc;
     use std::thread;
     use std::time::Duration;
@@ -142,11 +147,15 @@ mod tests {
 
     fn create_test_store() -> DroppableStore<TestState, TestAction> {
         DroppableStore::new(
-            StoreBuilder::new(TestState::default())
-                .with_reducer(Box::new(TestReducer))
-                .with_name("test-store".into())
-                .build()
-                .unwrap(),
+            StoreImpl::new_with(
+                TestState::default(),
+                vec![Box::new(TestReducer)],
+                "test-store".into(),
+                16,
+                BackpressurePolicy::default(),
+                vec![],
+            )
+            .unwrap(),
         )
     }
 
