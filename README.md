@@ -91,12 +91,9 @@ use rs_store::{BackpressurePolicy, StoreBuilder};
 use std::sync::Arc;
 
 // Create a predicate that drops low-priority messages
-let predicate = Arc::new(|action_op: &rs_store::ActionOp<i32>| {
-    match action_op {
-        rs_store::ActionOp::Action(value) => *value < 5, // Drop values less than 5
-        rs_store::ActionOp::Exit(_) => false, // Never drop exit messages
-    }
-});
+let predicate = Arc::new(|value: &i32| {
+        *value < 5 // 5보다 작은 값들은 drop
+    });
 
 let policy = BackpressurePolicy::DropLatestIf { predicate };
 
@@ -196,6 +193,7 @@ For detailed documentation, visit:
 - [ ] Stop store after all effects are scheduled
 - [X] drop store after all references are dropped
 - [x] dispatcher has weak reference to the store
+- [x] hide ActionOp
 - [ ] effects system
 
 ## Contributing
