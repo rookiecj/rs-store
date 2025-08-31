@@ -4,15 +4,10 @@ use std::sync::Arc;
 fn main() {
     // predicate 기반 drop 정책 사용 예시
     // 작은 값들을 우선적으로 drop하는 predicate
-    let predicate = Arc::new(|action_op: &rs_store::ActionOp<i32>| {
-        match action_op {
-            rs_store::ActionOp::Action(value) => {
-                println!("droppable {} ? {}", *value, *value < 5);
-                *value < 5 // 5보다 작은 값들은 drop
-            }
-            rs_store::ActionOp::Exit(_) => false, // Exit는 drop하지 않음
-            rs_store::ActionOp::AddSubscriber => false, // AddSubscriber는 drop하지 않음
-        }
+    // predicate는 이제 Action의 내용(T)에만 적용됩니다
+    let predicate = Arc::new(|value: &i32| {
+        println!("droppable {} ? {}", *value, *value < 5);
+        *value < 5 // 5보다 작은 값들은 drop
     });
 
     let policy = BackpressurePolicy::DropOldestIf { predicate };
