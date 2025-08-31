@@ -78,8 +78,9 @@ rs-store supports multiple backpressure policies:
 
 - **BlockOnFull**: Blocks the sender when the queue is full (default)
 - **DropOldest**: Drops the oldest item when the queue is full
-- **DropLatest**: Drops the latest item when the queue is full
-- **DropLatestIf**: Drops items based on a custom predicate when the queue is full
+- **DropLatest**: Drops new item when the queue is full
+- **DropOldestIf**: Drops items from the oldest based on a custom predicate when the queue is full
+- **DropLatestIf**: Drops items from the latest based on a custom predicate when the queue is full
 
 #### Predicate-based Backpressure
 
