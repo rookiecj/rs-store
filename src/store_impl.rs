@@ -2,6 +2,7 @@ use crate::channel::{BackpressureChannel, BackpressurePolicy, ReceiverChannel, S
 use crate::dispatcher::{Dispatcher, WeakDispatcher};
 use crate::metrics::{CountMetrics, Metrics, MetricsSnapshot};
 use crate::middleware::Middleware;
+use crate::subscriber::SubscriberWithId;
 use crate::{DispatchOp, Effect, MiddlewareOp, Reducer, SenderError, Subscriber, Subscription};
 use fmt::Debug;
 use rusty_pool::ThreadPool;
@@ -41,9 +42,9 @@ where
     pub(crate) name: String,
     state: Mutex<State>,
     pub(crate) reducers: Mutex<Vec<Box<dyn Reducer<State, Action> + Send + Sync>>>,
-    pub(crate) subscribers: Arc<Mutex<Vec<Arc<dyn Subscriber<State, Action> + Send + Sync>>>>,
+    pub(crate) subscribers: Arc<Mutex<Vec<SubscriberWithId<State, Action>>>>,
     /// temporary vector to store subscribers to be added
-    adding_subscribers: Arc<Mutex<Vec<Arc<dyn Subscriber<State, Action> + Send + Sync>>>>,
+    adding_subscribers: Arc<Mutex<Vec<SubscriberWithId<State, Action>>>>,
     pub(crate) dispatch_tx: Mutex<Option<SenderChannel<Action>>>,
     middlewares: Mutex<Vec<Arc<dyn Middleware<State, Action> + Send + Sync>>>,
     pub(crate) metrics: Arc<CountMetrics>,
@@ -54,12 +55,14 @@ where
 /// Subscription for a subscriber
 /// the subscriber can use it to unsubscribe from the store
 struct SubscriberSubscription {
-    unsubscribe: Box<dyn Fn() + Send + Sync>,
+    #[allow(dead_code)]
+    subscriber_id: u64, // Store subscriber ID instead of Arc reference
+    unsubscribe: Box<dyn Fn(u64) + Send + Sync>,
 }
 
 impl Subscription for SubscriberSubscription {
     fn unsubscribe(&self) {
-        (self.unsubscribe)();
+        (self.unsubscribe)(self.subscriber_id);
     }
 }
 
@@ -246,8 +249,12 @@ where
         &self,
         subscriber: Arc<dyn Subscriber<State, Action> + Send + Sync>,
     ) -> Box<dyn Subscription> {
+        // SubscriberWithId로 래핑하여 unique ID 할당
+        let subscriber_with_id = SubscriberWithId::new(subscriber);
+        let subscriber_id = subscriber_with_id.id;
+
         // 새로운 subscriber를 adding_subscribers에 추가
-        self.adding_subscribers.lock().unwrap().push(subscriber.clone());
+        self.adding_subscribers.lock().unwrap().push(subscriber_with_id);
 
         // ActionOp::AddSubscriber 액션을 전달하여 reducer에서 처리하도록 함
         if let Some(tx) = self.dispatch_tx.lock().unwrap().as_ref() {
@@ -258,10 +265,11 @@ where
         let subscribers = self.subscribers.clone();
         let adding_subscribers = self.adding_subscribers.clone();
         Box::new(SubscriberSubscription {
-            unsubscribe: Box::new(move || {
+            subscriber_id, // Store the ID for comparison
+            unsubscribe: Box::new(move |subscriber_id| {
                 let mut subscribers = subscribers.lock().unwrap();
                 subscribers.retain(|s| {
-                    let retain = !Arc::ptr_eq(s, &subscriber);
+                    let retain = s.id != subscriber_id; // Compare by ID
                     if !retain {
                         s.on_unsubscribe();
                     }
@@ -270,7 +278,7 @@ where
 
                 // remove from adding_subscribers
                 let mut adding = adding_subscribers.lock().unwrap();
-                adding.retain(|s| !Arc::ptr_eq(s, &subscriber));
+                adding.retain(|s| s.id != subscriber_id); // Compare by ID
             }),
         })
     }
@@ -281,16 +289,16 @@ where
         eprintln!("store: clear_subscribers");
         match self.subscribers.lock() {
             Ok(mut subscribers) => {
-                for subscriber in subscribers.iter() {
-                    subscriber.on_unsubscribe();
+                for subscriber_with_id in subscribers.iter() {
+                    subscriber_with_id.on_unsubscribe();
                 }
                 subscribers.clear();
             }
             Err(mut e) => {
                 #[cfg(feature = "store-log")]
                 eprintln!("store: Error while locking subscribers: {:?}", e);
-                for subscriber in e.get_ref().iter() {
-                    subscriber.on_unsubscribe();
+                for subscriber_with_id in e.get_ref().iter() {
+                    subscriber_with_id.on_unsubscribe();
                 }
                 e.get_mut().clear();
             }
@@ -500,8 +508,8 @@ where
 
         if need_notify {
             let subscribers = self.subscribers.lock().unwrap().clone();
-            for subscriber in subscribers.iter() {
-                subscriber.on_notify(next_state, action);
+            for subscriber_with_id in subscribers.iter() {
+                subscriber_with_id.on_notify(next_state, action);
             }
             let duration = _notify_start.elapsed();
             self.metrics.subscriber_notified(Some(action), subscribers.len(), duration);
@@ -511,15 +519,15 @@ where
     fn do_subscribe(
         &self,
         state: &State,
-        new_subscribers: impl Iterator<Item = Arc<dyn Subscriber<State, Action> + Send + Sync>>,
+        new_subscribers: impl Iterator<Item = SubscriberWithId<State, Action>>,
     ) {
         let mut subscribers = self.subscribers.lock().unwrap();
 
         // notify new subscribers with the latest state and add to subscribers
-        for subscriber in new_subscribers {
-            subscriber.on_subscribe(state);
+        for subscriber_with_id in new_subscribers {
+            subscriber_with_id.on_subscribe(state);
 
-            subscribers.push(subscriber);
+            subscribers.push(subscriber_with_id);
         }
     }
 

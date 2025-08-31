@@ -1,3 +1,14 @@
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
+
+// Global counter for generating unique subscriber IDs
+static SUBSCRIBER_ID_COUNTER: AtomicU64 = AtomicU64::new(1);
+
+/// Generate a unique subscriber ID
+pub fn generate_subscriber_id() -> u64 {
+    SUBSCRIBER_ID_COUNTER.fetch_add(1, Ordering::SeqCst)
+}
+
 /// Subscriber is a trait that can be implemented to receive notifications from the store.
 pub trait Subscriber<State, Action>
 where
@@ -13,6 +24,56 @@ where
 
     /// on_unsubscribe is called when a subscriber is unsubscribed from the store.
     fn on_unsubscribe(&self) {}
+}
+
+/// SubscriberWithId wraps a subscriber with a unique ID for identification
+/// ID 기반 subscriber 추가/제거를 위한 wrapper 구조체
+#[derive(Clone)]
+pub(crate) struct SubscriberWithId<State, Action>
+where
+    State: Send + Sync + Clone,
+    Action: Send + Sync + Clone,
+{
+    pub id: u64, // unique ID for this subscriber
+    pub subscriber: Arc<dyn Subscriber<State, Action> + Send + Sync>,
+}
+
+impl<State, Action> SubscriberWithId<State, Action>
+where
+    State: Send + Sync + Clone,
+    Action: Send + Sync + Clone,
+{
+    /// Create a new SubscriberWithId with auto-generated ID
+    pub fn new(subscriber: Arc<dyn Subscriber<State, Action> + Send + Sync>) -> Self {
+        Self {
+            id: generate_subscriber_id(),
+            subscriber,
+        }
+    }
+
+    /// Create a new SubscriberWithId with specific ID
+    #[allow(dead_code)]
+    pub fn with_id(id: u64, subscriber: Arc<dyn Subscriber<State, Action> + Send + Sync>) -> Self {
+        Self { id, subscriber }
+    }
+}
+
+impl<State, Action> Subscriber<State, Action> for SubscriberWithId<State, Action>
+where
+    State: Send + Sync + Clone,
+    Action: Send + Sync + Clone,
+{
+    fn on_subscribe(&self, state: &State) {
+        self.subscriber.on_subscribe(state)
+    }
+
+    fn on_notify(&self, state: &State, action: &Action) {
+        self.subscriber.on_notify(state, action)
+    }
+
+    fn on_unsubscribe(&self) {
+        self.subscriber.on_unsubscribe()
+    }
 }
 
 /// Subscription is a handle to unsubscribe from the store.
