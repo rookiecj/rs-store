@@ -5,7 +5,7 @@ use std::sync::{Arc, Weak};
 /// Dispatcher dispatches actions to the store
 pub trait Dispatcher<Action: Send + Clone + std::fmt::Debug>: Send {
     /// dispatch is used to dispatch an action to the store
-    /// the caller can be blocked by the channel
+    /// the action can be dropped if the store is full
     fn dispatch(&self, action: Action) -> Result<(), StoreError>;
 
     /// dispatch_thunk is used to dispatch a thunk.
@@ -17,8 +17,8 @@ pub trait Dispatcher<Action: Send + Clone + std::fmt::Debug>: Send {
     fn dispatch_task(&self, task: Box<dyn FnOnce() + Send>);
 }
 
-/// WeakDispatcher는 store에 대한 weak reference를 가지는 dispatcher
-/// circular reference를 방지하기 위해 사용됩니다
+/// WeakDispatcher is a dispatcher that holds a weak reference to the store
+/// to prevent circular reference
 pub struct WeakDispatcher<State, Action>
 where
     State: Send + Sync + Clone + std::fmt::Debug + 'static,
