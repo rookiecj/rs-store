@@ -19,13 +19,15 @@ where
     DropLatest,
     /// Drop items based on predicate when the queue is full, it drops from the latest
     /// With this policy, [send] method can be Err when all items are not droppable
+    /// Predicate is only applied to ActionOp::Action variants, other variants are never dropped
     DropLatestIf {
-        predicate: Arc<dyn Fn(&ActionOp<T>) -> bool + Send + Sync>,
+        predicate: Arc<dyn Fn(&T) -> bool + Send + Sync>,
     },
     /// Drop items based on predicate when the queue is full, it drops from the oldest
     /// With this policy, [send] method can be Err when all items are not droppable
+    /// Predicate is only applied to ActionOp::Action variants, other variants are never dropped
     DropOldestIf {
-        predicate: Arc<dyn Fn(&ActionOp<T>) -> bool + Send + Sync>,
+        predicate: Arc<dyn Fn(&T) -> bool + Send + Sync>,
     },
 }
 
@@ -169,7 +171,13 @@ where
                             queue.len(),
                             queue[i]
                         );
-                        if predicate(&queue[i]) {
+                        // Only apply predicate to Action variants
+                        let should_drop = if let ActionOp::Action(action) = &queue[i] {
+                            predicate(action)
+                        } else {
+                            false // Never drop non-Action variants
+                        };
+                        if should_drop {
                             if let Some(dropped_item) = queue.remove(i) {
                                 dropped_count += 1;
                                 if let Some(metrics) = &self.metrics {
@@ -210,7 +218,13 @@ where
                             queue.len(),
                             queue[index]
                         );
-                        if predicate(&queue[index]) {
+                        // Only apply predicate to Action variants
+                        let should_drop = if let ActionOp::Action(action) = &queue[index] {
+                            predicate(action)
+                        } else {
+                            false // Never drop non-Action variants
+                        };
+                        if should_drop {
                             if let Some(dropped_item) = queue.remove(index) {
                                 dropped_count += 1;
                                 if let Some(metrics) = &self.metrics {
@@ -326,7 +340,13 @@ where
                             queue.len(),
                             queue[i]
                         );
-                        if predicate(&queue[i]) {
+                        // Only apply predicate to Action variants
+                        let should_drop = if let ActionOp::Action(action) = &queue[i] {
+                            predicate(action)
+                        } else {
+                            false // Never drop non-Action variants
+                        };
+                        if should_drop {
                             if let Some(dropped_item) = queue.remove(i) {
                                 dropped_count += 1;
                                 if let Some(metrics) = &self.metrics {
@@ -364,7 +384,13 @@ where
                             queue.len(),
                             queue[index]
                         );
-                        if predicate(&queue[index]) {
+                        // Only apply predicate to Action variants
+                        let should_drop = if let ActionOp::Action(action) = &queue[index] {
+                            predicate(action)
+                        } else {
+                            false // Never drop non-Action variants
+                        };
+                        if should_drop {
                             if let Some(dropped_item) = queue.remove(index) {
                                 dropped_count += 1;
                                 if let Some(metrics) = &self.metrics {
@@ -619,11 +645,7 @@ mod tests {
     #[test]
     fn test_predicate_dropping() {
         // predicate: 5보다 작은 값들은 drop
-        let predicate = Arc::new(|action_op: &ActionOp<i32>| match action_op {
-            ActionOp::Action(value) => *value < 5,
-            ActionOp::Exit(_) => false,
-            ActionOp::AddSubscriber => false,
-        });
+        let predicate = Arc::new(|value: &i32| *value < 5);
 
         let (sender, receiver) =
             BackpressureChannel::<i32>::pair(2, BackpressurePolicy::DropLatestIf { predicate });
@@ -675,12 +697,8 @@ mod tests {
 
     #[test]
     fn test_add_subscriber_with_predicate() {
-        // AddSubscriber는 절대 drop되지 않도록 하는 predicate
-        let predicate = Arc::new(|action_op: &ActionOp<i32>| match action_op {
-            ActionOp::Action(value) => *value < 5,
-            ActionOp::Exit(_) => false,
-            ActionOp::AddSubscriber => false, // AddSubscriber는 절대 drop하지 않음
-        });
+        // predicate는 Action에만 적용되므로 AddSubscriber는 자동으로 보존됨
+        let predicate = Arc::new(|value: &i32| *value < 5);
 
         let (sender, receiver) =
             BackpressureChannel::<i32>::pair(2, BackpressurePolicy::DropLatestIf { predicate });
@@ -800,13 +818,7 @@ mod tests {
         let (sender, receiver) = BackpressureChannel::pair(
             3,
             BackpressurePolicy::DropOldestIf {
-                predicate: Arc::new(|action_op: &ActionOp<i32>| {
-                    if let ActionOp::Action(value) = action_op {
-                        *value < 5 // Drop values less than 5
-                    } else {
-                        false
-                    }
-                }),
+                predicate: Arc::new(|value: &i32| *value < 5), // Drop values less than 5
             },
         );
 
