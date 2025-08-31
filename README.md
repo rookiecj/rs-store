@@ -18,13 +18,9 @@ rs-store provides a predictable state container inspired by Redux, featuring thr
 - 📊 Side effect handling in reducers
 - 📊 Middleware handles actions and effects
 - 📊 Backpressure handling with configurable policies
-- 🎯 Predicate-based backpressure policies for intelligent message dropping
-- 🔄 Droppable store
 - 🎯 Bounded channel size with sync channels
 - 🔄 Decoupling state updates from notification delivery
-- 📚 State Iterator support
 - 📚 Channeled subscription support
-- 📚 Selector support
 - 📊 Metrics support
 - 🧪 Comprehensive test coverage
 

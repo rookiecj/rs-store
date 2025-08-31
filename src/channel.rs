@@ -15,15 +15,15 @@ where
     BlockOnFull,
     /// Drop the oldest item when the queue is full
     DropOldest,
-    /// Drop the latest item when the queue is full
+    /// Drop the new item when the queue is full
     DropLatest,
     /// Drop items based on predicate when the queue is full, it drops from the latest
-    /// With this policy, 'send' can be Err when all items are not droppable
+    /// With this policy, [send] method can be Err when all items are not droppable
     DropLatestIf {
         predicate: Arc<dyn Fn(&ActionOp<T>) -> bool + Send + Sync>,
     },
     /// Drop items based on predicate when the queue is full, it drops from the oldest
-    /// With this policy, 'send' can be Err when all items are not droppable
+    /// With this policy, [send] method can be Err when all items are not droppable
     DropOldestIf {
         predicate: Arc<dyn Fn(&ActionOp<T>) -> bool + Send + Sync>,
     },
@@ -72,6 +72,14 @@ where
         }
     }
 
+    /// send put an item to the queue with backpressure policy
+    /// when it is full, the send will try to drop an item based on the policy:
+    /// - with BlockOnFull policy, the send will block until the space is available
+    /// - with DropOldest policy, the send will drop the oldest item and put the new item to the queue
+    /// - with DropLatest policy, the send will drop the new item
+    /// - with DropOldestIf policy, the send will drop an item if the predicate is true from the oldest to the newest
+    /// - with DropLatestIf policy, the send will drop an item if the predicate is true from the latest to the oldest
+    /// if nothing is dropped, the send will block until the space is available
     fn send(&self, item: ActionOp<T>) -> Result<i64, SenderError<ActionOp<T>>> {
         // Check if channel is closed
         if *self.closed.lock().unwrap() {
@@ -80,7 +88,16 @@ where
 
         let mut queue: std::sync::MutexGuard<'_, VecDeque<ActionOp<T>>> =
             self.queue.lock().unwrap();
-        if queue.len() >= self.capacity {
+
+        // Loop until we can successfully add the item to the queue
+        loop {
+            if queue.len() < self.capacity {
+                // Queue has space, add the item
+                queue.push_back(item);
+                break;
+            }
+
+            // Queue is full, try to handle based on policy
             match &self.policy {
                 BackpressurePolicy::BlockOnFull => {
                     // Wait until space is available
@@ -90,7 +107,7 @@ where
                             return Err(SenderError::ChannelClosed);
                         }
                     }
-                    queue.push_back(item);
+                    // Continue loop to add item
                 }
                 BackpressurePolicy::DropOldest => {
                     // Drop the oldest item
@@ -101,10 +118,10 @@ where
                             }
                         }
                     }
-                    queue.push_back(item);
+                    // Continue loop to add item
                 }
                 BackpressurePolicy::DropLatest => {
-                    // Drop the new item
+                    // Drop the new item (don't add to queue)
                     if let Some(metrics) = &self.metrics {
                         if let ActionOp::Action(action) = &item {
                             metrics.action_dropped(Some(action as &dyn std::any::Any));
@@ -114,7 +131,7 @@ where
                     return Ok(queue.len() as i64);
                 }
                 BackpressurePolicy::DropOldestIf { predicate } => {
-                    // Find and drop items that match the predicate
+                    // Find and drop items that match the predicate from oldest to newest
                     let mut dropped_count = 0;
                     let mut i = 0;
                     while i < queue.len() {
@@ -139,16 +156,22 @@ where
                         i += 1;
                     }
 
-                    if dropped_count > 0 {
-                        queue.push_back(item);
-                    } else {
+                    if dropped_count == 0 {
+                        // Nothing was dropped, block until space is available
                         #[cfg(feature = "store-log")]
-                        eprintln!("store: failed to drop: queue len={}", queue.len());
-                        return Err(SenderError::SendError(item));
+                        eprintln!(
+                            "store: no droppable items found, blocking until space available: queue len={}",
+                            queue.len()
+                        );
+                        queue = self.condvar.wait(queue).unwrap();
+                        if *self.closed.lock().unwrap() {
+                            return Err(SenderError::ChannelClosed);
+                        }
                     }
+                    // Continue loop to try again
                 }
                 BackpressurePolicy::DropLatestIf { predicate } => {
-                    // Find and drop items that match the predicate
+                    // Find and drop items that match the predicate from latest to oldest
                     let mut dropped_count = 0;
                     let mut i = 0;
                     while i < queue.len() {
@@ -174,17 +197,21 @@ where
                         i += 1;
                     }
 
-                    if dropped_count > 0 {
-                        queue.push_back(item);
-                    } else {
+                    if dropped_count == 0 {
+                        // Nothing was dropped, block until space is available
                         #[cfg(feature = "store-log")]
-                        eprintln!("store: failed to drop: queue len={}", queue.len());
-                        return Err(SenderError::SendError(item));
+                        eprintln!(
+                            "store: no droppable items found, blocking until space available: queue len={}",
+                            queue.len()
+                        );
+                        queue = self.condvar.wait(queue).unwrap();
+                        if *self.closed.lock().unwrap() {
+                            return Err(SenderError::ChannelClosed);
+                        }
                     }
+                    // Continue loop to try again
                 }
             }
-        } else {
-            queue.push_back(item);
         }
 
         // Update metrics
@@ -260,7 +287,10 @@ where
                         queue.push_back(item);
                     } else {
                         #[cfg(feature = "store-log")]
-                        eprintln!("store: failed to drop: queue len={}", queue.len());
+                        eprintln!(
+                            "store: failed to drop the oldestif while trying to send: queue len={}",
+                            queue.len()
+                        );
                         return Err(SenderError::SendError(item));
                     }
                 }
@@ -295,7 +325,10 @@ where
                         queue.push_back(item);
                     } else {
                         #[cfg(feature = "store-log")]
-                        eprintln!("store: failed to drop: queue len={}", queue.len());
+                        eprintln!(
+                            "store: failed to drop the latestif while trying to send: queue len={}",
+                            queue.len()
+                        );
                         return Err(SenderError::SendError(item));
                     }
                 }
@@ -373,10 +406,13 @@ impl<T> SenderChannel<T>
 where
     T: Send + Sync + Clone + std::fmt::Debug + 'static,
 {
+    /// when it is full, the send will try to drop an item based on the policy
+    /// if nothing is dropped, the send will block until the space is available
     pub fn send(&self, item: ActionOp<T>) -> Result<i64, SenderError<ActionOp<T>>> {
         self.queue.send(item)
     }
 
+    /// when it is full, it will return Err
     pub fn try_send(&self, item: ActionOp<T>) -> Result<i64, SenderError<ActionOp<T>>> {
         self.queue.try_send(item)
     }

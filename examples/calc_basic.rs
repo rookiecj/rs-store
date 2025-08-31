@@ -1,4 +1,5 @@
-use rs_store::{DispatchOp, Dispatcher};
+use rs_store::DispatchOp;
+use rs_store::Dispatcher;
 use rs_store::{Reducer, StoreImpl, Subscriber};
 use std::sync::{Arc, Mutex};
 

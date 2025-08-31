@@ -92,7 +92,7 @@ pub trait Middleware<State, Action> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{DispatchOp, Dispatcher, Reducer, StoreBuilder};
+    use crate::{DispatchOp, Dispatcher, Reducer, StoreBuilder, StoreImpl};
     use std::sync::{Arc, Mutex};
     use std::thread;
     use std::time::Duration;
@@ -184,11 +184,8 @@ mod tests {
     #[test]
     fn test_logger_middleware() {
         let reducer = Box::new(TestReducer);
-        let store_result = StoreBuilder::new_with_reducer(0, reducer).build();
+        let store = StoreImpl::new_with_reducer(0, reducer);
 
-        assert!(store_result.is_ok());
-
-        let store = store_result.unwrap();
         // Add logger middleware
         let logger = Arc::new(LoggerMiddleware::new());
         store.add_middleware(logger.clone());
@@ -379,9 +376,7 @@ mod tests {
     fn test_middleware_before_reduce() {
         // given
         let reducer = Box::new(MiddlewareReducer::new());
-        let store_result = StoreBuilder::new_with_reducer(0, reducer).build();
-        assert!(store_result.is_ok());
-        let store = store_result.unwrap();
+        let store = StoreImpl::new_with_reducer(0, reducer);
 
         // when
         let effect_middleware = MiddlewareBeforeDispatch::new();
@@ -523,11 +518,9 @@ mod tests {
     fn test_effect_middleware() {
         // given
         let reducer = Box::new(EffectReducer::new());
-        let store_result = StoreBuilder::new_with_reducer(EffectState::default(), reducer).build();
-        assert!(store_result.is_ok());
+        let store = StoreImpl::new_with_reducer(EffectState::default(), reducer);
 
         // when
-        let store = store_result.unwrap();
         let effect_middleware = Arc::new(EffectMiddleware::new());
         store.add_middleware(effect_middleware.clone());
 
@@ -550,9 +543,7 @@ mod tests {
     #[test]
     fn test_middleware_poisoned() {
         let reducer = Box::new(TestReducer);
-        let store_result = StoreBuilder::new_with_reducer(0, reducer).build();
-        assert!(store_result.is_ok());
-        let store = store_result.unwrap();
+        let store = StoreImpl::new_with_reducer(0, reducer);
 
         // Add logger middleware
         let logger = Arc::new(LoggerMiddleware::new());

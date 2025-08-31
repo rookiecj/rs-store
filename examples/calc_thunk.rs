@@ -1,7 +1,7 @@
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 
-use rs_store::{DispatchOp, Dispatcher, StoreBuilder};
+use rs_store::{DispatchOp, Dispatcher, StoreImpl};
 use rs_store::{Reducer, Subscriber};
 
 #[derive(Debug, Clone)]
@@ -128,11 +128,15 @@ pub fn main() {
     let cond_done: Arc<Condvar> = Arc::new(Condvar::new());
     let subtract_thunk = get_subtract_thunk(cond_done.clone(), 1);
 
-    let store =
-        StoreBuilder::new_with_reducer(CalcState::default(), Box::new(CalcReducer::default()))
-            .with_name("store-thunk".into())
-            .build()
-            .unwrap();
+    let store = StoreImpl::new_with(
+        CalcState::default(),
+        vec![Box::new(CalcReducer::default())],
+        "store-thunk".into(),
+        rs_store::DEFAULT_CAPACITY,
+        rs_store::BackpressurePolicy::default(),
+        vec![],
+    )
+    .unwrap();
 
     store.add_subscriber(Arc::new(CalcSubscriber::default()));
     store.dispatch(CalcAction::Add(1)).expect("no dispatch failed");

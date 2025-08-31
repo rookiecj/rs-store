@@ -58,19 +58,12 @@ fn main() {
     // 처리 완료 대기
     // std::thread::sleep(std::time::Duration::from_millis(3000));
 
-    // stop can be failed when the queue is full , the Exit action can not be delivered
+    // stop can be failed when the queue is full , the send will be blocked
     match store.stop() {
         Ok(_) => println!("store stopped"),
         Err(e) => {
             println!("store stop failed  : {:?}", e);
-            // wait for the queue to be empty, try again
-            std::thread::sleep(std::time::Duration::from_millis(1000));
-            match store.stop() {
-                Ok(_) => println!("store stopped"),
-                Err(e) => {
-                    panic!("store stop failed  : {:?}", e);
-                }
-            }
+            panic!("store stop failed  : {:?}", e);
         }
     }
 
@@ -79,10 +72,10 @@ fn main() {
     println!();
     println!("최종 상태: {}", final_state);
 
-    // 메트릭 확인
-    let metrics = store.get_metrics();
-    println!("메트릭:");
-    println!("  - 받은 액션: {}", metrics.action_received);
-    println!("  - 처리된 액션: {}", metrics.action_reduced);
-    println!("  - drop된 액션: {}", metrics.action_dropped);
+    // // 메트릭 확인
+    // let metrics = store.get_metrics();
+    // println!("메트릭:");
+    // println!("  - 받은 액션: {}", metrics.action_received);
+    // println!("  - 처리된 액션: {}", metrics.action_reduced);
+    // println!("  - drop된 액션: {}", metrics.action_dropped);
 }

@@ -1,4 +1,4 @@
-use rs_store::{DispatchOp, Dispatcher, FnReducer, FnSubscriber, StoreBuilder};
+use rs_store::{DispatchOp, FnReducer, FnSubscriber, StoreBuilder};
 use std::sync::Arc;
 
 pub fn main() {

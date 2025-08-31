@@ -21,7 +21,7 @@ build-full: ## build for release
 clean:	## clean
 	cargo clean
 
-test-all: test test-dev examples ## test all
+test-all: test test-dev examples example-dropoldest_if ## test all
 
 .PHONY: test
 test:	## test
