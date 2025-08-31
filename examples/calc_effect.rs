@@ -130,7 +130,7 @@ pub fn main() {
             .build()
             .unwrap();
 
-    store.add_subscriber(Arc::new(CalcSubscriber::default()));
+    store.add_subscriber(Arc::new(CalcSubscriber::default())).unwrap();
     let _ = store.dispatch(CalcAction::AddWillProduceThunk(1));
 
     match store.stop() {

@@ -114,7 +114,7 @@ pub fn main() {
             .unwrap();
 
     println!("add subscriber");
-    store.add_subscriber(Arc::new(CalcSubscriber::default()));
+    store.add_subscriber(Arc::new(CalcSubscriber::default())).unwrap();
     let _ = store.dispatch(CalcAction::Add(1));
 
     let store_clone = store.clone();
@@ -122,7 +122,7 @@ pub fn main() {
         thread::sleep(std::time::Duration::from_secs(1));
 
         println!("add more subscriber");
-        store_clone.add_subscriber(Arc::new(CalcSubscriber::new(1)));
+        store_clone.add_subscriber(Arc::new(CalcSubscriber::new(1))).unwrap();
         let _ = store_clone.dispatch(CalcAction::Subtract(1));
     })
     .join()

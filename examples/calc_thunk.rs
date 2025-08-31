@@ -138,7 +138,7 @@ pub fn main() {
     )
     .unwrap();
 
-    store.add_subscriber(Arc::new(CalcSubscriber::default()));
+    store.add_subscriber(Arc::new(CalcSubscriber::default())).unwrap();
     store.dispatch(CalcAction::Add(1)).expect("no dispatch failed");
 
     // send thunk to store

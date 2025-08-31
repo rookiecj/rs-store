@@ -44,7 +44,7 @@ where
     fn add_subscriber(
         &self,
         subscriber: Arc<dyn Subscriber<State, Action> + Send + Sync>,
-    ) -> Box<dyn Subscription>;
+    ) -> Result<Box<dyn Subscription>, StoreError>;
 
     /// Iterate over the store's state and action pairs
     //fn iter(&self) -> impl Iterator<Item = (State, Action)>;

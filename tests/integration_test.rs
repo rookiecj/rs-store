@@ -125,7 +125,7 @@ fn test_integration_new_subscriber_feature() {
     // 첫 번째 subscriber 추가
     println!("Adding first subscriber...");
     let subscriber1 = Arc::new(IntegrationTestSubscriber::new("subscriber-1"));
-    store.add_subscriber(subscriber1.clone());
+    store.add_subscriber(subscriber1.clone()).unwrap();
 
     // 잠시 대기하여 AddSubscriber 액션이 처리되도록 함
     thread::sleep(Duration::from_millis(200));
@@ -156,7 +156,7 @@ fn test_integration_new_subscriber_feature() {
     // 두 번째 subscriber 추가 (현재 상태는 counter: 10)
     println!("Adding second subscriber...");
     let subscriber2 = Arc::new(IntegrationTestSubscriber::new("subscriber-2"));
-    store.add_subscriber(subscriber2.clone());
+    store.add_subscriber(subscriber2.clone()).unwrap();
 
     // 잠시 대기하여 AddSubscriber 액션이 처리되도록 함
     thread::sleep(Duration::from_millis(100));
@@ -208,7 +208,7 @@ fn test_integration_concurrent_subscribers() {
         let store_thread = store_clone.clone();
         let handle = thread::spawn(move || {
             let subscriber = Arc::new(IntegrationTestSubscriber::new(&format!("thread-{}", i)));
-            store_thread.add_subscriber(subscriber.clone());
+            store_thread.add_subscriber(subscriber.clone()).unwrap();
 
             // 잠시 대기
             thread::sleep(Duration::from_millis(50));
@@ -253,7 +253,7 @@ fn test_integration_subscriber_lifecycle() {
 
     // subscriber 추가
     let subscriber = Arc::new(IntegrationTestSubscriber::new("lifecycle"));
-    let subscription = store.add_subscriber(subscriber.clone());
+    let subscription = store.add_subscriber(subscriber.clone()).unwrap();
 
     // 잠시 대기
     thread::sleep(Duration::from_millis(100));

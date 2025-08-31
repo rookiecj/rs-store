@@ -66,11 +66,11 @@ pub fn main() {
     .build()
     .unwrap();
 
-    store.add_subscriber(Arc::new(FnSubscriber::from(calc_subscriber)));
+    store.add_subscriber(Arc::new(FnSubscriber::from(calc_subscriber))).unwrap();
     let _ = store.dispatch(CalcAction::Add(1));
 
     thread::sleep(std::time::Duration::from_secs(1));
-    store.add_subscriber(Arc::new(FnSubscriber::from(calc_subscriber)));
+    store.add_subscriber(Arc::new(FnSubscriber::from(calc_subscriber))).unwrap();
     let _ = store.dispatch(CalcAction::Subtract(1));
 
     match store.stop() {

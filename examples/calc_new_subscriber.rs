@@ -117,7 +117,7 @@ pub fn main() {
     // 첫 번째 subscriber 추가
     println!("=== Adding first subscriber ===");
     let subscriber1 = Arc::new(CalcSubscriberWithSubscribe::new(1));
-    store.add_subscriber(subscriber1.clone());
+    store.add_subscriber(subscriber1.clone()).unwrap();
 
     // 액션을 dispatch하여 상태 변경
     println!("=== Dispatching actions ===");
@@ -130,7 +130,7 @@ pub fn main() {
     // 두 번째 subscriber 추가 (현재 상태는 count: 15)
     println!("=== Adding second subscriber ===");
     let subscriber2 = Arc::new(CalcSubscriberWithSubscribe::new(2));
-    store.add_subscriber(subscriber2.clone());
+    store.add_subscriber(subscriber2.clone()).unwrap();
 
     // 잠시 대기하여 AddSubscriber 액션이 처리되도록 함
     thread::sleep(std::time::Duration::from_millis(100));
