@@ -61,7 +61,9 @@ mod tests {
                 println!("reducer: {} + {}", state, action);
                 DispatchOp::Dispatch(state + action, None)
             })),
-        );
+        )
+        .expect("Failed to create store");
+
         let droppable_store = DroppableStore::new(store);
         do_with_store(droppable_store.clone());
 
@@ -156,7 +158,8 @@ mod tests {
             Box::new(FnReducer::from(move |state: &i32, action: &i32| {
                 DispatchOp::Dispatch(state + action, None)
             })),
-        );
+        )
+        .unwrap();
 
         let droppable_store = DroppableStore::new(_store);
 

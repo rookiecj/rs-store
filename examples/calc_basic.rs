@@ -97,7 +97,8 @@ pub fn main() {
     let store = StoreImpl::<CalcState, CalcAction>::new_with_reducer(
         CalcState::default(),
         Box::new(CalcReducer::default()),
-    );
+    )
+    .unwrap();
 
     println!("add subscriber");
     store.add_subscriber(Arc::new(CalcSubscriber::default()));

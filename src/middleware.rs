@@ -184,7 +184,7 @@ mod tests {
     #[test]
     fn test_logger_middleware() {
         let reducer = Box::new(TestReducer);
-        let store = StoreImpl::new_with_reducer(0, reducer);
+        let store = StoreImpl::new_with_reducer(0, reducer).unwrap();
 
         // Add logger middleware
         let logger = Arc::new(LoggerMiddleware::new());
@@ -376,7 +376,7 @@ mod tests {
     fn test_middleware_before_reduce() {
         // given
         let reducer = Box::new(MiddlewareReducer::new());
-        let store = StoreImpl::new_with_reducer(0, reducer);
+        let store = StoreImpl::new_with_reducer(0, reducer).unwrap();
 
         // when
         let effect_middleware = MiddlewareBeforeDispatch::new();
@@ -518,7 +518,7 @@ mod tests {
     fn test_effect_middleware() {
         // given
         let reducer = Box::new(EffectReducer::new());
-        let store = StoreImpl::new_with_reducer(EffectState::default(), reducer);
+        let store = StoreImpl::new_with_reducer(EffectState::default(), reducer).unwrap();
 
         // when
         let effect_middleware = Arc::new(EffectMiddleware::new());
@@ -543,7 +543,7 @@ mod tests {
     #[test]
     fn test_middleware_poisoned() {
         let reducer = Box::new(TestReducer);
-        let store = StoreImpl::new_with_reducer(0, reducer);
+        let store = StoreImpl::new_with_reducer(0, reducer).unwrap();
 
         // Add logger middleware
         let logger = Arc::new(LoggerMiddleware::new());

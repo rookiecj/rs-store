@@ -69,7 +69,7 @@ where
     Action: Send + Sync + Clone + std::fmt::Debug + 'static,
 {
     /// create a new store with an initial state
-    pub fn new(state: State) -> Arc<StoreImpl<State, Action>> {
+    pub fn new(state: State) -> Result<Arc<StoreImpl<State, Action>>, StoreError> {
         Self::new_with(
             state,
             vec![],
@@ -78,15 +78,14 @@ where
             BackpressurePolicy::default(),
             vec![],
         )
-        .unwrap()
     }
 
     /// create a new store with a reducer and an initial state
     pub fn new_with_reducer(
         state: State,
         reducer: Box<dyn Reducer<State, Action> + Send + Sync>,
-    ) -> Arc<StoreImpl<State, Action>> {
-        Self::new_with_name(state, reducer, DEFAULT_STORE_NAME.into()).unwrap()
+    ) -> Result<Arc<StoreImpl<State, Action>>, StoreError> {
+        Self::new_with_name(state, reducer, DEFAULT_STORE_NAME.into())
     }
 
     /// create a new store with name
@@ -1020,7 +1019,9 @@ mod tests {
         // Setup store with a simple counter
         let initial_state = 0;
         let reducer = Box::new(TestReducer);
-        let store = StoreImpl::new_with_reducer(initial_state, reducer);
+        let store_result = StoreImpl::new_with_reducer(initial_state, reducer);
+        assert!(store_result.is_ok());
+        let store = store_result.unwrap();
 
         // Create subscriber to receive updates
         let received_states = Arc::new(Mutex::new(Vec::new()));
@@ -1053,7 +1054,9 @@ mod tests {
 
     #[test]
     fn test_store_subscribed_backpressure() {
-        let store = StoreImpl::new_with_reducer(0, Box::new(TestReducer));
+        let store_result = StoreImpl::new_with_reducer(0, Box::new(TestReducer));
+        assert!(store_result.is_ok());
+        let store = store_result.unwrap();
 
         let received = Arc::new(Mutex::new(Vec::new()));
         let received_clone = received.clone();
@@ -1091,7 +1094,7 @@ mod tests {
 
     #[test]
     fn test_store_subscribed_subscription() {
-        let store = StoreImpl::new_with_reducer(0, Box::new(TestReducer));
+        let store = StoreImpl::new_with_reducer(0, Box::new(TestReducer)).unwrap();
 
         let received = Arc::new(Mutex::new(Vec::new()));
         let subscriber1 = Box::new(TestChannelSubscriber::new(received.clone()));
@@ -1125,7 +1128,7 @@ mod tests {
     // 새로운 subscriber가 추가될 때 최신 상태를 받는지 테스트
     #[test]
     fn test_new_subscriber_receives_latest_state() {
-        let store = StoreImpl::new_with_reducer(0, Box::new(TestReducer));
+        let store = StoreImpl::new_with_reducer(0, Box::new(TestReducer)).unwrap();
 
         // 첫 번째 subscriber 추가
         let received1 = Arc::new(Mutex::new(Vec::new()));
@@ -1169,7 +1172,7 @@ mod tests {
     // 새로운 subscriber가 추가될 때 on_subscribe가 호출되는지 테스트
     #[test]
     fn test_new_subscriber_on_subscribe_called() {
-        let store = StoreImpl::new_with_reducer(0, Box::new(TestReducer));
+        let store = StoreImpl::new_with_reducer(0, Box::new(TestReducer)).unwrap();
 
         // 액션을 dispatch하여 상태 변경
         store.dispatch(5).unwrap();
@@ -1216,7 +1219,7 @@ mod tests {
     // 여러 subscriber가 동시에 추가될 때 테스트
     #[test]
     fn test_multiple_subscribers_added_simultaneously() {
-        let store = StoreImpl::new_with_reducer(0, Box::new(TestReducer));
+        let store = StoreImpl::new_with_reducer(0, Box::new(TestReducer)).unwrap();
 
         // 액션을 dispatch하여 상태 변경
         store.dispatch(10).unwrap();
@@ -1256,7 +1259,7 @@ mod tests {
     // subscriber 추가 후 즉시 unsubscribe하는 테스트
     #[test]
     fn test_subscriber_unsubscribe_after_add() {
-        let store = StoreImpl::new_with_reducer(0, Box::new(TestReducer));
+        let store = StoreImpl::new_with_reducer(0, Box::new(TestReducer)).unwrap();
 
         // 액션을 dispatch하여 상태 변경
         store.dispatch(5).unwrap();
@@ -1286,7 +1289,7 @@ mod tests {
     // store가 중지된 후 subscriber를 추가하는 테스트
     #[test]
     fn test_add_subscriber_after_store_stop() {
-        let store = StoreImpl::new_with_reducer(0, Box::new(TestReducer));
+        let store = StoreImpl::new_with_reducer(0, Box::new(TestReducer)).unwrap();
 
         // store 중지
         match store.stop() {
@@ -1312,7 +1315,7 @@ mod tests {
     // on_subscribe에서 상태를 수정하는 subscriber 테스트
     #[test]
     fn test_subscriber_modifies_state_in_on_subscribe() {
-        let store = StoreImpl::new_with_reducer(0, Box::new(TestReducer));
+        let store = StoreImpl::new_with_reducer(0, Box::new(TestReducer)).unwrap();
 
         // 액션을 dispatch하여 상태 변경
         store.dispatch(5).unwrap();
@@ -1359,7 +1362,7 @@ mod tests {
     // 여러 번의 AddSubscriber 액션이 연속으로 발생하는 테스트
     #[test]
     fn test_consecutive_add_subscriber_actions() {
-        let store = StoreImpl::new_with_reducer(0, Box::new(TestReducer));
+        let store = StoreImpl::new_with_reducer(0, Box::new(TestReducer)).unwrap();
 
         // 첫 번째 subscriber 추가
         let received1 = Arc::new(Mutex::new(Vec::new()));
@@ -1407,7 +1410,7 @@ mod tests {
         //     })))
         //     .build()
         //     .unwrap();
-        let store = StoreImpl::new_with_reducer(0, Box::new(TestReducer));
+        let store = StoreImpl::new_with_reducer(0, Box::new(TestReducer)).unwrap();
 
         // when: create iterator and dispatch actions
         let mut iter = store.iter();
@@ -1431,7 +1434,7 @@ mod tests {
     #[test]
     fn test_store_iter_no_actions() {
         // given: store with reducer
-        let store = StoreImpl::new_with_reducer(0, Box::new(TestReducer));
+        let store = StoreImpl::new_with_reducer(0, Box::new(TestReducer)).unwrap();
 
         // when: create iterator without dispatching actions
         let mut iter = store.iter();
@@ -1490,7 +1493,8 @@ mod tests {
                     ),
                 },
             )),
-        );
+        )
+        .unwrap();
 
         // when: create iterator and dispatch actions
         let mut iter = store.iter();
@@ -1541,7 +1545,7 @@ mod tests {
     #[test]
     fn test_store_iter_concurrent_actions() {
         // given: store with reducer
-        let store = StoreImpl::new_with_reducer(0, Box::new(TestReducer));
+        let store = StoreImpl::new_with_reducer(0, Box::new(TestReducer)).unwrap();
 
         // when: create iterator and dispatch many actions quickly
         let mut iter = store.iter();
@@ -1636,7 +1640,8 @@ mod tests {
                 };
                 DispatchOp::Dispatch(new_state, effects)
             })),
-        );
+        )
+        .unwrap();
 
         // when: create iterator and dispatch actions
         let mut iter = store.iter();
@@ -1693,7 +1698,7 @@ mod tests {
     #[test]
     fn test_store_iter_early_stop() {
         // given: store with reducer
-        let store = StoreImpl::new_with_reducer(0, Box::new(TestReducer));
+        let store = StoreImpl::new_with_reducer(0, Box::new(TestReducer)).unwrap();
 
         // when: create iterator, dispatch actions, but stop store early
         let mut iter = store.iter();
@@ -1775,7 +1780,8 @@ mod tests {
                 let new_state = format!("{}{}", state, action);
                 DispatchOp::Dispatch(new_state, None)
             })),
-        );
+        )
+        .unwrap();
 
         // when: create iterator and dispatch string actions
         let mut iter = store.iter();
@@ -1806,7 +1812,8 @@ mod tests {
             Box::new(FnReducer::from(|state: &i32, _action: &i32| {
                 DispatchOp::Dispatch(*state, None) // return same state
             })),
-        );
+        )
+        .unwrap();
         // when: create iterator and dispatch actions
         let mut iter = store.iter();
 
