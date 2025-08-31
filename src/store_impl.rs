@@ -18,7 +18,7 @@ const DEFAULT_STOP_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// ActionOp is used to dispatch an action to the store
 #[derive(Debug, Clone, PartialEq)]
-pub enum ActionOp<Action>
+pub(crate) enum ActionOp<Action>
 where
     Action: Send + Sync + Clone + std::fmt::Debug + 'static,
 {

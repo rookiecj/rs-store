@@ -7,7 +7,7 @@ pub mod reducer;
 pub use reducer::*;
 
 pub mod store_impl;
-pub use store_impl::ActionOp;
+// pub use store_impl::ActionOp;
 pub use store_impl::*;
 
 pub mod builder;
