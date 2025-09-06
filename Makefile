@@ -30,6 +30,9 @@ test:	## test
 test-test_store_iter_with_different_policies:
 	RUST_TEST_THREADS=1 RUST_LOG=debug cargo test --test store_impl::tests::test_store_iter_with_different_policies -- --nocapture
 
+test-store_impl:
+	RUST_TEST_THREADS=1 RUST_LOG=debug cargo test --package rs-store --lib store_impl::tests --profile test --features store-log -- --nocapture
+
 .PHONY: test-dev
 test-dev:	## test with log
 	RUST_TEST_THREADS=1 RUST_LOG=debug cargo test --profile dev  -- --nocapture
@@ -75,7 +78,7 @@ examples: ## example all
 	RUSTFLAGS="-D warnings" cargo run --example calc_query_state -- --nocapture
 	
 example-dropoldest_if:
-	RUSTFLAGS="-D warnings" cargo run --example dropoldest_if -- --nocapture --features store-log
+	RUSTFLAGS="-D warnings" cargo run --features store-log --example dropoldest_if -- --nocapture --features store-log
 
 
 VERSION := $(shell cargo pkgid -p "rs-store" | cut -d\# -f2 | cut -d@ -f2)

@@ -31,14 +31,14 @@ where
 unsafe impl<State, Action> Send for WeakDispatcher<State, Action>
 where
     State: Send + Sync + Clone + std::fmt::Debug + 'static,
-    Action: Send + Sync + Clone + std::fmt::Debug + 'static,
+    Action: Send + Sync + Clone + std::fmt::Debug + 'static
 {
 }
 
 unsafe impl<State, Action> Sync for WeakDispatcher<State, Action>
 where
     State: Send + Sync + Clone + std::fmt::Debug + 'static,
-    Action: Send + Sync + Clone + std::fmt::Debug + 'static,
+    Action: Send + Sync + Clone + std::fmt::Debug + 'static
 {
 }
 
@@ -48,9 +48,9 @@ where
     Action: Send + Sync + Clone + std::fmt::Debug + 'static,
 {
     /// WeakDispatcher 생성자
-    pub fn new(store: Arc<StoreImpl<State, Action>>) -> Self {
+    pub fn new(dispatcher: Arc<StoreImpl<State, Action>>) -> Self {
         Self {
-            store: Arc::downgrade(&store),
+            store: Arc::downgrade(&dispatcher),
         }
     }
 }
@@ -63,72 +63,29 @@ where
     fn dispatch(&self, action: Action) -> Result<(), StoreError> {
         // weak reference를 strong reference로 업그레이드 시도
         if let Some(store) = self.store.upgrade() {
-            let sender = store.dispatch_tx.lock().unwrap();
-            if let Some(tx) = sender.as_ref() {
-                match tx.send(ActionOp::Action(action)) {
-                    Ok(_) => Ok(()),
-                    Err(_e) => {
-                        #[cfg(feature = "store-log")]
-                        eprintln!("Failed to send action: {:?}", _e);
-                        Err(StoreError::DispatchError(
-                            "Failed to send action".to_string(),
-                        ))
-                    }
-                }
-            } else {
-                Err(StoreError::DispatchError("Store is stopped".to_string()))
-            }
+            store.dispatch(action)
         } else {
-            // store가 이미 drop된 경우
             Err(StoreError::DispatchError(
-                "Store has been dropped".to_string(),
+                "Dispatcher has been dropped".to_string(),
             ))
         }
     }
 
     fn dispatch_thunk(&self, thunk: Box<dyn FnOnce(Box<dyn Dispatcher<Action>>) + Send>) {
         if let Some(store) = self.store.upgrade() {
-            // WeakDispatcher를 복제하여 thunk에 전달
-            let weak_dispatcher = WeakDispatcher::new(store.clone());
-            let dispatcher: Box<dyn Dispatcher<Action>> = Box::new(weak_dispatcher);
-
-            match store.pool.lock() {
-                Ok(pool) => {
-                    if let Some(pool) = pool.as_ref() {
-                        pool.execute(move || {
-                            thunk(dispatcher);
-                        })
-                    }
-                }
-                Err(_e) => {
-                    #[cfg(feature = "store-log")]
-                    eprintln!("Failed to lock pool: {}", _e);
-                }
-            }
+            store.dispatch_thunk(thunk);
         } else {
             #[cfg(feature = "store-log")]
-            eprintln!("Store has been dropped, cannot dispatch thunk");
+            eprintln!("Dispatcher has been dropped, cannot dispatch thunk");
         }
     }
 
     fn dispatch_task(&self, task: Box<dyn FnOnce() + Send>) {
         if let Some(store) = self.store.upgrade() {
-            match store.pool.lock() {
-                Ok(pool) => {
-                    if let Some(pool) = pool.as_ref() {
-                        pool.execute(move || {
-                            task();
-                        })
-                    }
-                }
-                Err(_e) => {
-                    #[cfg(feature = "store-log")]
-                    eprintln!("Failed to lock pool: {}", _e);
-                }
-            }
+            store.dispatch_task(task);
         } else {
             #[cfg(feature = "store-log")]
-            eprintln!("Store has been dropped, cannot dispatch task");
+            eprintln!("Dispatcher has been dropped, cannot dispatch task");
         }
     }
 }
@@ -157,14 +114,12 @@ where
     }
 
     fn dispatch_thunk(&self, thunk: Box<dyn FnOnce(Box<dyn Dispatcher<Action>>) + Send>) {
-        let weak_dispatcher = WeakDispatcher::new(self.clone());
-        let dispatcher: Box<dyn Dispatcher<Action>> = Box::new(weak_dispatcher);
-        // poll can be shutdown already
+        let weak_dispatcher = Box::new(WeakDispatcher::new(self.clone()));
         match self.pool.lock() {
             Ok(pool) => {
                 if let Some(pool) = pool.as_ref() {
                     pool.execute(move || {
-                        thunk(dispatcher);
+                        thunk(weak_dispatcher);
                     })
                 }
             }

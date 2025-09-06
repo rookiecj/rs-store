@@ -189,27 +189,20 @@ where
             );
             match action_op {
                 ActionOp::Action(action) => {
-                    // WeakDispatcher를 사용하여 circular reference 방지
-                    let the_dispatcher = Arc::new(WeakDispatcher::new(store_impl.clone()));
 
                     // do reduce
                     let current_state = store_impl.state.lock().unwrap().clone();
                     let (need_dispatch, new_state, effects) = store_impl.do_reduce(
                         &action,
                         current_state,
-                        the_dispatcher.clone(),
+                        store_impl.clone(),
                         action_received_at,
                     );
                     *store_impl.state.lock().unwrap() = new_state.clone();
 
                     // do effects remain
                     if let Some(mut effects) = effects {
-                        store_impl.do_effect(
-                            &action,
-                            &new_state,
-                            &mut effects,
-                            the_dispatcher.clone(),
-                        );
+                        store_impl.do_effect(&action, &new_state, &mut effects, store_impl.clone());
                     }
 
                     // do notify subscribers
@@ -217,7 +210,7 @@ where
                         store_impl.do_notify(
                             &action,
                             &new_state,
-                            the_dispatcher.clone(),
+                            store_impl.clone(),
                             action_received_at,
                         );
                     }
@@ -368,7 +361,7 @@ where
         &self,
         action: &Action,
         mut state: State,
-        dispatcher: Arc<WeakDispatcher<State, Action>>,
+        dispatcher: Arc<StoreImpl<State, Action>>,
         action_received_at: Instant,
     ) -> (bool, State, Option<Vec<Effect<Action>>>) {
         //let state = self.state.lock().unwrap().clone();
@@ -380,9 +373,10 @@ where
         if !self.middlewares.lock().unwrap().is_empty() {
             let middleware_start = Instant::now();
             let mut middleware_executed = 0;
+            let weak_dispatcher = Arc::new(WeakDispatcher::new(dispatcher.clone()));
             for middleware in self.middlewares.lock().unwrap().iter() {
                 middleware_executed += 1;
-                match middleware.before_reduce(action, &state, dispatcher.clone()) {
+                match middleware.before_reduce(action, &state, weak_dispatcher.clone()) {
                     Ok(MiddlewareOp::ContinueAction) => {
                         // continue dispatching the action
                     }
@@ -451,7 +445,7 @@ where
         action: &Action,
         state: &State,
         effects: &mut Vec<Effect<Action>>,
-        dispatcher: Arc<WeakDispatcher<State, Action>>,
+        dispatcher: Arc<StoreImpl<State, Action>>,
     ) {
         let effect_start = Instant::now();
         self.metrics.effect_issued(effects.len());
@@ -459,9 +453,10 @@ where
         if !self.middlewares.lock().unwrap().is_empty() {
             let middleware_start = Instant::now();
             let mut middleware_executed = 0;
+            let weak_dispatcher = Arc::new(WeakDispatcher::new(dispatcher.clone()));
             for middleware in self.middlewares.lock().unwrap().iter() {
                 middleware_executed += 1;
-                match middleware.before_effect(action, state, effects, dispatcher.clone()) {
+                match middleware.before_effect(action, state, effects, weak_dispatcher.clone()) {
                     Ok(MiddlewareOp::ContinueAction) => {
                         // do nothing
                     }
@@ -492,9 +487,15 @@ where
             let effect = effects.remove(0);
             match effect {
                 Effect::Action(a) => {
-                    dispatcher.dispatch_thunk(Box::new(move |dispatcher| {
-                        dispatcher.dispatch(a).expect("no dispatch failed");
-                    }));
+                    dispatcher.dispatch_thunk(Box::new(
+                        move |weak_dispatcher| match weak_dispatcher.dispatch(a) {
+                            Ok(_) => {}
+                            Err(_e) => {
+                                #[cfg(feature = "store-log")]
+                                eprintln!("Error while dispatching action: {:?}", _e);
+                            }
+                        },
+                    ));
                 }
                 Effect::Task(task) => {
                     dispatcher.dispatch_task(task);
@@ -519,7 +520,7 @@ where
         &self,
         action: &Action,
         next_state: &State,
-        dispatcher: Arc<WeakDispatcher<State, Action>>,
+        dispatcher: Arc<StoreImpl<State, Action>>,
         _action_received_at: Instant,
     ) {
         let _notify_start = Instant::now();
@@ -532,9 +533,10 @@ where
         if !self.middlewares.lock().unwrap().is_empty() {
             let middleware_start = Instant::now();
             let mut middleware_executed = 0;
+            let weak_dispatcher = Arc::new(WeakDispatcher::new(dispatcher.clone()));
             for middleware in self.middlewares.lock().unwrap().iter() {
                 middleware_executed += 1;
-                match middleware.before_dispatch(action, next_state, dispatcher.clone()) {
+                match middleware.before_dispatch(action, next_state, weak_dispatcher.clone()) {
                     Ok(MiddlewareOp::ContinueAction) => {
                         // do nothing
                     }
