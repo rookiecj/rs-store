@@ -30,14 +30,14 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-rs-store = "2.7"
+rs-store = "2.8"
 ```
 
 ## Quick Start
 
 ```rust
+use rs_store::{DispatchOp, FnReducer, FnSubscriber, StoreBuilder};
 use std::sync::Arc;
-use rs_store::{DispatchOp, Dispatcher, FnReducer, FnSubscriber, StoreBuilder};
 
 pub fn main() {
     // new store with reducer
@@ -50,16 +50,25 @@ pub fn main() {
         .unwrap();
 
     // add subscriber
-    store.add_subscriber(Arc::new(FnSubscriber::from(|state: &i32, _action: &i32| {
-        println!("subscriber: state: {}", state);
-    })));
+    store
+        .add_subscriber(Arc::new(FnSubscriber::from(
+            |state: &i32, _action: &i32| {
+                println!("subscriber: state: {}", state);
+            },
+        )))
+        .unwrap();
 
     // dispatch actions
-    store.dispatch(41);
-    store.dispatch(1);
+    store.dispatch(41).expect("no error");
+    store.dispatch(1).expect("no error");
 
     // stop the store
-    store.stop();
+    match store.stop() {
+        Ok(_) => println!("store stopped"),
+        Err(e) => {
+            panic!("store stop failed  : {:?}", e);
+        }
+    }
 
     assert_eq!(store.get_state(), 42);
 }
@@ -108,11 +117,13 @@ This allows you to prioritize important messages and drop less critical ones whe
 
 ### Side Effects in Reducers
 
-Unlike traditional Redux implementations, rs-store allows reducers to produce side effects directly. This means reducers can produce asynchronous operations.
+Unlike traditional Redux implementations, rs-store allows reducers to produce side effects directly.
+This means reducers can produce asynchronous operations.
 
 ### Middleware
 
-Middleware is a powerful feature that allows you to intercept and modify actions before they reach the reducer, or to handle side effects, logging, metrics, etc.
+Middleware is a powerful feature that allows you to intercept and modify actions before they reach the reducer,
+or to handle side effects, logging, metrics, etc.
 
 ### Channeled Subscription
 
@@ -120,7 +131,9 @@ The channeled subscription feature provides a way to subscribe to a store in new
 
 ### Latest State Notification for New Subscribers
 
-When a new subscriber is added to the store, it automatically receives the current state through the `on_subscribe` method. This ensures that new subscribers don't miss the current state and can start with the latest information.
+When a new subscriber is added to the store, it automatically receives the current state through the `on_subscribe`
+method.
+This ensures that new subscribers don't miss the current state and can start with the latest information.
 
 ```rust
 use rs_store::{Subscriber, StoreBuilder};
@@ -182,7 +195,7 @@ The metrics feature provides a way to collect metrics.
 
 For detailed documentation, visit:
 
-- [API Documentation (docs.rs)](https://docs.rs/rs-store/2.7.0/rs_store/)
+- [API Documentation (docs.rs)](https://docs.rs/rs-store/2.8.0/rs_store/)
 - [Crate Page (crates.io)](https://crates.io/crates/rs-store)
 
 ## Implementation Status
@@ -190,10 +203,9 @@ For detailed documentation, visit:
 ### In Progress 🚧
 - [x] Latest state notification for new subscribers
 - [x] Notification scheduler (CurrentThread, ThreadPool)
-- [ ] Stop store after all effects are scheduled
+- [-] ~~Stop store after all effects are scheduled~~ (removed)
 - [X] drop store after all references are dropped
 - [x] dispatcher has weak reference to the store
-- [x] hide ActionOp
 - [ ] effects system
 
 ## Contributing
