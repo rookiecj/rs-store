@@ -28,6 +28,8 @@ where
     AddSubscriber,
     // /// RemoveSubscriber is used to remove a subscriber from the store
     // RemoveSubscriber(u64),
+    /// StateFunction is used to execute a function with the current state
+    StateFunction,
     /// Exit is used to exit the store and should not be dropped
     #[allow(dead_code)]
     Exit(Instant),
@@ -47,6 +49,7 @@ where
     pub(crate) subscribers: Arc<Mutex<Vec<SubscriberWithId<State, Action>>>>,
     /// temporary vector to store subscribers to be added
     adding_subscribers: Arc<Mutex<Vec<SubscriberWithId<State, Action>>>>,
+    state_functions: Arc<Mutex<Vec<Box<dyn FnOnce(&State) + Send + Sync + 'static>>>>,
     pub(crate) dispatch_tx: Mutex<Option<SenderChannel<Action>>>,
     middlewares: Mutex<Vec<Arc<dyn Middleware<State, Action> + Send + Sync>>>,
     pub(crate) metrics: Arc<CountMetrics>,
@@ -132,6 +135,7 @@ where
             reducers: Mutex::new(reducers),
             subscribers: Arc::new(Mutex::new(Vec::default())),
             adding_subscribers: Arc::new(Mutex::new(Vec::default())),
+            state_functions: Arc::new(Mutex::new(Vec::default())),
             middlewares: Mutex::new(middlewares),
             dispatch_tx: Mutex::new(Some(tx)),
             metrics,
@@ -216,6 +220,9 @@ where
                     //     #[cfg(feature = "store-log")]
                     //     eprintln!("store: {} subscribers removed", subscriber_id);
                     // }
+                    ActionOp::StateFunction => {
+                        rx_store.do_state_function();
+                    }
                     ActionOp::Exit(_) => {
                         rx_store.on_close(action_received_at);
                         #[cfg(feature = "store-log")]
@@ -575,6 +582,30 @@ where
         });
     }
 
+    fn do_state_function(&self) {
+        let state_cloned = match self.state.lock() {
+            Ok(state) => state.clone(),
+            Err(_e) => {
+                #[cfg(feature = "store-log")]
+                eprintln!("store: Error while locking state: {:?}", _e);
+                return;
+            }
+        };
+        match self.state_functions.lock() {
+            Ok(mut state_functions) => {
+                for state_function in state_functions.drain(..) {
+                    state_function(&state_cloned);
+                }
+                //state_functions.clear();
+            }
+            Err(_e) => {
+                #[cfg(feature = "store-log")]
+                eprintln!("store: Error while locking state functions: {:?}", _e);
+                return;
+            }
+        };
+    }
+
     fn on_close(&self, action_received_at: Instant) {
         #[cfg(feature = "store-log")]
         eprintln!("store: on_close");
@@ -721,6 +752,42 @@ where
         }
     }
 
+    /// query the current state with a function
+    ///
+    /// The function will be executed in the store thread with the current state.
+    ///
+    /// ### Parameters
+    /// * query_fn: A function that receives the current state as `&State`
+    ///
+    /// ### Return
+    /// * Ok(()) : if the query is executed successfully
+    /// * Err(StoreError) : if the store is not available
+    pub fn query_state<F>(&self, query_fn: F) -> Result<(), StoreError>
+    where
+        F: FnOnce(&State) + Send + Sync + 'static,
+    {
+        self.state_functions.lock().unwrap().push(Box::new(query_fn));
+
+        if let Ok(tx) = self.dispatch_tx.lock() {
+            if let Some(tx) = tx.as_ref() {
+                return match tx.send(ActionOp::StateFunction) {
+                    Ok(_) => Ok(()),
+                    Err(e) => Err(StoreError::DispatchError(format!(
+                        "Error while sending state function to dispatch channel: {:?}",
+                        e
+                    ))),
+                };
+            }
+            return Err(StoreError::DispatchError(
+                "Dispatch channel is closed".to_string(),
+            ));
+        } else {
+            return Err(StoreError::DispatchError(
+                "Dispatch channel is closed".to_string(),
+            ));
+        }
+    }
+
     /// Add middleware
     pub fn add_middleware(&self, middleware: Arc<dyn Middleware<State, Action> + Send + Sync>) {
         self.middlewares.lock().unwrap().push(middleware.clone());
@@ -853,6 +920,10 @@ where
                     // 이는 메인 reducer 스레드에서만 처리됨
                     #[cfg(feature = "store-log")]
                     eprintln!("store: {} received AddSubscriber (ignored)", _name);
+                }
+                ActionOp::StateFunction => {
+                    #[cfg(feature = "store-log")]
+                    eprintln!("store: {} received StateFunction (ignored)", _name);
                 }
 
                 ActionOp::Exit(created_at) => {
@@ -1879,5 +1950,159 @@ mod tests {
 
         store.stop().expect("store should stop");
         assert_eq!(iter.next(), None);
+    }
+
+    /// Test query_state functionality
+    #[test]
+    fn test_query_state_basic() {
+        // given: store with a simple counter
+        let store = StoreImpl::new_with_reducer(0, Box::new(TestReducer)).unwrap();
+
+        // dispatch some actions to change state
+        store.dispatch(5).unwrap();
+        store.dispatch(10).unwrap();
+
+        // wait for actions to be processed
+        std::thread::sleep(std::time::Duration::from_millis(100));
+
+        // when: query the current state
+        let queried_value = std::sync::Arc::new(std::sync::Mutex::new(0));
+        let queried_value_clone = queried_value.clone();
+        store
+            .query_state(move |state| {
+                *queried_value_clone.lock().unwrap() = *state;
+            })
+            .unwrap();
+
+        let _ = store.stop();
+        // then: should get the current state (0 + 5 + 10 = 15)
+        assert_eq!(*queried_value.lock().unwrap(), 15);
+    }
+
+    /// Test query_state with complex state
+    #[test]
+    fn test_query_state_complex() {
+        // given: store with complex state
+        #[derive(Debug, Clone, PartialEq)]
+        struct ComplexState {
+            value: i32,
+            name: String,
+        }
+
+        #[derive(Debug, Clone, PartialEq)]
+        enum ComplexAction {
+            Add(i32),
+            SetName(String),
+        }
+
+        let store = StoreImpl::new_with_reducer(
+            ComplexState {
+                value: 0,
+                name: "initial".to_string(),
+            },
+            Box::new(FnReducer::from(
+                |state: &ComplexState, action: &ComplexAction| match action {
+                    ComplexAction::Add(n) => DispatchOp::Dispatch(
+                        ComplexState {
+                            value: state.value + n,
+                            name: state.name.clone(),
+                        },
+                        None,
+                    ),
+                    ComplexAction::SetName(name) => DispatchOp::Dispatch(
+                        ComplexState {
+                            value: state.value,
+                            name: name.clone(),
+                        },
+                        None,
+                    ),
+                },
+            )),
+        )
+        .unwrap();
+
+        // dispatch some actions
+        store.dispatch(ComplexAction::Add(10)).unwrap();
+        store.dispatch(ComplexAction::SetName("test".to_string())).unwrap();
+        store.dispatch(ComplexAction::Add(5)).unwrap();
+
+        // when: query the current state
+        let queried_value = std::sync::Arc::new(std::sync::Mutex::new(0));
+        let queried_name = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+        let queried_value_clone = queried_value.clone();
+        let queried_name_clone = queried_name.clone();
+        store
+            .query_state(move |state| {
+                *queried_value_clone.lock().unwrap() = state.value;
+                *queried_name_clone.lock().unwrap() = state.name.clone();
+            })
+            .unwrap();
+
+        store.stop().unwrap();
+
+        // then: should get the current state
+        assert_eq!(*queried_value.lock().unwrap(), 15); // 0 + 10 + 5
+        assert_eq!(*queried_name.lock().unwrap(), "test");
+    }
+
+    /// Test query_state with multiple queries
+    #[test]
+    fn test_query_state_multiple_queries() {
+        // given: store with a simple counter
+        let store = StoreImpl::new_with_reducer(0, Box::new(TestReducer)).unwrap();
+
+        // dispatch some actions
+        store.dispatch(5).unwrap();
+        store.dispatch(10).unwrap();
+
+        // wait for actions to be processed
+        std::thread::sleep(std::time::Duration::from_millis(100));
+
+        // when: query the state multiple times
+        let query1_result = std::sync::Arc::new(std::sync::Mutex::new(0));
+        let query2_result = std::sync::Arc::new(std::sync::Mutex::new(0));
+
+        let query1_clone = query1_result.clone();
+        store
+            .query_state(move |state| {
+                *query1_clone.lock().unwrap() = *state;
+            })
+            .unwrap();
+
+        store.dispatch(20).unwrap();
+
+        // wait for action to be processed
+        std::thread::sleep(std::time::Duration::from_millis(100));
+
+        let query2_clone = query2_result.clone();
+        store
+            .query_state(move |state| {
+                *query2_clone.lock().unwrap() = *state;
+            })
+            .unwrap();
+
+        store.stop().unwrap();
+
+        // then: should get the correct states
+        assert_eq!(*query1_result.lock().unwrap(), 15); // 0 + 5 + 10
+        assert_eq!(*query2_result.lock().unwrap(), 35); // 15 + 20
+    }
+
+    /// Test query_state with error handling
+    #[test]
+    fn test_query_state_error_handling() {
+        // given: store with a simple counter
+        let store = StoreImpl::new_with_reducer(0, Box::new(TestReducer)).unwrap();
+
+        // when: query the state (should succeed)
+        let queried_value = std::sync::Arc::new(std::sync::Mutex::new(0));
+        let queried_value_clone = queried_value.clone();
+        let result = store.query_state(move |state| {
+            *queried_value_clone.lock().unwrap() = *state;
+        });
+
+        // then: should succeed and get the initial state
+        assert!(result.is_ok());
+        assert_eq!(*queried_value.lock().unwrap(), 0);
     }
 }

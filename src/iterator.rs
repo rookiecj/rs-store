@@ -93,6 +93,9 @@ where
                     ActionOp::AddSubscriber => {
                         continue;
                     }
+                    ActionOp::StateFunction => {
+                        continue;
+                    }
                 }
             }
         };

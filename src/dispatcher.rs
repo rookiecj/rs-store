@@ -19,7 +19,7 @@ pub trait Dispatcher<Action: Send + Clone + std::fmt::Debug>: Send {
 
 /// WeakDispatcher is a dispatcher that holds a weak reference to the store
 /// to prevent circular reference
-pub struct WeakDispatcher<State, Action>
+pub(crate) struct WeakDispatcher<State, Action>
 where
     State: Send + Sync + Clone + std::fmt::Debug + 'static,
     Action: Send + Sync + Clone + std::fmt::Debug + 'static,

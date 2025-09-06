@@ -72,7 +72,8 @@ examples: ## example all
 	RUSTFLAGS="-D warnings" cargo run --example calc_basic_builder -- --nocapture
 #	RUSTFLAGS="-D warnings" cargo run --example iter_state -- --nocapture
 	RUSTFLAGS="-D warnings" cargo run --example dropoldest_if -- --nocapture
-
+	RUSTFLAGS="-D warnings" cargo run --example calc_query_state -- --nocapture
+	
 example-dropoldest_if:
 	RUSTFLAGS="-D warnings" cargo run --example dropoldest_if -- --nocapture --features store-log
 
