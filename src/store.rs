@@ -27,7 +27,9 @@ pub enum StoreError {
     },
 }
 
-/// Store trait defines the interface for a Redux-like store
+/// Store is a thread-safe and concurrent-safe store for Redux-like state management
+/// It provides a way to manage the state of an application in a thread-safe and concurrent-safe manner
+/// It supports reducers, subscribers, and async actions through Thunk
 pub trait Store<State, Action>: Send + Sync
 where
     State: Send + Sync + Clone + std::fmt::Debug + 'static,
@@ -61,8 +63,7 @@ where
     ///
     /// ### Parameters
     /// * capacity: Channel buffer capacity
-    /// * policy: Backpressure policy for when channel is full,
-    ///     `BlockOnFull` or `DropLatestIf` is supported to prevent from dropping the ActionOp::Exit
+    /// * policy: Backpressure policy for when down channel(store to subscriber) is full
     ///
     /// ### Return
     /// * Subscription: Subscription for the store,
@@ -91,6 +92,7 @@ mod tests {
     use crate::Reducer;
     use crate::StoreImpl;
     use std::sync::Arc;
+    use std::sync::Mutex;
     use std::thread;
     use std::time::Duration;
 
@@ -157,6 +159,50 @@ mod tests {
             )
             .unwrap(),
         )
+    }
+
+    struct TestChannneledReducer;
+
+    impl Reducer<i32, i32> for TestChannneledReducer {
+        fn reduce(&self, state: &i32, action: &i32) -> DispatchOp<i32, i32> {
+            DispatchOp::Dispatch(state + action, None)
+        }
+    }
+
+    struct TestChannelSubscriber {
+        received: Arc<Mutex<Vec<(i32, i32)>>>,
+    }
+
+    impl TestChannelSubscriber {
+        fn new(received: Arc<Mutex<Vec<(i32, i32)>>>) -> Self {
+            Self { received }
+        }
+    }
+
+    impl Subscriber<i32, i32> for TestChannelSubscriber {
+        fn on_notify(&self, state: &i32, action: &i32) {
+            //println!("TestChannelSubscriber: state={}, action={}", state, action);
+            self.received.lock().unwrap().push((*state, *action));
+        }
+    }
+
+    struct SlowSubscriber {
+        received: Arc<Mutex<Vec<(i32, i32)>>>,
+        delay: Duration,
+    }
+
+    impl SlowSubscriber {
+        fn new(received: Arc<Mutex<Vec<(i32, i32)>>>, delay: Duration) -> Self {
+            Self { received, delay }
+        }
+    }
+
+    impl Subscriber<i32, i32> for SlowSubscriber {
+        fn on_notify(&self, state: &i32, action: &i32) {
+            //println!("SlowSubscriber: state={}, action={}", state, action);
+            std::thread::sleep(self.delay);
+            self.received.lock().unwrap().push((*state, *action));
+        }
     }
 
     #[test]
@@ -312,5 +358,227 @@ mod tests {
         // Test that the store remains in a consistent state after errors
         let state = store.get_state();
         assert_eq!(state.counter, 0);
+    }
+
+    // subscribed() 기본 기능 테스트 - 별도 스레드에서 실행되는지 확인
+    #[test]
+    fn test_subscribed_basic_functionality() {
+        let store =
+            StoreBuilder::new_with_reducer(0, Box::new(TestChannneledReducer)).build().unwrap();
+
+        let received = Arc::new(Mutex::new(Vec::new()));
+        let subscriber = Box::new(TestChannelSubscriber::new(received.clone()));
+
+        // subscribed()로 구독 - 별도 스레드에서 실행됨
+        let subscription = store.subscribed(subscriber).unwrap();
+
+        // 액션들을 dispatch
+        store.dispatch(1).unwrap();
+        store.dispatch(2).unwrap();
+        store.dispatch(3).unwrap();
+
+        // 잠시 대기하여 채널을 통해 메시지가 전달되도록 함
+        thread::sleep(Duration::from_millis(100));
+
+        // store 정지
+        store.stop().unwrap();
+
+        // 구독 해제
+        subscription.unsubscribe();
+
+        // 수신된 메시지 검증
+        let states = received.lock().unwrap();
+        assert_eq!(states.len(), 3);
+        assert_eq!(states[0], (1, 1)); // state=0+1, action=1
+        assert_eq!(states[1], (3, 2)); // state=1+2, action=2
+        assert_eq!(states[2], (6, 3)); // state=3+3, action=3
+    }
+
+    // subscribed() 동시성 테스트 - 여러 subscriber가 동시에 실행되는지 확인
+    #[test]
+    fn test_subscribed_concurrent_subscribers() {
+        let store =
+            StoreBuilder::new_with_reducer(0, Box::new(TestChannneledReducer)).build().unwrap();
+
+        let received1 = Arc::new(Mutex::new(Vec::new()));
+        let received2 = Arc::new(Mutex::new(Vec::new()));
+        let received3 = Arc::new(Mutex::new(Vec::new()));
+
+        // 3개의 subscriber를 각각 별도 스레드에서 실행
+        let subscription1 =
+            store.subscribed(Box::new(TestChannelSubscriber::new(received1.clone()))).unwrap();
+        let subscription2 =
+            store.subscribed(Box::new(TestChannelSubscriber::new(received2.clone()))).unwrap();
+        let subscription3 =
+            store.subscribed(Box::new(TestChannelSubscriber::new(received3.clone()))).unwrap();
+
+        // 동시에 여러 액션을 dispatch
+        for i in 1..=10 {
+            store.dispatch(i).unwrap();
+        }
+
+        // 잠시 대기
+        thread::sleep(Duration::from_millis(200));
+
+        // store 정지
+        store.stop().unwrap();
+
+        // 모든 구독 해제
+        subscription1.unsubscribe();
+        subscription2.unsubscribe();
+        subscription3.unsubscribe();
+
+        // 모든 subscriber가 동일한 메시지를 받았는지 확인
+        let states1 = received1.lock().unwrap();
+        let states2 = received2.lock().unwrap();
+        let states3 = received3.lock().unwrap();
+
+        assert_eq!(states1.len(), 10);
+        assert_eq!(states2.len(), 10);
+        assert_eq!(states3.len(), 10);
+
+        // 각 subscriber가 동일한 순서로 메시지를 받았는지 확인
+        for i in 0..10 {
+            assert_eq!(states1[i].1, states2[i].1); // action이 동일
+            assert_eq!(states2[i].1, states3[i].1);
+        }
+    }
+
+    // subscribed() 백프레셔 정책 테스트 - DropLatestIf 정책
+    #[test]
+    fn test_subscribed_drop_latest_if_policy() {
+        let store =
+            StoreBuilder::new_with_reducer(0, Box::new(TestChannneledReducer)).build().unwrap();
+
+        let received = Arc::new(Mutex::new(Vec::new()));
+        let subscriber = Box::new(SlowSubscriber::new(
+            received.clone(),
+            Duration::from_millis(50),
+        ));
+
+        // 작은 용량과 DropLatestIf 정책으로 구독
+        let predicate = Arc::new(|(_, _, action): &(Instant, i32, i32)| *action < 5);
+        let policy = BackpressurePolicy::DropLatestIf { predicate };
+        let subscription = store.subscribed_with(2, policy, subscriber).unwrap();
+
+        // 채널을 가득 채우는 액션들을 빠르게 dispatch
+        for i in 1..=10 {
+            store.dispatch(i).unwrap();
+        }
+
+        // 처리 시간 대기
+        thread::sleep(Duration::from_millis(300));
+
+        store.stop().unwrap();
+        subscription.unsubscribe();
+
+        // 백프레셔 정책에 의해 일부 메시지가 드롭되었는지 확인
+        let states = received.lock().unwrap();
+        // 채널 용량이 2이고 SlowSubscriber가 느리므로 일부 메시지만 처리됨
+        assert!(
+            states.len() < 10,
+            "Expected fewer than 10 messages due to backpressure, got {}",
+            states.len()
+        );
+
+        // 최소한 일부 메시지는 받았는지 확인
+        assert!(
+            states.len() > 0,
+            "Expected at least some messages to be received"
+        );
+    }
+
+    // subscribed() 에러 처리 테스트 - 잘못된 capacity로 구독 시도
+    #[test]
+    fn test_subscribed_error_handling() {
+        let store =
+            StoreBuilder::new_with_reducer(0, Box::new(TestChannneledReducer)).build().unwrap();
+
+        let received = Arc::new(Mutex::new(Vec::new()));
+        let subscriber = Box::new(TestChannelSubscriber::new(received.clone()));
+
+        // 유효한 구독
+        let subscription = store.subscribed(subscriber).unwrap();
+        // subscription은 Box<dyn Subscription>이므로 is_some() 메서드가 없음
+
+        // 구독 해제
+        subscription.unsubscribe();
+
+        // 이미 해제된 구독에 대한 추가 액션은 처리되지 않아야 함
+        store.dispatch(1).unwrap();
+        thread::sleep(Duration::from_millis(50));
+
+        let states = received.lock().unwrap();
+        assert_eq!(states.len(), 0); // 해제 후에는 메시지를 받지 않아야 함
+
+        store.stop().unwrap();
+    }
+
+    // subscribed() 스레드 생명주기 테스트
+    #[test]
+    fn test_subscribed_thread_lifecycle() {
+        let store =
+            StoreBuilder::new_with_reducer(0, Box::new(TestChannneledReducer)).build().unwrap();
+
+        let received = Arc::new(Mutex::new(Vec::new()));
+        let subscriber = Box::new(TestChannelSubscriber::new(received.clone()));
+
+        // 구독 생성
+        let subscription = store.subscribed(subscriber).unwrap();
+
+        // 액션 dispatch
+        store.dispatch(1).unwrap();
+        thread::sleep(Duration::from_millis(50));
+
+        // 구독 해제 - 스레드가 정상적으로 종료되어야 함
+        subscription.unsubscribe();
+
+        // 추가 액션은 처리되지 않아야 함
+        store.dispatch(2).unwrap();
+        thread::sleep(Duration::from_millis(50));
+
+        let states = received.lock().unwrap();
+        assert_eq!(states.len(), 1); // 첫 번째 액션만 처리됨
+        assert_eq!(states[0], (1, 1));
+
+        store.stop().unwrap();
+    }
+
+    // subscribed()와 add_subscriber() 혼합 사용 테스트
+    #[test]
+    fn test_subscribed_mixed_with_add_subscriber() {
+        let store =
+            StoreBuilder::new_with_reducer(0, Box::new(TestChannneledReducer)).build().unwrap();
+
+        // 일반 subscriber (reducer 스레드에서 실행)
+        let received_main = Arc::new(Mutex::new(Vec::new()));
+        let subscriber_main = Arc::new(TestChannelSubscriber::new(received_main.clone()));
+        let _subscription_main = store.add_subscriber(subscriber_main).unwrap();
+
+        // subscribed subscriber (별도 스레드에서 실행)
+        let received_channeled = Arc::new(Mutex::new(Vec::new()));
+        let subscriber_channeled = Box::new(TestChannelSubscriber::new(received_channeled.clone()));
+        let subscription_channeled = store.subscribed(subscriber_channeled).unwrap();
+
+        // 액션들 dispatch
+        for i in 1..=5 {
+            store.dispatch(i).unwrap();
+        }
+
+        thread::sleep(Duration::from_millis(100));
+
+        store.stop().unwrap();
+        subscription_channeled.unsubscribe();
+
+        // 두 subscriber 모두 동일한 메시지를 받았는지 확인
+        let states_main = received_main.lock().unwrap();
+        let states_channeled = received_channeled.lock().unwrap();
+
+        assert_eq!(states_main.len(), 5);
+        assert_eq!(states_channeled.len(), 5);
+
+        for i in 0..5 {
+            assert_eq!(states_main[i], states_channeled[i]);
+        }
     }
 }

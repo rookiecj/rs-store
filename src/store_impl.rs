@@ -36,6 +36,10 @@ where
 }
 
 /// StoreImpl is the default implementation of a Redux store
+///
+/// # Caution
+/// [StoreImpl] is the default implementation of the Store trait, its iterface can be changed in the future.
+/// [Store] is the interface for the store you depend on.
 #[allow(clippy::type_complexity)]
 pub struct StoreImpl<State, Action>
 where
@@ -189,7 +193,6 @@ where
             );
             match action_op {
                 ActionOp::Action(action) => {
-
                     // do reduce
                     let current_state = store_impl.state.lock().unwrap().clone();
                     let (need_dispatch, new_state, effects) = store_impl.do_reduce(
@@ -871,8 +874,7 @@ where
     ///
     /// ### Parameters
     /// * capacity: Channel buffer capacity
-    /// * policy: Backpressure policy for when channel is full,
-    ///     `BlockOnFull` or `DropLatestIf` is supported to prevent from dropping the ActionOp::Exit
+    /// * policy: Backpressure policy for when down channel(store to subscriber) is full
     ///
     /// ### Return
     /// * Subscription: Subscription for the store,

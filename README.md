@@ -91,7 +91,7 @@ rs-store supports multiple backpressure policies:
 - **DropOldestIf**: Drops items from the oldest based on a custom predicate when the queue is full
 - **DropLatestIf**: Drops items from the latest based on a custom predicate when the queue is full
 
-#### Predicate-based Backpressure
+##### Predicate-based Backpressure
 
 The `DropLatestIf` policy allows you to implement intelligent message dropping based on custom criteria:
 
@@ -119,6 +119,25 @@ This allows you to prioritize important messages and drop less critical ones whe
 
 Unlike traditional Redux implementations, rs-store allows reducers to produce side effects directly.
 This means reducers can produce asynchronous operations.
+
+```rust
+impl Reducer<CalcState, CalcAction> for CalcReducer {
+    fn reduce(&self, state: &CalcState, action: &CalcAction) -> DispatchOp<CalcState, CalcAction> {
+        match action {
+            CalcAction::AddWillProduceThunk(i) => {
+                println!("CalcReducer::reduce: + {}", i);
+                DispatchOp::Dispatch(
+                    CalcState {
+                        count: state.count + i,
+                    },
+                    Some(Effect::Thunk(subtract_effect_thunk(*i))),
+                )
+            }
+        }
+    }
+}
+
+```
 
 ### Middleware
 
