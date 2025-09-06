@@ -129,7 +129,7 @@ where
             Some(metrics.clone()),
         );
 
-        let store = StoreImpl {
+        let store_impl = StoreImpl {
             name: name.clone(),
             state: Mutex::new(state),
             reducers: Mutex::new(reducers),
@@ -145,101 +145,121 @@ where
         };
 
         // start a thread in which the store will listen for actions
-        let rx_store = Arc::new(store);
+        let rx_store = Arc::new(store_impl);
         let tx_store = rx_store.clone();
 
         // reducer thread
-        tx_store.pool.lock().unwrap().as_ref().unwrap().execute(move || {
-            #[cfg(feature = "store-log")]
-            eprintln!("store: reducer thread started");
-
-            while let Some(action_op) = rx.recv() {
-                let action_received_at = Instant::now();
-                rx_store.metrics.action_received(Some(&action_op));
+        match tx_store.pool.lock() {
+            Ok(pool) => {
+                if let Some(pool) = pool.as_ref() {
+                    pool.execute(move || {
+                        StoreImpl::reducer_thread(rx, rx_store);
+                    })
+                }
+            }
+            Err(_e) => {
                 #[cfg(feature = "store-log")]
-                eprintln!(
-                    "store: dispatch: action: {:?}, remains: {}",
-                    action_op,
-                    rx.len()
-                );
-                match action_op {
-                    ActionOp::Action(action) => {
-                        // WeakDispatcher를 사용하여 circular reference 방지
-                        let the_dispatcher = Arc::new(WeakDispatcher::new(rx_store.clone()));
+                eprintln!("store: Error while locking pool: {:?}", _e);
+                return Err(StoreError::InitError(format!(
+                    "Error while locking pool: {:?}",
+                    _e
+                )));
+            }
+        }
 
-                        // do reduce
-                        let current_state = rx_store.state.lock().unwrap().clone();
-                        let (need_dispatch, new_state, effects) = rx_store.do_reduce(
+        Ok(tx_store)
+    }
+
+    // reducer thread
+    pub(crate) fn reducer_thread(
+        rx: ReceiverChannel<Action>,
+        store_impl: Arc<StoreImpl<State, Action>>,
+    ) {
+        #[cfg(feature = "store-log")]
+        eprintln!("store: reducer thread started");
+
+        while let Some(action_op) = rx.recv() {
+            let action_received_at = Instant::now();
+            store_impl.metrics.action_received(Some(&action_op));
+            #[cfg(feature = "store-log")]
+            eprintln!(
+                "store: dispatch: action: {:?}, remains: {}",
+                action_op,
+                rx.len()
+            );
+            match action_op {
+                ActionOp::Action(action) => {
+                    // WeakDispatcher를 사용하여 circular reference 방지
+                    let the_dispatcher = Arc::new(WeakDispatcher::new(store_impl.clone()));
+
+                    // do reduce
+                    let current_state = store_impl.state.lock().unwrap().clone();
+                    let (need_dispatch, new_state, effects) = store_impl.do_reduce(
+                        &action,
+                        current_state,
+                        the_dispatcher.clone(),
+                        action_received_at,
+                    );
+                    *store_impl.state.lock().unwrap() = new_state.clone();
+
+                    // do effects remain
+                    if let Some(mut effects) = effects {
+                        store_impl.do_effect(
                             &action,
-                            current_state,
+                            &new_state,
+                            &mut effects,
+                            the_dispatcher.clone(),
+                        );
+                    }
+
+                    // do notify subscribers
+                    if need_dispatch {
+                        store_impl.do_notify(
+                            &action,
+                            &new_state,
                             the_dispatcher.clone(),
                             action_received_at,
                         );
-                        *rx_store.state.lock().unwrap() = new_state.clone();
-
-                        // do effects remain
-                        if let Some(mut effects) = effects {
-                            rx_store.do_effect(
-                                &action,
-                                &new_state,
-                                &mut effects,
-                                the_dispatcher.clone(),
-                            );
-                        }
-
-                        // do notify subscribers
-                        if need_dispatch {
-                            rx_store.do_notify(
-                                &action,
-                                &new_state,
-                                the_dispatcher.clone(),
-                                action_received_at,
-                            );
-                        }
-
-                        rx_store
-                            .metrics
-                            .action_executed(Some(&action), action_received_at.elapsed());
-                    }
-                    ActionOp::AddSubscriber => {
-                        let mut new_subscribers = rx_store.adding_subscribers.lock().unwrap();
-                        let new_subscribers_len = new_subscribers.len();
-                        if new_subscribers_len > 0 {
-                            let current_state = rx_store.state.lock().unwrap().clone();
-                            let iter_subscribers = new_subscribers.drain(..).into_iter();
-
-                            rx_store.do_subscribe(&current_state, iter_subscribers);
-                        }
-
-                        #[cfg(feature = "store-log")]
-                        eprintln!("store: {} subscribers added", new_subscribers_len);
                     }
 
-                    // ActionOp::RemoveSubscriber(subscriber_id) => {
-                    //     rx_store.do_remove_subscriber(subscriber_id);
-                    //     #[cfg(feature = "store-log")]
-                    //     eprintln!("store: {} subscribers removed", subscriber_id);
-                    // }
-                    ActionOp::StateFunction => {
-                        rx_store.do_state_function();
+                    store_impl.metrics.action_executed(Some(&action), action_received_at.elapsed());
+                }
+                ActionOp::AddSubscriber => {
+                    let mut new_subscribers = store_impl.adding_subscribers.lock().unwrap();
+                    let new_subscribers_len = new_subscribers.len();
+                    if new_subscribers_len > 0 {
+                        let current_state = store_impl.state.lock().unwrap().clone();
+                        let iter_subscribers = new_subscribers.drain(..).into_iter();
+
+                        store_impl.do_subscribe(&current_state, iter_subscribers);
                     }
-                    ActionOp::Exit(_) => {
-                        rx_store.on_close(action_received_at);
-                        #[cfg(feature = "store-log")]
-                        eprintln!("store: reducer loop exit");
-                        break;
-                    }
+
+                    #[cfg(feature = "store-log")]
+                    eprintln!("store: {} subscribers added", new_subscribers_len);
+                }
+
+                // ActionOp::RemoveSubscriber(subscriber_id) => {
+                //     rx_store.do_remove_subscriber(subscriber_id);
+                //     #[cfg(feature = "store-log")]
+                //     eprintln!("store: {} subscribers removed", subscriber_id);
+                // }
+                ActionOp::StateFunction => {
+                    store_impl.do_state_function();
+                }
+                ActionOp::Exit(_) => {
+                    store_impl.on_close(action_received_at);
+                    #[cfg(feature = "store-log")]
+                    eprintln!("store: reducer loop exit");
+                    break;
                 }
             }
+        }
 
-            // drop all subscribers
-            rx_store.clear_subscribers();
+        // drop all subscribers
+        store_impl.clear_subscribers();
 
-            #[cfg(feature = "store-log")]
-            eprintln!("store: reducer thread done");
-        });
-
-        Ok(tx_store)
+        #[cfg(feature = "store-log")]
+        eprintln!("store: reducer thread done");
     }
 
     /// get the latest state(for debugging)
