@@ -359,11 +359,9 @@ mod tests {
                     // do async
                     // ReqAsync -> Response
                     let v = v.clone();
-                    dispatcher.dispatch_thunk(
-                        Box::new(move |dispatcher| {
-                            let _ = dispatcher.dispatch(MiddlewareAction::ResponseAsThis(v + 1));
-                        }),
-                    );
+                    dispatcher.dispatch_thunk(Box::new(move |dispatcher| {
+                        let _ = dispatcher.dispatch(MiddlewareAction::ResponseAsThis(v + 1));
+                    }));
                     // done action
                     return Ok(MiddlewareOp::DoneAction);
                 }

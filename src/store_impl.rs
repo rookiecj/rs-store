@@ -129,7 +129,7 @@ where
         let (tx, rx) = BackpressureChannel::<Action>::pair_with(
             "dispatch",
             capacity,
-            policy.clone(),
+            policy,
             Some(metrics.clone()),
         );
 
@@ -1175,7 +1175,8 @@ mod tests {
         let received_states = Arc::new(Mutex::new(Vec::new()));
         let subscriber1 = Box::new(TestChannelSubscriber::new(received_states.clone()));
         // Create channel
-        let subscription = store.subscribed_with(10, BackpressurePolicy::DropOldest, subscriber1);
+        let subscription =
+            store.subscribed_with(10, BackpressurePolicy::DropOldestIf(None), subscriber1);
 
         // Dispatch some actions
         store.dispatch(1).unwrap();
@@ -1213,7 +1214,8 @@ mod tests {
             Duration::from_millis(100),
         ));
         // Create channel with small capacity
-        let subscription = store.subscribed_with(1, BackpressurePolicy::DropOldest, subscriber);
+        let subscription =
+            store.subscribed_with(1, BackpressurePolicy::DropOldestIf(None), subscriber);
 
         // Fill the channel
         for i in 0..5 {
@@ -1246,7 +1248,8 @@ mod tests {
 
         let received = Arc::new(Mutex::new(Vec::new()));
         let subscriber1 = Box::new(TestChannelSubscriber::new(received.clone()));
-        let subscription = store.subscribed_with(10, BackpressurePolicy::DropOldest, subscriber1);
+        let subscription =
+            store.subscribed_with(10, BackpressurePolicy::DropOldestIf(None), subscriber1);
 
         // Dispatch some actions
         store.dispatch(1).unwrap();
@@ -1901,14 +1904,15 @@ mod tests {
     //             DispatchOp::Dispatch(state + action, None)
     //         })))
     //         .with_capacity(2)
-    //         .with_policy(BackpressurePolicy::DropOldest)
+    //         .with_policy(BackpressurePolicy::DropOldestIf(None))
     //         .build()
     //         .unwrap();
     //
     //     // when: create iterator with different capacity and policy
     //     let mut iter = store.iter_with(1, BackpressurePolicy::BlockOnFull);
     //
-    //     store.dispatch(5).expect("dispatch should succeed");
+    //     store.dispatch(5).expect("dispat
+    // ch should succeed");
     //     store.dispatch(10).expect("dispatch should succeed");
     //
     //     // then: iterator should work with custom capacity and policy

@@ -97,8 +97,9 @@ fn main() {
     println!("=== Query State Example ===");
 
     // Create a store with initial state
-    let store_impl = StoreImpl::new_with_reducer(CalcState::default(), Box::new(CalcReducer::default()))
-        .unwrap();
+    let store_impl =
+        StoreImpl::new_with_reducer(CalcState::default(), Box::new(CalcReducer::default()))
+            .unwrap();
 
     // Dispatch some actions
     println!("Dispatching actions...");

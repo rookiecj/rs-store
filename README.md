@@ -100,11 +100,11 @@ use rs_store::{BackpressurePolicy, StoreBuilder};
 use std::sync::Arc;
 
 // Create a predicate that drops low-priority messages
-let predicate = Arc::new(|value: &i32| {
+let predicate = Box::new( | value: & i32| {
         *value < 5 // 5보다 작은 값들은 drop
     });
 
-let policy = BackpressurePolicy::DropLatestIf { predicate };
+let policy = BackpressurePolicy::DropLatestIf(Some(predicate));
 
 let store = StoreBuilder::new(0)
     .with_capacity(3) // Small capacity to trigger backpressure

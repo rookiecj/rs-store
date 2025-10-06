@@ -5,7 +5,7 @@ use std::marker::PhantomData;
 use std::sync::{Arc, Condvar, Mutex};
 
 /// the Backpressure policy
-#[derive(Clone, Default)]
+#[derive(Default)]
 pub enum BackpressurePolicy<T>
 where
     T: Send + Sync + Clone + std::fmt::Debug + 'static,
@@ -13,22 +13,20 @@ where
     /// Block the sender when the queue is full
     #[default]
     BlockOnFull,
-    /// Drop the oldest item when the queue is full
+    /// Drop an item from the oldest to the newest when the queue is full
+    #[deprecated(note = "Use DropOldestIf(None) instead")]
     DropOldest,
-    /// Drop the new item when the queue is full
+    /// Drop an item from the newest to the oldest when the queue is full
+    #[deprecated(note = "Use DropLatestIf(None) instead")]
     DropLatest,
-    /// Drop items based on predicate when the queue is full, it drops from the latest
+    /// Drop items based on predicate when the queue is full, it drops from the newest to the oldest
     /// With this policy, [send] method can be Err when all items are not droppable
     /// Predicate is only applied to ActionOp::Action variants, other variants are never dropped
-    DropLatestIf {
-        predicate: Arc<dyn Fn(&T) -> bool + Send + Sync>,
-    },
-    /// Drop items based on predicate when the queue is full, it drops from the oldest
+    DropLatestIf(Option<Box<dyn Fn(&T) -> bool + Send + Sync>>),
+    /// Drop items based on predicate when the queue is full, it drops from the oldest to the newest
     /// With this policy, [send] method can be Err when all items are not droppable
     /// Predicate is only applied to ActionOp::Action variants, other variants are never dropped
-    DropOldestIf {
-        predicate: Arc<dyn Fn(&T) -> bool + Send + Sync>,
-    },
+    DropOldestIf(Option<Box<dyn Fn(&T) -> bool + Send + Sync>>),
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -78,7 +76,7 @@ where
     /// when it is full, the send will try to drop an item based on the policy:
     /// - with BlockOnFull policy, the send will block until the space is available
     /// - with DropOldest policy, the send will drop the oldest item and put the new item to the queue
-    /// - with DropLatest policy, the send will drop the new item
+    /// - with DropLatest policy, the send will drop the newest item and put the new item to the queue
     /// - with DropOldestIf policy, the send will drop an item if the predicate is true from the oldest to the newest
     /// - with DropLatestIf policy, the send will drop an item if the predicate is true from the latest to the oldest
     /// if nothing is dropped, the send will block until the space is available
@@ -100,6 +98,7 @@ where
             }
 
             // Queue is full, try to handle based on policy
+            #[allow(deprecated)]
             match &self.policy {
                 BackpressurePolicy::BlockOnFull => {
                     // Wait until space is available
@@ -111,7 +110,7 @@ where
                     }
                     // Continue loop to add item
                 }
-                BackpressurePolicy::DropOldest => {
+                BackpressurePolicy::DropOldest | BackpressurePolicy::DropOldestIf(None) => {
                     // Drop the oldest item, but only if it's an Action variant
                     let mut found_action_to_drop = false;
                     let mut i = 0;
@@ -140,26 +139,37 @@ where
                     }
                     // Continue loop to add item
                 }
-                BackpressurePolicy::DropLatest => {
+                BackpressurePolicy::DropLatest | BackpressurePolicy::DropLatestIf(None) => {
                     // Drop the new item only if it's an Action variant
-                    if matches!(item, ActionOp::Action(_)) {
-                        if let Some(metrics) = &self.metrics {
-                            if let ActionOp::Action(action) = &item {
-                                metrics.action_dropped(Some(action as &dyn std::any::Any));
+                    let mut found_action_to_drop = false;
+                    let mut i = 0;
+                    while i < queue.len() {
+                        let idx = queue.len() - i - 1;
+                        if matches!(queue[idx], ActionOp::Action(_)) {
+                            if let Some(dropped_item) = queue.remove(idx) {
+                                found_action_to_drop = true;
+                                if let Some(metrics) = &self.metrics {
+                                    if let ActionOp::Action(action) = &dropped_item {
+                                        metrics.action_dropped(Some(action as &dyn std::any::Any));
+                                    }
+                                }
+                                break;
                             }
                         }
-                        self.condvar.notify_one();
-                        return Ok(queue.len() as i64);
-                    } else {
-                        // If the new item is not an Action, block until space is available
+                        i += 1;
+                    }
+
+                    // If no Action variant was found to drop, block until space is available
+                    if !found_action_to_drop {
                         queue = self.condvar.wait(queue).unwrap();
                         if *self.closed.lock().unwrap() {
                             return Err(SenderError::ChannelClosed);
                         }
                         continue; // Continue the outer loop to try again
                     }
+                    // Continue loop to add item
                 }
-                BackpressurePolicy::DropOldestIf { predicate } => {
+                BackpressurePolicy::DropOldestIf(Some(predicate)) => {
                     // Find and drop items that match the predicate from oldest to newest
                     let mut dropped_count = 0;
                     let mut i = 0;
@@ -205,7 +215,7 @@ where
                     }
                     // Continue loop to try again
                 }
-                BackpressurePolicy::DropLatestIf { predicate } => {
+                BackpressurePolicy::DropLatestIf(Some(predicate)) => {
                     // Find and drop items that match the predicate from latest to oldest
                     let mut dropped_count = 0;
                     let mut i = 0;
@@ -272,12 +282,15 @@ where
 
         let mut queue = self.queue.lock().unwrap();
 
-        if queue.len() >= self.capacity {
+        if queue.len() < self.capacity {
+            queue.push_back(item);
+        } else {
+            #[allow(deprecated)]
             match &self.policy {
                 BackpressurePolicy::BlockOnFull => {
                     return Err(SenderError::SendError(item));
                 }
-                BackpressurePolicy::DropOldest => {
+                BackpressurePolicy::DropOldest | BackpressurePolicy::DropOldestIf(None) => {
                     // Drop the oldest item, but only if it's an Action variant
                     let mut found_action_to_drop = false;
                     let mut i = 0;
@@ -308,27 +321,38 @@ where
                         return Err(SenderError::SendError(item));
                     }
                 }
-                BackpressurePolicy::DropLatest => {
-                    // Drop the new item only if it's an Action variant
-                    if matches!(item, ActionOp::Action(_)) {
-                        if let Some(metrics) = &self.metrics {
-                            if let ActionOp::Action(action) = &item {
-                                metrics.action_dropped(Some(action as &dyn std::any::Any));
+                BackpressurePolicy::DropLatest | BackpressurePolicy::DropLatestIf(None) => {
+                    let mut found_action_to_drop = false;
+                    let mut i = 0;
+                    while i < queue.len() {
+                        let index = queue.len() - i - 1;
+                        if matches!(queue[index], ActionOp::Action(_)) {
+                            if let Some(dropped_item) = queue.remove(index) {
+                                found_action_to_drop = true;
+                                if let Some(metrics) = &self.metrics {
+                                    if let ActionOp::Action(action) = &dropped_item {
+                                        metrics.action_dropped(Some(action as &dyn std::any::Any));
+                                    }
+                                }
+                                break;
                             }
                         }
-                        self.condvar.notify_one();
-                        return Ok(queue.len() as i64);
+                        i += 1;
+                    }
+
+                    if found_action_to_drop {
+                        queue.push_back(item);
                     } else {
-                        // If the new item is not an Action, return error
+                        // No Action variant found to drop, return error
                         #[cfg(feature = "store-log")]
                         eprintln!(
-                            "store: failed to drop latest non-action while trying to send: queue len={}",
+                            "store: failed to drop latest action while trying to send: queue len={}",
                             queue.len()
                         );
                         return Err(SenderError::SendError(item));
                     }
                 }
-                BackpressurePolicy::DropOldestIf { predicate } => {
+                BackpressurePolicy::DropOldestIf(Some(predicate)) => {
                     // Find and drop items that match the predicate
                     let mut dropped_count = 0;
                     let mut i = 0;
@@ -371,7 +395,7 @@ where
                         return Err(SenderError::SendError(item));
                     }
                 }
-                BackpressurePolicy::DropLatestIf { predicate } => {
+                BackpressurePolicy::DropLatestIf(Some(predicate)) => {
                     // Find and drop items that match the predicate
                     let mut dropped_count = 0;
                     let mut i = 0;
@@ -416,8 +440,6 @@ where
                     }
                 }
             }
-        } else {
-            queue.push_back(item);
         }
 
         // Update metrics
@@ -617,7 +639,7 @@ mod tests {
     #[test]
     fn test_drop_oldest() {
         let (sender, receiver) =
-            BackpressureChannel::<i32>::pair(2, BackpressurePolicy::DropOldest);
+            BackpressureChannel::<i32>::pair(2, BackpressurePolicy::DropOldestIf(None));
 
         sender.send(ActionOp::Action(1)).unwrap();
         sender.send(ActionOp::Action(2)).unwrap();
@@ -631,24 +653,24 @@ mod tests {
     #[test]
     fn test_drop_latest() {
         let (sender, receiver) =
-            BackpressureChannel::<i32>::pair(2, BackpressurePolicy::DropLatest);
+            BackpressureChannel::<i32>::pair(2, BackpressurePolicy::DropLatestIf(None));
 
         sender.send(ActionOp::Action(1)).unwrap();
-        sender.send(ActionOp::Action(2)).unwrap();
-        sender.send(ActionOp::Action(3)).unwrap(); // Should drop 3
+        sender.send(ActionOp::Action(2)).unwrap(); // should drop 2
+        sender.send(ActionOp::Action(3)).unwrap();
 
         assert_eq!(receiver.recv(), Some(ActionOp::Action(1)));
-        assert_eq!(receiver.recv(), Some(ActionOp::Action(2)));
+        assert_eq!(receiver.recv(), Some(ActionOp::Action(3)));
         assert_eq!(receiver.try_recv(), None);
     }
 
     #[test]
     fn test_predicate_dropping() {
         // predicate: 5보다 작은 값들은 drop
-        let predicate = Arc::new(|value: &i32| *value < 5);
+        let predicate = Box::new(|value: &i32| *value < 5);
 
         let (sender, receiver) =
-            BackpressureChannel::<i32>::pair(2, BackpressurePolicy::DropLatestIf { predicate });
+            BackpressureChannel::<i32>::pair(2, BackpressurePolicy::DropLatestIf(Some(predicate)));
 
         // 채널을 가득 채우기
         sender.send(ActionOp::Action(1)).unwrap(); // 첫 번째 아이템 (drop 대상)
@@ -698,10 +720,10 @@ mod tests {
     #[test]
     fn test_add_subscriber_with_predicate() {
         // predicate는 Action에만 적용되므로 AddSubscriber는 자동으로 보존됨
-        let predicate = Arc::new(|value: &i32| *value < 5);
+        let predicate = Box::new(|value: &i32| *value < 5);
 
         let (sender, receiver) =
-            BackpressureChannel::<i32>::pair(2, BackpressurePolicy::DropLatestIf { predicate });
+            BackpressureChannel::<i32>::pair(2, BackpressurePolicy::DropLatestIf(Some(predicate)));
 
         // 채널을 가득 채우기
         sender.send(ActionOp::Action(1)).unwrap(); // drop 대상
@@ -787,9 +809,7 @@ mod tests {
     fn test_drop_oldest_if_predicate_always_false() {
         let (sender, receiver) = BackpressureChannel::pair(
             3,
-            BackpressurePolicy::DropOldestIf {
-                predicate: Arc::new(|_| false), // Predicate always returns false
-            },
+            BackpressurePolicy::DropOldestIf(Some(Box::new(|_| false))), // Predicate always returns false
         );
 
         // Fill the channel to capacity
@@ -817,9 +837,7 @@ mod tests {
     fn test_drop_oldest_if_predicate_sometimes_true() {
         let (sender, receiver) = BackpressureChannel::pair(
             3,
-            BackpressurePolicy::DropOldestIf {
-                predicate: Arc::new(|value: &i32| *value < 5), // Drop values less than 5
-            },
+            BackpressurePolicy::DropOldestIf(Some(Box::new(|value: &i32| *value < 5))), // Drop values less than 5
         );
 
         // Fill the channel to capacity with values that don't match predicate
@@ -852,7 +870,7 @@ mod tests {
     #[test]
     fn test_drop_oldest_only_actions() {
         let (sender, receiver) =
-            BackpressureChannel::<i32>::pair(2, BackpressurePolicy::DropOldest);
+            BackpressureChannel::<i32>::pair(2, BackpressurePolicy::DropOldestIf(None));
 
         // Fill the channel with non-Action items
         sender.send(ActionOp::AddSubscriber).unwrap();
@@ -875,7 +893,7 @@ mod tests {
     #[test]
     fn test_drop_oldest_with_mixed_types() {
         let (sender, receiver) =
-            BackpressureChannel::<i32>::pair(3, BackpressurePolicy::DropOldest);
+            BackpressureChannel::<i32>::pair(3, BackpressurePolicy::DropOldestIf(None));
 
         // Fill the channel with mixed types
         sender.send(ActionOp::Action(1)).unwrap(); // This should be droppable
@@ -907,15 +925,20 @@ mod tests {
     #[test]
     fn test_drop_latest_only_actions() {
         let (sender, receiver) =
-            BackpressureChannel::<i32>::pair(2, BackpressurePolicy::DropLatest);
+            BackpressureChannel::<i32>::pair(3, BackpressurePolicy::DropLatestIf(None));
 
         // Fill the channel with non-Action items
         sender.send(ActionOp::AddSubscriber).unwrap();
+        sender.send(ActionOp::Action(1)).unwrap();
         sender.send(ActionOp::Exit(std::time::Instant::now())).unwrap();
-        assert_eq!(receiver.len(), 2);
+        assert_eq!(receiver.len(), 3);
 
         // Try to send an Action - should be dropped
-        let result = sender.try_send(ActionOp::Action(1));
+        let result = sender.try_send(ActionOp::Action(2));
+        assert!(result.is_ok(), "Action should be dropped successfully");
+
+        // Try to send an Action - should be dropped
+        let result = sender.try_send(ActionOp::StateFunction);
         assert!(result.is_ok(), "Action should be dropped successfully");
 
         // Try to send a non-Action - should fail because channel is full
@@ -926,16 +949,17 @@ mod tests {
         );
 
         // Channel should still contain the original non-Action items
-        assert_eq!(receiver.len(), 2);
+        assert_eq!(receiver.len(), 3);
         assert_eq!(receiver.recv(), Some(ActionOp::AddSubscriber));
         assert!(matches!(receiver.recv(), Some(ActionOp::Exit(_))));
+        assert_eq!(receiver.recv(), Some(ActionOp::StateFunction));
     }
 
     #[test]
     fn test_drop_policy_preserves_critical_operations() {
         // 이 테스트는 중요한 작업(AddSubscriber, Exit)이 drop되지 않는지 확인합니다
         let (sender, receiver) =
-            BackpressureChannel::<i32>::pair(3, BackpressurePolicy::DropOldest);
+            BackpressureChannel::<i32>::pair(3, BackpressurePolicy::DropOldestIf(None));
 
         // 채널을 가득 채우기: 2개의 Action과 1개의 AddSubscriber
         sender.send(ActionOp::Action(1)).unwrap();
@@ -977,7 +1001,7 @@ mod tests {
     fn test_drop_policy_with_exit_operations() {
         // Exit 작업이 drop되지 않는지 확인하는 테스트
         let (sender, receiver) =
-            BackpressureChannel::<i32>::pair(2, BackpressurePolicy::DropLatest);
+            BackpressureChannel::<i32>::pair(2, BackpressurePolicy::DropLatestIf(None));
 
         let exit_time = std::time::Instant::now();
 
@@ -986,29 +1010,29 @@ mod tests {
         sender.send(ActionOp::Exit(exit_time)).unwrap();
         assert_eq!(receiver.len(), 2);
 
-        // 새로운 Action을 보내면 drop되어야 함 (Exit은 보존)
-        let result = sender.try_send(ActionOp::Action(2));
+        // 새로운 Action을 보내면 최근 아이템이 drop되어야 함 (Exit은 보존)
+        let result = sender.send(ActionOp::Action(2));
         assert!(result.is_ok(), "Action should be dropped, not Exit");
 
         // Exit은 여전히 존재해야 함
         let received_items: Vec<_> = std::iter::from_fn(|| receiver.try_recv()).collect();
         assert_eq!(received_items.len(), 2);
 
-        let has_exit = received_items.iter().any(|item| matches!(item, ActionOp::Exit(_)));
+        let has_action_1 = received_items.get(0).unwrap() == &ActionOp::Action(1);
+        assert!(!has_action_1, "Action(1) should be dropped");
+
+        let has_exit = received_items.get(0).unwrap() == &ActionOp::Exit(exit_time);
         assert!(has_exit, "Exit should never be dropped by drop policy");
 
-        let has_action_1 = received_items.iter().any(|item| matches!(item, ActionOp::Action(1)));
-        assert!(has_action_1, "Action(1) should be preserved");
-
-        let has_action_2 = received_items.iter().any(|item| matches!(item, ActionOp::Action(2)));
-        assert!(!has_action_2, "Action(2) should be dropped");
+        let has_action_2 = received_items.get(1).unwrap() == &ActionOp::Action(2);
+        assert!(has_action_2, "Action(2) added");
     }
 
     #[test]
     fn test_drop_oldest_action_ordering() {
         // DropOldest가 Action들 중에서 가장 오래된 것을 drop하는지 확인
         let (sender, receiver) =
-            BackpressureChannel::<i32>::pair(4, BackpressurePolicy::DropOldest);
+            BackpressureChannel::<i32>::pair(4, BackpressurePolicy::DropOldestIf(None));
 
         // 채널에 순서대로 추가: Action(1), AddSubscriber, Action(2), Action(3)
         sender.send(ActionOp::Action(1)).unwrap(); // 가장 오래된 Action
@@ -1054,7 +1078,7 @@ mod tests {
     fn test_drop_policy_blocking_behavior() {
         // Action이 없을 때 blocking 동작을 확인하는 테스트
         let (sender, receiver) =
-            BackpressureChannel::<i32>::pair(2, BackpressurePolicy::DropOldest);
+            BackpressureChannel::<i32>::pair(2, BackpressurePolicy::DropOldestIf(None));
 
         // 채널을 non-Action items로 가득 채우기
         sender.send(ActionOp::AddSubscriber).unwrap();
@@ -1082,12 +1106,72 @@ mod tests {
     }
 
     #[test]
+    fn test_drop_oldest_if_predicate_always_true() {
+        let (sender, receiver) = BackpressureChannel::<i32>::pair(
+            3,
+            BackpressurePolicy::DropOldestIf(Some(Box::new(|_| true))),
+        );
+
+        sender.send(ActionOp::Action(1)).unwrap();
+        sender.send(ActionOp::Action(2)).unwrap();
+        sender.send(ActionOp::Action(3)).unwrap();
+
+        let result = sender.send(ActionOp::Action(4));
+        assert!(result.is_ok(), "Action should be dropped successfully");
+
+        let received_items: Vec<_> = std::iter::from_fn(|| receiver.try_recv()).collect();
+        assert_eq!(received_items.len(), 3);
+
+        let has_action_1 = received_items.get(0).unwrap() == &ActionOp::Action(1);
+        assert!(!has_action_1, "Action(1) should be dropped");
+
+        let has_action_2 = received_items.get(0).unwrap() == &ActionOp::Action(2);
+        assert!(has_action_2, "Action(2) should be preserved");
+
+        let has_action_3 = received_items.get(1).unwrap() == &ActionOp::Action(3);
+        assert!(has_action_3, "Action(3) should be preserved");
+
+        let has_action_4 = received_items.get(2).unwrap() == &ActionOp::Action(4);
+        assert!(has_action_4, "Action(4) should be added");
+    }
+
+    #[test]
+    fn test_drop_latest_if_predicate_always_true() {
+        let (sender, receiver) = BackpressureChannel::<i32>::pair(
+            3,
+            BackpressurePolicy::DropLatestIf(Some(Box::new(|_| true))),
+        );
+
+        sender.send(ActionOp::Action(1)).unwrap();
+        sender.send(ActionOp::Action(2)).unwrap();
+        sender.send(ActionOp::Action(3)).unwrap(); // should be dropped
+
+        let result = sender.send(ActionOp::Action(4));
+        assert!(result.is_ok(), "Action should be dropped successfully");
+
+        let received_items: Vec<_> = std::iter::from_fn(|| receiver.try_recv()).collect();
+        assert_eq!(received_items.len(), 3);
+
+        let has_action_1 = received_items.get(0).unwrap() == &ActionOp::Action(1);
+        assert!(has_action_1, "Action(1) should be preserved");
+
+        let has_action_2 = received_items.get(1).unwrap() == &ActionOp::Action(2);
+        assert!(has_action_2, "Action(2) should be preserved");
+
+        let has_action_3 = received_items.get(2).unwrap() == &ActionOp::Action(3);
+        assert!(!has_action_3, "Action(3) should be dropped");
+
+        let has_action_4 = received_items.get(2).unwrap() == &ActionOp::Action(4);
+        assert!(has_action_4, "Action(4) should be added");
+    }
+
+    #[test]
     fn test_drop_latest_vs_drop_oldest_action_selection() {
-        // DropLatest와 DropOldest가 서로 다른 Action을 선택하는지 확인
+        // DropLatest와 DropOldest가 서로 같은 Action을 선택하는지 확인
 
         // DropOldest 테스트
         let (sender_oldest, receiver_oldest) =
-            BackpressureChannel::<i32>::pair(3, BackpressurePolicy::DropOldest);
+            BackpressureChannel::<i32>::pair(3, BackpressurePolicy::DropOldestIf(None));
 
         sender_oldest.send(ActionOp::Action(10)).unwrap(); // 가장 오래된 Action
         sender_oldest.send(ActionOp::AddSubscriber).unwrap();
@@ -1108,10 +1192,6 @@ mod tests {
             .collect();
 
         assert!(
-            !oldest_actions.contains(&10),
-            "DropOldest should drop Action(10)"
-        );
-        assert!(
             oldest_actions.contains(&20),
             "DropOldest should preserve Action(20)"
         );
@@ -1122,47 +1202,43 @@ mod tests {
 
         // DropLatest 테스트
         let (sender_latest, receiver_latest) =
-            BackpressureChannel::<i32>::pair(3, BackpressurePolicy::DropLatest);
+            BackpressureChannel::<i32>::pair(3, BackpressurePolicy::DropLatestIf(None));
 
         sender_latest.send(ActionOp::Action(100)).unwrap(); // 가장 오래된 Action
         sender_latest.send(ActionOp::AddSubscriber).unwrap();
-        sender_latest.send(ActionOp::Action(200)).unwrap(); // 가장 새로운 Action
+        sender_latest.send(ActionOp::Action(200)).unwrap(); // should be dropped
 
-        // 새로운 Action을 보내면 그것이 drop되어야 함
-        let result = sender_latest.try_send(ActionOp::Action(300));
-        assert!(result.is_ok(), "DropLatest should drop the new Action(300)");
+        // 새로운 Action을 보내면 마지막 drop되어야 함
+        let result = sender_latest.send(ActionOp::Action(300));
+        assert!(
+            result.is_ok(),
+            "send Action should be success, should drop the latest Action(200)"
+        );
 
         let latest_items: Vec<_> = std::iter::from_fn(|| receiver_latest.try_recv()).collect();
-        let latest_actions: Vec<i32> = latest_items
-            .iter()
-            .filter_map(|item| {
-                if let ActionOp::Action(val) = item {
-                    Some(*val)
-                } else {
-                    None
-                }
-            })
-            .collect();
+        assert_eq!(latest_items.len(), 3);
 
-        assert!(
-            latest_actions.contains(&100),
-            "DropLatest should preserve Action(100)"
+        let has_action_100 = latest_items.get(0).unwrap() == &ActionOp::Action(100);
+        assert!(has_action_100, "DropLatest should preserve Action(100)");
+
+        assert_eq!(
+            latest_items.get(1).unwrap(),
+            &ActionOp::AddSubscriber,
+            "DropLatest should preserve AddSubscriber"
         );
-        assert!(
-            latest_actions.contains(&200),
-            "DropLatest should preserve Action(200)"
-        );
-        assert!(
-            !latest_actions.contains(&300),
-            "DropLatest should drop Action(300)"
-        );
+
+        let has_action_200 = latest_items.get(2).unwrap() == &ActionOp::Action(200);
+        assert!(!has_action_200, "DropLatest should drop Action(200)");
+
+        let has_action_300 = latest_items.get(2).unwrap() == &ActionOp::Action(300);
+        assert!(has_action_300, "DropLatest should add Action(300)");
     }
 
     #[test]
     fn test_comprehensive_drop_policy_verification() {
         // 종합적인 drop policy 검증 테스트
         let (sender, receiver) =
-            BackpressureChannel::<String>::pair(5, BackpressurePolicy::DropOldest);
+            BackpressureChannel::<String>::pair(5, BackpressurePolicy::DropOldestIf(None));
 
         // 다양한 타입의 ActionOp를 순서대로 추가
         sender.send(ActionOp::Action("action1".to_string())).unwrap();
