@@ -1,7 +1,7 @@
 [package]
 name = "rs-store"
-# 2.8.0 add query state
-version = "2.8.0"
+# 2.9.0 refactor policy enums
+version = "2.9.0"
 edition = "2021"
 authors = ["Changju Lee", "Changju Lee<rookiecj@gmail.com>"]
 description = "Redux Store for Rust"

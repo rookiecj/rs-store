@@ -181,7 +181,7 @@ mod tests {
         let (tx, rx) = BackpressureChannel::<(i32, i32)>::pair_with(
             "test",
             5,
-            BackpressurePolicy::DropOldest,
+            BackpressurePolicy::DropOldestIf(None),
             None,
         );
 

@@ -5,12 +5,12 @@ fn main() {
     // predicate 기반 drop 정책 사용 예시
     // 작은 값들을 우선적으로 drop하는 predicate
     // predicate는 이제 Action의 내용(T)에만 적용됩니다
-    let predicate = Arc::new(|value: &i32| {
+    let predicate = Box::new(|value: &i32| {
         println!("droppable {} ? {}", *value, *value < 5);
         *value < 5 // 5보다 작은 값들은 drop
     });
 
-    let policy = BackpressurePolicy::DropOldestIf { predicate };
+    let policy = BackpressurePolicy::DropOldestIf(Some(predicate));
 
     // 매우 작은 capacity로 store 생성하여 backpressure 상황 시뮬레이션
     let store = StoreBuilder::new(0)

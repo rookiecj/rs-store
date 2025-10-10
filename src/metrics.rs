@@ -564,7 +564,7 @@ mod tests {
             vec![Box::new(TestReducer)],
             "test".to_string(),
             5,
-            BackpressurePolicy::DropOldest,
+            BackpressurePolicy::DropOldestIf(None),
             vec![],
         )
         .unwrap();
@@ -599,7 +599,7 @@ mod tests {
             vec![Box::new(TestReducer)],
             "test".to_string(),
             2,
-            BackpressurePolicy::DropOldest,
+            BackpressurePolicy::DropOldestIf(None),
             vec![],
         )
         .unwrap();
@@ -628,6 +628,7 @@ mod tests {
     fn test_count_metrics_with_middleware() {
         // given
         let middleware = Arc::new(TestMiddleware::new("test"));
+        #[allow(deprecated)]
         let store = StoreImpl::new_with(
             0,
             vec![Box::new(TestReducer)],

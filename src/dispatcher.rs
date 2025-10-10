@@ -31,14 +31,14 @@ where
 unsafe impl<State, Action> Send for WeakDispatcher<State, Action>
 where
     State: Send + Sync + Clone + std::fmt::Debug + 'static,
-    Action: Send + Sync + Clone + std::fmt::Debug + 'static
+    Action: Send + Sync + Clone + std::fmt::Debug + 'static,
 {
 }
 
 unsafe impl<State, Action> Sync for WeakDispatcher<State, Action>
 where
     State: Send + Sync + Clone + std::fmt::Debug + 'static,
-    Action: Send + Sync + Clone + std::fmt::Debug + 'static
+    Action: Send + Sync + Clone + std::fmt::Debug + 'static,
 {
 }
 

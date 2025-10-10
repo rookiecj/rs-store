@@ -317,6 +317,7 @@ mod tests {
 
     #[test]
     fn test_store_builder_configurations() {
+        #[allow(deprecated)]
         let store = StoreBuilder::new(TestState::default())
             .with_reducer(Box::new(TestReducer))
             .with_name("custom-store".into())
@@ -457,8 +458,8 @@ mod tests {
         ));
 
         // 작은 용량과 DropLatestIf 정책으로 구독
-        let predicate = Arc::new(|(_, _, action): &(Instant, i32, i32)| *action < 5);
-        let policy = BackpressurePolicy::DropLatestIf { predicate };
+        let predicate = Box::new(|(_, _, action): &(Instant, i32, i32)| *action < 5);
+        let policy = BackpressurePolicy::DropLatestIf(Some(predicate));
         let subscription = store.subscribed_with(2, policy, subscriber).unwrap();
 
         // 채널을 가득 채우는 액션들을 빠르게 dispatch
