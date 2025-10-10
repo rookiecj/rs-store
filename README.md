@@ -30,7 +30,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-rs-store = "2.8.1"
+rs-store = "2.9.0"
 ```
 
 ## Quick Start
@@ -86,23 +86,39 @@ and it also can be used to prevent slow subscribers from blocking state updates.
 rs-store supports multiple backpressure policies:
 
 - **BlockOnFull**: Blocks the sender when the queue is full (default)
-- **DropOldest**: Drops the oldest item when the queue is full
-- **DropLatest**: Drops new item when the queue is full
-- **DropOldestIf**: Drops items from the oldest based on a custom predicate when the queue is full
-- **DropLatestIf**: Drops items from the latest based on a custom predicate when the queue is full
+- **DropOldestIf(None)**: Drops the oldest item when the queue is full (replaces deprecated `DropOldest`)
+- **DropLatestIf(None)**: Drops the newest item when the queue is full (replaces deprecated `DropLatest`)
+- **DropOldestIf(Some(predicate))**: Drops items from the oldest based on a custom predicate when the queue is full
+- **DropLatestIf(Some(predicate))**: Drops items from the latest based on a custom predicate when the queue is full
+
+> **Note**: `DropOldest` and `DropLatest` are deprecated. Use `DropOldestIf(None)` and `DropLatestIf(None)` instead for unconditional dropping, or provide a predicate for conditional dropping.
 
 ##### Predicate-based Backpressure
 
-The `DropLatestIf` policy allows you to implement intelligent message dropping based on custom criteria:
+The `DropLatestIf` and `DropOldestIf` policies allow you to implement intelligent message dropping based on custom criteria.
 
+**Example: Unconditional dropping**
 ```rust
 use rs_store::{BackpressurePolicy, StoreBuilder};
-use std::sync::Arc;
 
-// Create a predicate that drops low-priority messages
-let predicate = Box::new( | value: & i32| {
-        *value < 5 // 5보다 작은 값들은 drop
-    });
+// Drop the oldest item unconditionally when queue is full
+let policy = BackpressurePolicy::DropOldestIf(None);
+
+let store = StoreBuilder::new(0)
+    .with_capacity(3)
+    .with_policy(policy)
+    .build()
+    .unwrap();
+```
+
+**Example: Conditional dropping with predicate**
+```rust
+use rs_store::{BackpressurePolicy, StoreBuilder};
+
+// Drop low-priority messages based on a predicate
+let predicate = Box::new(|value: &i32| {
+    *value < 5 // Drop values less than 5
+});
 
 let policy = BackpressurePolicy::DropLatestIf(Some(predicate));
 
@@ -155,7 +171,7 @@ method.
 This ensures that new subscribers don't miss the current state and can start with the latest information.
 
 ```rust
-use rs_store::{Subscriber, StoreBuilder};
+use rs_store::{DispatchOp, Reducer, Subscriber, StoreBuilder};
 use std::sync::{Arc, Mutex};
 
 #[derive(Clone, Debug)]
@@ -163,10 +179,25 @@ struct MyState {
     counter: i32,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 enum MyAction {
     Increment,
     Decrement,
+}
+
+struct MyReducer;
+
+impl Reducer<MyState, MyAction> for MyReducer {
+    fn reduce(&self, state: &MyState, action: &MyAction) -> DispatchOp<MyState, MyAction> {
+        match action {
+            MyAction::Increment => {
+                DispatchOp::Dispatch(MyState { counter: state.counter + 1 }, None)
+            }
+            MyAction::Decrement => {
+                DispatchOp::Dispatch(MyState { counter: state.counter - 1 }, None)
+            }
+        }
+    }
 }
 
 struct MySubscriber {
@@ -189,7 +220,7 @@ impl Subscriber<MyState, MyAction> for MySubscriber {
 }
 
 // Usage
-let store = StoreBuilder::new_with_reducer(MyState { counter: 0 }, reducer)
+let store = StoreBuilder::new_with_reducer(MyState { counter: 0 }, Box::new(MyReducer))
     .build()
     .unwrap();
 
@@ -214,7 +245,7 @@ The metrics feature provides a way to collect metrics.
 
 For detailed documentation, visit:
 
-- [API Documentation (docs.rs)](https://docs.rs/rs-store/2.8.0/rs_store/)
+- [API Documentation (docs.rs)](https://docs.rs/rs-store/2.9.0/rs_store/)
 - [Crate Page (crates.io)](https://crates.io/crates/rs-store)
 
 ## Implementation Status
