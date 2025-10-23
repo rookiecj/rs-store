@@ -30,7 +30,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-rs-store = "2.9.0"
+rs-store = "2.9"
 ```
 
 ## Quick Start
