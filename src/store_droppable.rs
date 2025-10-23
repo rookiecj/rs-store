@@ -32,7 +32,7 @@ where
     fn drop(&mut self) {
         let _ = self.inner.stop();
         #[cfg(feature = "store-log")]
-        eprintln!("store: '{}' Store dropped", self.inner.name);
+        eprintln!("store: '{}' dropped", self.inner.name);
     }
 }
 

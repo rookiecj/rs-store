@@ -304,6 +304,11 @@ where
                     )));
                 }
             }
+        } else {
+            self.adding_subscribers.lock().unwrap().retain(|s| s.id != subscriber_id);
+            return Err(StoreError::DispatchError(
+                "Dispatch channel is closed".to_string(),
+            ));
         }
 
         // disposer for the subscriber
@@ -646,30 +651,34 @@ where
     /// * Ok(()) : if the store is closed
     /// * Err(StoreError) : if the store is not closed, this can be happened when the queue is full
     pub fn close(&self) -> Result<(), StoreError> {
-        match self.dispatch_tx.lock() {
-            Ok(mut tx) => {
-                if let Some(tx) = tx.as_ref() {
-                    #[cfg(feature = "store-log")]
-                    eprintln!("store: close: sending exit to dispatch channel");
-                    match tx.send(ActionOp::Exit(Instant::now())) {
-                        Ok(_) => {
-                            #[cfg(feature = "store-log")]
-                            eprintln!("store: close: dispatch channel sent exit");
-                        }
-                        Err(_e) => {
-                            #[cfg(feature = "store-log")]
-                            eprintln!(
-                                "store: close: Error while sending exit to dispatch channel: {:?}",
-                                _e
-                            );
-                            return Err(StoreError::DispatchError(format!(
-                                "Error while sending exit to dispatch channel, try it later: {:?}",
-                                _e
-                            )));
-                        }
+        // take the ownership and release the lock to avoid deadlock
+        let dispatch_tx = self.dispatch_tx.lock().map(|mut tx| tx.take());
+        match dispatch_tx {
+            Ok(Some(tx)) => {
+                #[cfg(feature = "store-log")]
+                eprintln!("store: close: sending exit to dispatch channel");
+                match tx.send(ActionOp::Exit(Instant::now())) {
+                    Ok(_) => {
+                        #[cfg(feature = "store-log")]
+                        eprintln!("store: close: dispatch channel sent exit");
+                    }
+                    Err(_e) => {
+                        #[cfg(feature = "store-log")]
+                        eprintln!(
+                            "store: close: Error while sending exit to dispatch channel: {:?}",
+                            _e
+                        );
+                        return Err(StoreError::DispatchError(format!(
+                            "Error while sending exit to dispatch channel, try it later: {:?}",
+                            _e
+                        )));
                     }
                 }
-                drop(tx.take());
+            }
+            Ok(None) => {
+                #[cfg(feature = "store-log")]
+                eprintln!("store: close: dispatch channel already closed");
+                return Ok(());
             }
             Err(_e) => {
                 #[cfg(feature = "store-log")]
@@ -711,18 +720,21 @@ where
         }
 
         // Shutdown the thread pool with timeout
-        // lock pool
-        match self.pool.lock() {
-            Ok(mut pool) => {
-                if let Some(pool) = pool.take() {
-                    if timeout.is_zero() {
-                        pool.shutdown_join();
-                    } else {
-                        pool.shutdown_join_timeout(timeout);
-                    }
+        // take the ownership and release the lock to avoid deadlock
+        let pool = self.pool.lock().map(|mut pool_guard| pool_guard.take());
+        match pool {
+            Ok(Some(pool)) => {
+                if timeout.is_zero() {
+                    pool.shutdown_join();
+                } else {
+                    pool.shutdown_join_timeout(timeout);
                 }
                 #[cfg(feature = "store-log")]
-                eprintln!("store: shutdown pool");
+                eprintln!("store: pool shutdown completed");
+            }
+            Ok(None) => {
+                #[cfg(feature = "store-log")]
+                eprintln!("store: pool already shutdown");
             }
             Err(_e) => {
                 #[cfg(feature = "store-log")]
@@ -735,7 +747,7 @@ where
         }
 
         #[cfg(feature = "store-log")]
-        eprintln!("store: Store stopped");
+        eprintln!("store: stopped");
         Ok(())
     }
 
@@ -986,17 +998,46 @@ where
 
     fn clear_resource(&self) {
         // drop channel
-        if let Ok(mut tx_locked) = self.tx.lock() {
-            if let Some(tx) = tx_locked.take() {
+        // take the ownership and release the lock to avoid deadlock
+        let tx_owned = self.tx.lock().map(|mut tx| tx.take());
+        match tx_owned {
+            Ok(Some(tx)) => {
+                #[cfg(feature = "store-log")]
+                eprintln!("store: ChanneledSubscriber: clearing resource: sending exit");
                 let _ = tx.send(ActionOp::Exit(Instant::now()));
                 drop(tx);
-            };
+            }
+            Ok(None) => {
+                #[cfg(feature = "store-log")]
+                eprintln!("store: ChanneledSubscriber: clearing resource: channel already closed");
+            }
+            Err(_e) => {
+                #[cfg(feature = "store-log")]
+                eprintln!(
+                    "store: ChanneledSubscriber: clearing resource: Error while locking channel: {:?}",
+                    _e
+                );
+            }
         }
 
         // join the thread
-        if let Ok(mut handle) = self.handle.lock() {
-            if let Some(h) = handle.take() {
+        let handled_owned = self.handle.lock().map(|mut handle| handle.take());
+        match handled_owned {
+            Ok(Some(h)) => {
+                #[cfg(feature = "store-log")]
+                eprintln!("store: ChanneledSubscriber: clearing resource: joining thread");
                 let _ = h.join();
+            }
+            Ok(None) => {
+                #[cfg(feature = "store-log")]
+                eprintln!("store: ChanneledSubscriber: clearing resource: thread already joined");
+            }
+            Err(_e) => {
+                #[cfg(feature = "store-log")]
+                eprintln!(
+                    "store: ChanneledSubscriber: clearing resource: Error while locking thread handle: {:?}",
+                    _e
+                );
             }
         }
     }
@@ -1058,7 +1099,7 @@ where
         // }
 
         #[cfg(feature = "store-log")]
-        eprintln!("store: '{}' Store dropped", self.name);
+        eprintln!("store: '{}' dropped", self.name);
     }
 }
 
@@ -1453,14 +1494,8 @@ mod tests {
         // subscriber 추가 시도
         let received = Arc::new(Mutex::new(Vec::new()));
         let subscriber = Arc::new(TestChannelSubscriber::new(received.clone()));
-        let _subscription = store.add_subscriber(subscriber).unwrap();
-
-        // 잠시 대기
-        thread::sleep(Duration::from_millis(100));
-
-        // subscriber가 추가되었지만 store가 중지되어 있으므로 액션을 받지 않음
-        let received = received.lock().unwrap();
-        assert_eq!(received.len(), 0);
+        let subscription = store.add_subscriber(subscriber);
+        assert!(subscription.is_err());
     }
 
     // on_subscribe에서 상태를 수정하는 subscriber 테스트
