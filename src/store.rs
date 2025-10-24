@@ -32,7 +32,7 @@ pub enum StoreError {
 /// It supports reducers, subscribers, and async actions through Thunk
 pub trait Store<State, Action>: Send + Sync
 where
-    State: Send + Sync + Clone + std::fmt::Debug + 'static,
+    State: Send + Sync + Clone + 'static,
     Action: Send + Sync + Clone + std::fmt::Debug + 'static,
 {
     /// Get the current state
