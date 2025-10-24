@@ -8,7 +8,7 @@ use std::sync::{Arc, Condvar, Mutex};
 #[derive(Default)]
 pub enum BackpressurePolicy<T>
 where
-    T: Send + Sync + Clone + std::fmt::Debug + 'static,
+    T: Send + Sync + Clone + 'static,
 {
     /// Block the sender when the queue is full
     #[default]
