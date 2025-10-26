@@ -4,7 +4,6 @@ use crate::metrics::{CountMetrics, Metrics, MetricsSnapshot};
 use crate::middleware::Middleware;
 use crate::subscriber::SubscriberWithId;
 use crate::{DispatchOp, Effect, MiddlewareOp, Reducer, SenderError, Subscriber, Subscription};
-use fmt::Debug;
 use rusty_pool::ThreadPool;
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
@@ -17,10 +16,10 @@ use crate::store::{Store, StoreError, DEFAULT_CAPACITY, DEFAULT_STORE_NAME};
 const DEFAULT_STOP_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// ActionOp is used to dispatch an action to the store
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub(crate) enum ActionOp<Action>
 where
-    Action: Send + Sync + Clone + std::fmt::Debug + 'static,
+    Action: Send + Sync + Clone + 'static,
 {
     /// Action is used to dispatch an action to the store
     Action(Action),
@@ -35,6 +34,41 @@ where
     Exit(Instant),
 }
 
+impl<Action> fmt::Debug for ActionOp<Action>
+where
+    Action: fmt::Debug + Send + Sync + Clone + 'static,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ActionOp::Action(action) => f.debug_tuple("Action").field(action).finish(),
+            ActionOp::AddSubscriber => f.write_str("AddSubscriber"),
+            ActionOp::StateFunction => f.write_str("StateFunction"),
+            ActionOp::Exit(instant) => f.debug_tuple("Exit").field(instant).finish(),
+        }
+    }
+}
+
+#[cfg(feature = "store-log")]
+pub(crate) fn describe_action<Action>(_action: &Action) -> String
+where
+    Action: Send + Sync + Clone + 'static,
+{
+    format!("Action<{}>(..)", std::any::type_name::<Action>())
+}
+
+#[cfg(feature = "store-log")]
+pub(crate) fn describe_action_op<Action>(action_op: &ActionOp<Action>) -> String
+where
+    Action: Send + Sync + Clone + 'static,
+{
+    match action_op {
+        ActionOp::Action(_) => format!("Action<{}>(..)", std::any::type_name::<Action>()),
+        ActionOp::AddSubscriber => "AddSubscriber".to_string(),
+        ActionOp::StateFunction => "StateFunction".to_string(),
+        ActionOp::Exit(instant) => format!("Exit({instant:?})"),
+    }
+}
+
 /// StoreImpl is the default implementation of a Redux store
 ///
 /// # Caution
@@ -43,7 +77,7 @@ where
 #[allow(clippy::type_complexity)]
 pub struct StoreImpl<State, Action>
 where
-    State: Send + Sync + Clone + std::fmt::Debug + 'static,
+    State: Send + Sync + Clone + 'static,
     Action: Send + Sync + Clone + std::fmt::Debug + 'static,
 {
     #[allow(dead_code)]
@@ -77,7 +111,7 @@ impl Subscription for SubscriberSubscription {
 
 impl<State, Action> StoreImpl<State, Action>
 where
-    State: Send + Sync + Clone + std::fmt::Debug + 'static,
+    State: Send + Sync + Clone + 'static,
     Action: Send + Sync + Clone + std::fmt::Debug + 'static,
 {
     /// create a new store with an initial state
@@ -187,8 +221,8 @@ where
             store_impl.metrics.action_received(Some(&action_op));
             #[cfg(feature = "store-log")]
             eprintln!(
-                "store: dispatch: action: {:?}, remains: {}",
-                action_op,
+                "store: dispatch: action: {}, remains: {}",
+                crate::store_impl::describe_action_op(&action_op),
                 rx.len()
             );
             match action_op {
@@ -375,7 +409,10 @@ where
         //let state = self.state.lock().unwrap().clone();
 
         #[cfg(feature = "store-log")]
-        eprintln!("store: reduce: action: {:?}", action);
+        eprintln!(
+            "store: reduce: action: {}",
+            crate::store_impl::describe_action(action)
+        );
 
         let mut reduce_action = true;
         if !self.middlewares.lock().unwrap().is_empty() {
@@ -535,7 +572,10 @@ where
         self.metrics.state_notified(Some(next_state));
 
         #[cfg(feature = "store-log")]
-        eprintln!("store: notify: action: {:?}", action);
+        eprintln!(
+            "store: notify: action: {}",
+            crate::store_impl::describe_action(action)
+        );
 
         let mut need_notify = true;
         if !self.middlewares.lock().unwrap().is_empty() {
@@ -979,7 +1019,7 @@ where
 /// Subscriber implementation that forwards store updates to a channel
 struct ChanneledSubscriber<T>
 where
-    T: Send + Sync + Clone + std::fmt::Debug + 'static,
+    T: Send + Sync + Clone + 'static,
 {
     handle: Mutex<Option<JoinHandle<()>>>,
     tx: Mutex<Option<SenderChannel<T>>>,
@@ -987,7 +1027,7 @@ where
 
 impl<T> ChanneledSubscriber<T>
 where
-    T: Send + Sync + Clone + std::fmt::Debug + 'static,
+    T: Send + Sync + Clone + 'static,
 {
     pub(crate) fn new(handle: JoinHandle<()>, tx: SenderChannel<T>) -> Self {
         Self {
@@ -1045,7 +1085,7 @@ where
 
 impl<State, Action> Subscriber<State, Action> for ChanneledSubscriber<(Instant, State, Action)>
 where
-    State: Send + Sync + Clone + std::fmt::Debug + 'static,
+    State: Send + Sync + Clone + 'static,
     Action: Send + Sync + Clone + std::fmt::Debug + 'static,
 {
     fn on_notify(&self, state: &State, action: &Action) {
@@ -1073,7 +1113,7 @@ where
 
 impl<T> Subscription for ChanneledSubscriber<T>
 where
-    T: Send + Sync + Clone + std::fmt::Debug + 'static,
+    T: Send + Sync + Clone + 'static,
 {
     fn unsubscribe(&self) {
         self.clear_resource();
@@ -1084,7 +1124,7 @@ where
 /// if you want to stop the dispatcher, call the stop method
 impl<State, Action> Drop for StoreImpl<State, Action>
 where
-    State: Send + Sync + Clone + std::fmt::Debug + 'static,
+    State: Send + Sync + Clone + 'static,
     Action: Send + Sync + Clone + std::fmt::Debug + 'static,
 {
     fn drop(&mut self) {
@@ -1105,7 +1145,7 @@ where
 
 impl<State, Action> Store<State, Action> for StoreImpl<State, Action>
 where
-    State: Send + Sync + Clone + std::fmt::Debug + 'static,
+    State: Send + Sync + Clone + 'static,
     Action: Send + Sync + Clone + std::fmt::Debug + 'static,
 {
     fn get_state(&self) -> State {

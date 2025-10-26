@@ -21,7 +21,7 @@ pub trait Dispatcher<Action: Send + Clone + std::fmt::Debug>: Send {
 /// to prevent circular reference
 pub(crate) struct WeakDispatcher<State, Action>
 where
-    State: Send + Sync + Clone + std::fmt::Debug + 'static,
+    State: Send + Sync + Clone + 'static,
     Action: Send + Sync + Clone + std::fmt::Debug + 'static,
 {
     store: Weak<StoreImpl<State, Action>>,
@@ -30,21 +30,21 @@ where
 // WeakDispatcher는 Send + Sync를 구현합니다
 unsafe impl<State, Action> Send for WeakDispatcher<State, Action>
 where
-    State: Send + Sync + Clone + std::fmt::Debug + 'static,
+    State: Send + Sync + Clone + 'static,
     Action: Send + Sync + Clone + std::fmt::Debug + 'static,
 {
 }
 
 unsafe impl<State, Action> Sync for WeakDispatcher<State, Action>
 where
-    State: Send + Sync + Clone + std::fmt::Debug + 'static,
+    State: Send + Sync + Clone + 'static,
     Action: Send + Sync + Clone + std::fmt::Debug + 'static,
 {
 }
 
 impl<State, Action> WeakDispatcher<State, Action>
 where
-    State: Send + Sync + Clone + std::fmt::Debug + 'static,
+    State: Send + Sync + Clone + 'static,
     Action: Send + Sync + Clone + std::fmt::Debug + 'static,
 {
     /// WeakDispatcher 생성자
@@ -57,7 +57,7 @@ where
 
 impl<State, Action> Dispatcher<Action> for WeakDispatcher<State, Action>
 where
-    State: Send + Sync + Clone + std::fmt::Debug + 'static,
+    State: Send + Sync + Clone + 'static,
     Action: Send + Sync + Clone + std::fmt::Debug + 'static,
 {
     fn dispatch(&self, action: Action) -> Result<(), StoreError> {
@@ -92,7 +92,7 @@ where
 
 impl<State, Action> Dispatcher<Action> for Arc<StoreImpl<State, Action>>
 where
-    State: Send + Sync + Clone + std::fmt::Debug + 'static,
+    State: Send + Sync + Clone + 'static,
     Action: Send + Sync + Clone + std::fmt::Debug + 'static,
 {
     fn dispatch(&self, action: Action) -> Result<(), StoreError> {

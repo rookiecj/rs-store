@@ -1,6 +1,9 @@
 use crate::metrics::Metrics;
 use crate::ActionOp;
+#[cfg(feature = "store-log")]
+use crate::store_impl::describe_action_op;
 use std::collections::VecDeque;
+use std::fmt;
 use std::marker::PhantomData;
 use std::sync::{Arc, Condvar, Mutex};
 
@@ -29,21 +32,27 @@ where
     DropOldestIf(Option<Box<dyn Fn(&T) -> bool + Send + Sync>>),
 }
 
-#[derive(thiserror::Error, Debug)]
-pub(crate) enum SenderError<T>
-where
-    T: std::fmt::Debug,
-{
-    #[error("Failed to send: {:?}", .0)]
+#[derive(thiserror::Error)]
+pub(crate) enum SenderError<T> {
+    #[error("Failed to send item")]
     SendError(T),
     #[error("Channel is closed")]
     ChannelClosed,
 }
 
+impl<T> fmt::Debug for SenderError<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SenderError::SendError(_) => f.write_str("SendError(..)"),
+            SenderError::ChannelClosed => f.write_str("ChannelClosed"),
+        }
+    }
+}
+
 /// Internal MPSC Queue implementation
 struct MpscQueue<T>
 where
-    T: Send + Sync + Clone + std::fmt::Debug + 'static,
+    T: Send + Sync + Clone + 'static,
 {
     queue: Mutex<VecDeque<ActionOp<T>>>,
     condvar: Condvar,
@@ -55,7 +64,7 @@ where
 
 impl<T> MpscQueue<T>
 where
-    T: Send + Sync + Clone + std::fmt::Debug + 'static,
+    T: Send + Sync + Clone + 'static,
 {
     fn new(
         capacity: usize,
@@ -176,10 +185,10 @@ where
                     while i < queue.len() {
                         #[cfg(feature = "store-log")]
                         eprintln!(
-                            "store: check droppable {}/{}: {:?}",
+                            "store: check droppable {}/{}: {}",
                             i,
                             queue.len(),
-                            queue[i]
+                            describe_action_op(&queue[i])
                         );
                         // Only apply predicate to Action variants
                         let should_drop = if let ActionOp::Action(action) = &queue[i] {
@@ -223,10 +232,10 @@ where
                         let index = queue.len() - i - 1;
                         #[cfg(feature = "store-log")]
                         eprintln!(
-                            "store: check droppable {}/{}: {:?}",
+                            "store: check droppable {}/{}: {}",
                             index,
                             queue.len(),
-                            queue[index]
+                            describe_action_op(&queue[index])
                         );
                         // Only apply predicate to Action variants
                         let should_drop = if let ActionOp::Action(action) = &queue[index] {
@@ -359,10 +368,10 @@ where
                     while i < queue.len() {
                         #[cfg(feature = "store-log")]
                         eprintln!(
-                            "store: check droppable {}/{}: {:?}",
+                            "store: check droppable {}/{}: {}",
                             i,
                             queue.len(),
-                            queue[i]
+                            describe_action_op(&queue[i])
                         );
                         // Only apply predicate to Action variants
                         let should_drop = if let ActionOp::Action(action) = &queue[i] {
@@ -403,10 +412,10 @@ where
                         let index = queue.len() - i - 1;
                         #[cfg(feature = "store-log")]
                         eprintln!(
-                            "store: check droppable {}/{}: {:?}",
+                            "store: check droppable {}/{}: {}",
                             index,
                             queue.len(),
-                            queue[index]
+                            describe_action_op(&queue[index])
                         );
                         // Only apply predicate to Action variants
                         let should_drop = if let ActionOp::Action(action) = &queue[index] {
@@ -490,7 +499,7 @@ where
 #[derive(Clone)]
 pub(crate) struct SenderChannel<T>
 where
-    T: Send + Sync + Clone + std::fmt::Debug + 'static,
+    T: Send + Sync + Clone + 'static,
 {
     _name: String,
     queue: Arc<MpscQueue<T>>,
@@ -498,7 +507,7 @@ where
 
 impl<Action> Drop for SenderChannel<Action>
 where
-    Action: Send + Sync + Clone + std::fmt::Debug + 'static,
+    Action: Send + Sync + Clone + 'static,
 {
     fn drop(&mut self) {
         #[cfg(feature = "store-log")]
@@ -509,7 +518,7 @@ where
 #[allow(dead_code)]
 impl<T> SenderChannel<T>
 where
-    T: Send + Sync + Clone + std::fmt::Debug + 'static,
+    T: Send + Sync + Clone + 'static,
 {
     /// when it is full, the send will try to drop an item based on the policy
     /// if nothing is dropped, the send will block until the space is available
@@ -526,7 +535,7 @@ where
 #[allow(dead_code)]
 pub(crate) struct ReceiverChannel<T>
 where
-    T: Send + Sync + Clone + std::fmt::Debug + 'static,
+    T: Send + Sync + Clone + 'static,
 {
     name: String,
     queue: Arc<MpscQueue<T>>,
@@ -535,7 +544,7 @@ where
 
 impl<Action> Drop for ReceiverChannel<Action>
 where
-    Action: Send + Sync + Clone + std::fmt::Debug + 'static,
+    Action: Send + Sync + Clone + 'static,
 {
     fn drop(&mut self) {
         #[cfg(feature = "store-log")]
@@ -547,7 +556,7 @@ where
 #[allow(dead_code)]
 impl<T> ReceiverChannel<T>
 where
-    T: Send + Sync + Clone + std::fmt::Debug + 'static,
+    T: Send + Sync + Clone + 'static,
 {
     pub fn recv(&self) -> Option<ActionOp<T>> {
         self.queue.recv()
@@ -577,7 +586,7 @@ where
 
 impl<MSG> BackpressureChannel<MSG>
 where
-    MSG: Send + Sync + Clone + std::fmt::Debug + 'static,
+    MSG: Send + Sync + Clone + 'static,
 {
     #[allow(dead_code)]
     pub fn pair(
