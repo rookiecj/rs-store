@@ -11,7 +11,7 @@ pub enum DispatchOp<State, Action> {
 /// Reducer reduces the state based on the action.
 pub trait Reducer<State, Action>
 where
-    State: Send + Sync + Clone + std::fmt::Debug,
+    State: Send + Sync + Clone,
     Action: Send + Sync + std::fmt::Debug + 'static,
 {
     fn reduce(&self, state: &State, action: &Action) -> DispatchOp<State, Action>;
@@ -21,7 +21,7 @@ where
 pub struct FnReducer<F, State, Action>
 where
     F: Fn(&State, &Action) -> DispatchOp<State, Action>,
-    State: Send + Sync + Clone + std::fmt::Debug,
+    State: Send + Sync + Clone,
     Action: Send + Sync + std::fmt::Debug + 'static,
 {
     func: F,
@@ -31,7 +31,7 @@ where
 impl<F, State, Action> Reducer<State, Action> for FnReducer<F, State, Action>
 where
     F: Fn(&State, &Action) -> DispatchOp<State, Action>,
-    State: Send + Sync + Clone + std::fmt::Debug,
+    State: Send + Sync + Clone,
     Action: Send + Sync + std::fmt::Debug + 'static,
 {
     fn reduce(&self, state: &State, action: &Action) -> DispatchOp<State, Action> {
@@ -42,7 +42,7 @@ where
 impl<F, State, Action> From<F> for FnReducer<F, State, Action>
 where
     F: Fn(&State, &Action) -> DispatchOp<State, Action>,
-    State: Send + Sync + Clone + std::fmt::Debug,
+    State: Send + Sync + Clone,
     Action: Send + Sync + std::fmt::Debug + 'static,
 {
     fn from(func: F) -> Self {

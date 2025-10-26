@@ -213,8 +213,8 @@ mod tests {
     }
     impl<State, Action> Middleware<State, Action> for ChainMiddlewareContinueAction
     where
-        State: std::fmt::Debug + Send + Sync,
-        Action: std::fmt::Debug + Send + Sync,
+        State: Send + Sync,
+        Action: Send + Sync,
     {
     }
 
@@ -227,8 +227,8 @@ mod tests {
 
     impl<State, Action> Middleware<State, Action> for ChainMiddlewareDoneAction
     where
-        State: std::fmt::Debug + Send + Sync,
-        Action: std::fmt::Debug + Send + Sync,
+        State: Send + Sync,
+        Action: Send + Sync,
     {
         fn before_reduce(
             &self,
@@ -248,8 +248,8 @@ mod tests {
     }
     impl<State, Action> Middleware<State, Action> for ChainMiddlewareBreakChain
     where
-        State: std::fmt::Debug + Send + Sync,
-        Action: std::fmt::Debug + Send + Sync,
+        State: Send + Sync,
+        Action: Send + Sync,
     {
         fn before_reduce(
             &self,
@@ -346,7 +346,7 @@ mod tests {
     }
     impl<State> Middleware<State, MiddlewareAction> for MiddlewareBeforeDispatch
     where
-        State: std::fmt::Debug + Send + Sync,
+        State: Send + Sync,
     {
         fn before_reduce(
             &self,
