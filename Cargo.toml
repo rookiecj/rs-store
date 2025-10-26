@@ -1,7 +1,7 @@
 [package]
 name = "rs-store"
-# 2.9.1 fix deadlock issue in store
-version = "2.9.1"
+# 2.9.3 remove Debug trait from Action
+version = "2.9.3"
 edition = "2021"
 authors = ["Changju Lee", "Changju Lee<rookiecj@gmail.com>"]
 description = "Redux Store for Rust"
