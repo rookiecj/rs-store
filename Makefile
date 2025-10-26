@@ -30,6 +30,9 @@ test:	## test
 test-test_store_iter_with_different_policies:
 	RUST_TEST_THREADS=1 RUST_LOG=debug cargo test --test store_impl::tests::test_store_iter_with_different_policies -- --nocapture
 
+test-test_store_get_state:
+	RUST_TEST_THREADS=1 RUST_LOG=debug cargo test --package rs-store --lib store::tests::test_store_get_state --features store-log -- --nocapture
+
 test-store_impl:
 	RUST_TEST_THREADS=1 RUST_LOG=debug cargo test --package rs-store --lib store_impl::tests --profile test --features store-log -- --nocapture
 

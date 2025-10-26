@@ -86,7 +86,6 @@ where
 mod tests {
     use super::*;
     use crate::builder::StoreBuilder;
-    use crate::store_droppable::DroppableStore;
     use crate::BackpressurePolicy;
     use crate::DispatchOp;
     use crate::Reducer;
@@ -147,18 +146,15 @@ mod tests {
         }
     }
 
-    fn create_test_store() -> DroppableStore<TestState, TestAction> {
-        DroppableStore::new(
-            StoreImpl::new_with(
-                TestState::default(),
-                vec![Box::new(TestReducer)],
-                "test-store".into(),
-                16,
-                BackpressurePolicy::default(),
-                vec![],
-            )
-            .unwrap(),
-        )
+    fn create_test_store() -> Arc<StoreImpl<TestState, TestAction>> {
+        StoreImpl::new_with(
+            TestState::default(),
+            vec![Box::new(TestReducer)],
+            "test-store".into(),
+            16,
+            BackpressurePolicy::default(),
+            vec![],
+        ).unwrap()
     }
 
     struct TestChannneledReducer;
