@@ -16,3 +16,4 @@ Cargo.lock
 coverage/
 .DS_Store
 .vscode/
+docs/
