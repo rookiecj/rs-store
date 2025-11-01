@@ -78,14 +78,14 @@ mod tests {
                     // Effect::Action - dispatch another action
                     let effect =
                         Effect::Action(TestAction::AddMessage(format!("Set to {}", value)));
-                    DispatchOp::Dispatch(new_state, Some(effect))
+                    DispatchOp::Dispatch(new_state, vec![effect])
                 }
                 TestAction::AddValue(value) => {
                     let new_state = TestState {
                         value: state.value + value,
                         messages: state.messages.clone(),
                     };
-                    DispatchOp::Dispatch(new_state, None)
+                    DispatchOp::Dispatch(new_state, vec![])
                 }
                 TestAction::AddMessage(msg) => {
                     let mut new_messages = state.messages.clone();
@@ -94,7 +94,7 @@ mod tests {
                         value: state.value,
                         messages: new_messages,
                     };
-                    DispatchOp::Dispatch(new_state, None)
+                    DispatchOp::Dispatch(new_state, vec![])
                 }
                 TestAction::AsyncTask => {
                     let new_state = TestState {
@@ -105,7 +105,7 @@ mod tests {
                     let effect = Effect::Task(Box::new(|| {
                         thread::sleep(Duration::from_millis(10));
                     }));
-                    DispatchOp::Dispatch(new_state, Some(effect))
+                    DispatchOp::Dispatch(new_state, vec![effect])
                 }
                 TestAction::ThunkTask(value) => {
                     let new_state = TestState {
@@ -118,7 +118,7 @@ mod tests {
                         thread::sleep(Duration::from_millis(10));
                         let _ = dispatcher.dispatch(TestAction::AddValue(value_clone));
                     }));
-                    DispatchOp::Dispatch(new_state, Some(effect))
+                    DispatchOp::Dispatch(new_state, vec![effect])
                 }
                 TestAction::FunctionTask(key) => {
                     let new_state = TestState {
@@ -135,7 +135,7 @@ mod tests {
                                 as Box<dyn std::any::Any>)
                         }),
                     );
-                    DispatchOp::Dispatch(new_state, Some(effect))
+                    DispatchOp::Dispatch(new_state, vec![effect])
                 }
             }
         }

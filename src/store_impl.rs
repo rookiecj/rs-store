@@ -448,26 +448,22 @@ where
             );
         }
 
-        let mut effects = vec![];
+        let mut accum_effects = vec![];
         let mut need_dispatch = true;
         if reduce_action {
             let reducer_start = Instant::now();
 
             for reducer in self.reducers.lock().unwrap().iter() {
                 match reducer.reduce(&state, action) {
-                    DispatchOp::Dispatch(new_state, effect) => {
+                    DispatchOp::Dispatch(new_state, effects) => {
                         state = new_state;
-                        if let Some(effect) = effect {
-                            effects.push(effect);
-                        }
                         need_dispatch = true;
+                        accum_effects.extend(effects);
                     }
-                    DispatchOp::Keep(new_state, effect) => {
+                    DispatchOp::Keep(new_state, effects) => {
                         // keep the state but do not dispatch
                         state = new_state;
-                        if let Some(effect) = effect {
-                            effects.push(effect);
-                        }
+                        accum_effects.extend(effects);
                         need_dispatch = false;
                     }
                 }
@@ -482,7 +478,7 @@ where
             );
         }
 
-        (need_dispatch, state, Some(effects))
+        (need_dispatch, state, Some(accum_effects))
     }
 
     pub(crate) fn do_effect(
@@ -1183,7 +1179,7 @@ where
         self.stop()
     }
 
-    fn stop_with_timeout(&self, timeout: Duration) -> Result<(), StoreError> {
+    fn stop_timeout(&self, timeout: Duration) -> Result<(), StoreError> {
         self.stop_with_timeout(timeout)
     }
 }
@@ -1220,7 +1216,7 @@ mod tests {
 
     impl Reducer<i32, i32> for TestReducer {
         fn reduce(&self, state: &i32, action: &i32) -> DispatchOp<i32, i32> {
-            DispatchOp::Dispatch(state + action, None)
+            DispatchOp::Dispatch(state + action, vec![])
         }
     }
 
@@ -1701,21 +1697,21 @@ mod tests {
                             value: state.value + n,
                             name: state.name.clone(),
                         },
-                        None,
+                        vec![],
                     ),
                     ComplexAction::SetName(name) => DispatchOp::Dispatch(
                         ComplexState {
                             value: state.value,
                             name: name.clone(),
                         },
-                        None,
+                        vec![],
                     ),
                     ComplexAction::Reset => DispatchOp::Dispatch(
                         ComplexState {
                             value: 0,
                             name: "reset".to_string(),
                         },
-                        None,
+                        vec![],
                     ),
                 },
             )),
@@ -1826,7 +1822,7 @@ mod tests {
         let store = StoreImpl::new_with(
             0,
             vec![Box::new(FnReducer::from(|state: &i32, action: &i32| {
-                DispatchOp::Dispatch(state + action, None)
+                DispatchOp::Dispatch(state + action, vec![])
             }))],
             "test".to_string(),
             1,
@@ -1858,11 +1854,11 @@ mod tests {
             Box::new(FnReducer::from(|state: &i32, action: &i32| {
                 let new_state = state + action;
                 let effects = if action > &5 {
-                    Some(Effect::Task(Box::new(|| {
+                    vec![Effect::Task(Box::new(|| {
                         // effect that does nothing
-                    })))
+                    }))]
                 } else {
-                    None
+                    vec![]
                 };
                 DispatchOp::Dispatch(new_state, effects)
             })),
@@ -1891,10 +1887,10 @@ mod tests {
         // 실제로는 마지막 리듀서만 사용됩니다
         let store = StoreBuilder::new(0)
             .with_reducer(Box::new(FnReducer::from(|state: &i32, action: &i32| {
-                DispatchOp::Dispatch(state + action, None)
+                DispatchOp::Dispatch(state + action, vec![])
             })))
             .with_reducer(Box::new(FnReducer::from(|state: &i32, _action: &i32| {
-                DispatchOp::Dispatch(state * 2, None)
+                DispatchOp::Dispatch(state * 2, vec![])
             })))
             .build()
             .unwrap();
@@ -1949,7 +1945,7 @@ mod tests {
         let store = StoreImpl::new_with(
             0,
             vec![Box::new(FnReducer::from(|state: &i32, action: &i32| {
-                DispatchOp::Dispatch(state + action, None)
+                DispatchOp::Dispatch(state + action, vec![])
             }))],
             "test".to_string(),
             2,
@@ -2005,7 +2001,7 @@ mod tests {
             "".to_string(),
             Box::new(FnReducer::from(|state: &String, action: &String| {
                 let new_state = format!("{}{}", state, action);
-                DispatchOp::Dispatch(new_state, None)
+                DispatchOp::Dispatch(new_state, vec![])
             })),
         )
         .unwrap();
@@ -2037,7 +2033,7 @@ mod tests {
         let store = StoreImpl::new_with_reducer(
             0,
             Box::new(FnReducer::from(|state: &i32, _action: &i32| {
-                DispatchOp::Dispatch(*state, None) // return same state
+                DispatchOp::Dispatch(*state, vec![]) // return same state
             })),
         )
         .unwrap();
@@ -2110,14 +2106,14 @@ mod tests {
                             value: state.value + n,
                             name: state.name.clone(),
                         },
-                        None,
+                        vec![],
                     ),
                     ComplexAction::SetName(name) => DispatchOp::Dispatch(
                         ComplexState {
                             value: state.value,
                             name: name.clone(),
                         },
-                        None,
+                        vec![],
                     ),
                 },
             )),

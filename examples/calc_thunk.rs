@@ -38,7 +38,7 @@ impl Reducer<CalcState, CalcAction> for CalcReducer {
                     CalcState {
                         count: state.count + i,
                     },
-                    None,
+                    vec![],
                 )
             }
             CalcAction::Subtract(i) => {
@@ -47,7 +47,7 @@ impl Reducer<CalcState, CalcAction> for CalcReducer {
                     CalcState {
                         count: state.count - i,
                     },
-                    None,
+                    vec![],
                 )
             }
         }

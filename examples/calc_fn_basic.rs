@@ -29,7 +29,7 @@ fn calc_reducer(state: &CalcState, action: &CalcAction) -> DispatchOp<CalcState,
                 CalcState {
                     count: state.count + i,
                 },
-                None,
+                vec![],
             )
         }
         CalcAction::Subtract(i) => {
@@ -38,7 +38,7 @@ fn calc_reducer(state: &CalcState, action: &CalcAction) -> DispatchOp<CalcState,
                 CalcState {
                     count: state.count - i,
                 },
-                None,
+                vec![],
             )
         }
     }

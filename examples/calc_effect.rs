@@ -38,7 +38,7 @@ impl Reducer<CalcState, CalcAction> for CalcReducer {
                     CalcState {
                         count: state.count + i,
                     },
-                    Some(Effect::Thunk(subtract_effect_thunk(*i))),
+                    vec![Effect::Thunk(subtract_effect_thunk(*i))],
                 )
             }
             CalcAction::SubtractWillProduceEffectFunction(i) => {
@@ -48,10 +48,10 @@ impl Reducer<CalcState, CalcAction> for CalcReducer {
                         count: state.count - i,
                     },
                     // produce effect function
-                    Some(Effect::Function(
+                    vec![Effect::Function(
                         "subtract".to_string(),
                         subtract_effect_fn(*i),
-                    )),
+                    )],
                 )
             }
         }

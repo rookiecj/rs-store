@@ -2,10 +2,11 @@ use crate::effect::Effect;
 
 /// determine if the action should be dispatched or not
 pub enum DispatchOp<State, Action> {
-    /// Dispatch new state
-    Dispatch(State, Option<Effect<Action>>),
+    /// Dispatch new state with effects
+    /// since 3.0.0
+    Dispatch(State, Vec<Effect<Action>>),
     /// Keep new state but do not dispatch
-    Keep(State, Option<Effect<Action>>),
+    Keep(State, Vec<Effect<Action>>),
 }
 
 /// Reducer reduces the state based on the action.
@@ -89,11 +90,11 @@ mod tests {
                     });
                     // keep state if panic
                     if result.is_err() {
-                        return DispatchOp::Keep(*state, None);
+                        return DispatchOp::Keep(*state, vec![]);
                     }
                 }
                 // Normal operation for other actions
-                DispatchOp::Dispatch(state + action, None)
+                DispatchOp::Dispatch(state + action, vec![])
             }
         }
 
@@ -145,15 +146,15 @@ mod tests {
                 });
                 // keep state if panic
                 if result.is_err() {
-                    return DispatchOp::Keep(*state, None);
+                    return DispatchOp::Keep(*state, vec![]);
                 }
-                DispatchOp::Dispatch(state + action, None)
+                DispatchOp::Dispatch(state + action, vec![])
             }
         }
 
         impl Reducer<i32, i32> for NormalReducer {
             fn reduce(&self, state: &i32, action: &i32) -> DispatchOp<i32, i32> {
-                DispatchOp::Dispatch(state + action, None)
+                DispatchOp::Dispatch(state + action, vec![])
             }
         }
 
@@ -184,8 +185,9 @@ mod tests {
     #[test]
     fn test_fn_reducer_basic() {
         // given
-        let reducer =
-            FnReducer::from(|state: &i32, action: &i32| DispatchOp::Dispatch(state + action, None));
+        let reducer = FnReducer::from(|state: &i32, action: &i32| {
+            DispatchOp::Dispatch(state + action, vec![])
+        });
         let store = StoreBuilder::new_with_reducer(0, Box::new(reducer)).build().unwrap();
 
         // when
@@ -216,11 +218,11 @@ mod tests {
                 Action::AddWithEffect(i) => {
                     let new_state = state + i;
                     let effect = Effect::Action(Action::Add(40)); // Effect that adds 40 more
-                    DispatchOp::Dispatch(new_state, Some(effect))
+                    DispatchOp::Dispatch(new_state, vec![effect])
                 }
                 Action::Add(i) => {
                     let new_state = state + i;
-                    DispatchOp::Dispatch(new_state, None)
+                    DispatchOp::Dispatch(new_state, vec![])
                 }
             }
         });
@@ -247,9 +249,9 @@ mod tests {
         let reducer = FnReducer::from(|state: &i32, action: &i32| {
             if *action < 0 {
                 // Keep current state for negative actions
-                DispatchOp::Keep(*state, None)
+                DispatchOp::Keep(*state, vec![])
             } else {
-                DispatchOp::Dispatch(state + action, None)
+                DispatchOp::Dispatch(state + action, vec![])
             }
         });
         let store = StoreBuilder::new_with_reducer(0, Box::new(reducer)).build().unwrap();
@@ -283,10 +285,11 @@ mod tests {
     #[test]
     fn test_multiple_fn_reducers() {
         // given
-        let add_reducer =
-            FnReducer::from(|state: &i32, action: &i32| DispatchOp::Dispatch(state + action, None));
+        let add_reducer = FnReducer::from(|state: &i32, action: &i32| {
+            DispatchOp::Dispatch(state + action, vec![])
+        });
         let double_reducer =
-            FnReducer::from(|state: &i32, _action: &i32| DispatchOp::Dispatch(state * 2, None));
+            FnReducer::from(|state: &i32, _action: &i32| DispatchOp::Dispatch(state * 2, vec![]));
 
         let store = StoreBuilder::new(0)
             .with_reducer(Box::new(add_reducer))

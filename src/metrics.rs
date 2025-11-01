@@ -513,7 +513,7 @@ mod tests {
         fn reduce(&self, state: &i32, action: &i32) -> DispatchOp<i32, i32> {
             let new_state = state + action;
             thread::sleep(Duration::from_millis(10)); // Add delay to test timing
-            DispatchOp::Dispatch(new_state, None)
+            DispatchOp::Dispatch(new_state, vec![])
         }
     }
 

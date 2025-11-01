@@ -35,21 +35,21 @@ impl Reducer<TestState, TestAction> for TestReducer {
                     counter: state.counter + 1,
                     name: state.name.clone(),
                 };
-                DispatchOp::Dispatch(new_state, None)
+                DispatchOp::Dispatch(new_state, vec![])
             }
             TestAction::Decrement => {
                 let new_state = TestState {
                     counter: state.counter - 1,
                     name: state.name.clone(),
                 };
-                DispatchOp::Dispatch(new_state, None)
+                DispatchOp::Dispatch(new_state, vec![])
             }
             TestAction::SetValue(value) => {
                 let new_state = TestState {
                     counter: *value,
                     name: state.name.clone(),
                 };
-                DispatchOp::Dispatch(new_state, None)
+                DispatchOp::Dispatch(new_state, vec![])
             }
         }
     }

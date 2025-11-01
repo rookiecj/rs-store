@@ -45,7 +45,7 @@ impl Reducer<CalcState, CalcAction> for CalcReducer {
                         count: new_count,
                         history: new_history,
                     },
-                    None,
+                    vec![],
                 )
             }
             CalcAction::Subtract(n) => {
@@ -60,7 +60,7 @@ impl Reducer<CalcState, CalcAction> for CalcReducer {
                         count: new_count,
                         history: new_history,
                     },
-                    None,
+                    vec![],
                 )
             }
             CalcAction::Multiply(n) => {
@@ -75,7 +75,7 @@ impl Reducer<CalcState, CalcAction> for CalcReducer {
                         count: new_count,
                         history: new_history,
                     },
-                    None,
+                    vec![],
                 )
             }
             CalcAction::Reset => {
@@ -86,7 +86,7 @@ impl Reducer<CalcState, CalcAction> for CalcReducer {
                         count: 0,
                         history: new_history,
                     },
-                    None,
+                    vec![],
                 )
             }
         }

@@ -79,7 +79,7 @@ where
     fn stop(&self) -> Result<(), StoreError>;
 
     /// Stop the store with timeout
-    fn stop_with_timeout(&self, timeout: Duration) -> Result<(), StoreError>;
+    fn stop_timeout(&self, timeout: Duration) -> Result<(), StoreError>;
 }
 
 #[cfg(test)]
@@ -130,17 +130,17 @@ mod tests {
                 TestAction::Increment => {
                     let mut new_state = state.clone();
                     new_state.counter += 1;
-                    DispatchOp::Dispatch(new_state, None)
+                    DispatchOp::Dispatch(new_state, vec![])
                 }
                 TestAction::Decrement => {
                     let mut new_state = state.clone();
                     new_state.counter -= 1;
-                    DispatchOp::Dispatch(new_state, None)
+                    DispatchOp::Dispatch(new_state, vec![])
                 }
                 TestAction::SetMessage(msg) => {
                     let mut new_state = state.clone();
                     new_state.message = msg.clone();
-                    DispatchOp::Dispatch(new_state, None)
+                    DispatchOp::Dispatch(new_state, vec![])
                 }
             }
         }
@@ -154,14 +154,15 @@ mod tests {
             16,
             BackpressurePolicy::default(),
             vec![],
-        ).unwrap()
+        )
+        .unwrap()
     }
 
     struct TestChannneledReducer;
 
     impl Reducer<i32, i32> for TestChannneledReducer {
         fn reduce(&self, state: &i32, action: &i32) -> DispatchOp<i32, i32> {
-            DispatchOp::Dispatch(state + action, None)
+            DispatchOp::Dispatch(state + action, vec![])
         }
     }
 

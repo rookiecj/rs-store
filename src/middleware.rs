@@ -103,7 +103,7 @@ mod tests {
     impl Reducer<i32, i32> for TestReducer {
         fn reduce(&self, _state: &i32, action: &i32) -> DispatchOp<i32, i32> {
             let new_state = *action;
-            DispatchOp::Dispatch(new_state, None)
+            DispatchOp::Dispatch(new_state, vec![])
         }
     }
 
@@ -328,11 +328,11 @@ mod tests {
             match action {
                 MiddlewareAction::ReqThisAction(value) => {
                     let new_state = *value;
-                    DispatchOp::Dispatch(new_state, None)
+                    DispatchOp::Dispatch(new_state, vec![])
                 }
                 MiddlewareAction::ResponseAsThis(value) => {
                     let new_state = *value;
-                    DispatchOp::Dispatch(new_state, None)
+                    DispatchOp::Dispatch(new_state, vec![])
                 }
             }
         }
@@ -446,11 +446,11 @@ mod tests {
                             Ok(new_result)
                         }),
                     );
-                    DispatchOp::Dispatch(new_state, Some(effect))
+                    DispatchOp::Dispatch(new_state, vec![effect])
                 }
                 EffectAction::ResponseForTheEffect(value) => {
                     let new_state = EffectState { value: *value };
-                    DispatchOp::Dispatch(new_state, None)
+                    DispatchOp::Dispatch(new_state, vec![])
                 }
             }
         }

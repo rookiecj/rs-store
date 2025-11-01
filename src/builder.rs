@@ -173,7 +173,7 @@ mod tests {
     impl Reducer<i32, i32> for TestReducer {
         fn reduce(&self, state: &i32, action: &i32) -> DispatchOp<i32, i32> {
             let new_state = state + action;
-            DispatchOp::Dispatch(new_state, None)
+            DispatchOp::Dispatch(new_state, vec![])
         }
     }
 
