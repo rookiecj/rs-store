@@ -1,4 +1,5 @@
 use crate::effect::Effect;
+use std::sync::Arc;
 
 /// determine if the action should be dispatched or not
 pub enum DispatchOp<State, Action> {
@@ -16,6 +17,105 @@ where
     Action: Send + Sync + std::fmt::Debug + 'static,
 {
     fn reduce(&self, state: &State, action: &Action) -> DispatchOp<State, Action>;
+}
+
+/// ReducerChain chains reducers together sequentially.
+/// The first reducer in the vector becomes the first reducer in the chain.
+/// Execution order: first reducer -> second reducer -> ... -> last reducer
+pub struct ReducerChain<State, Action>
+where
+    State: Send + Sync + Clone,
+    Action: Send + Sync + std::fmt::Debug + 'static,
+{
+    reducer: Arc<dyn Reducer<State, Action> + Send + Sync>,
+    next: Option<Box<ReducerChain<State, Action>>>,
+}
+
+impl<State, Action> ReducerChain<State, Action>
+where
+    State: Send + Sync + Clone,
+    Action: Send + Sync + std::fmt::Debug + 'static,
+{
+    /// Create a new reducer chain with a single reducer
+    pub fn new(reducer: Arc<dyn Reducer<State, Action> + Send + Sync>) -> Self {
+        Self {
+            reducer,
+            next: None,
+        }
+    }
+
+    /// Chain another reducer to this chain
+    pub fn chain(mut self, reducer: Arc<dyn Reducer<State, Action> + Send + Sync>) -> Self {
+        if let Some(ref mut next) = self.next {
+            // Recursively chain to the end
+            *next = Box::new(next.as_ref().clone().chain(reducer));
+        } else {
+            // add at tail of the chain
+            self.next = Some(Box::new(ReducerChain::new(reducer)));
+        }
+        self
+    }
+
+    /// Create a reducer chain from a vector of reducers
+    /// The first reducer in the vector becomes the first reducer in the chain.
+    pub fn from_vec(reducers: Vec<Box<dyn Reducer<State, Action> + Send + Sync>>) -> Option<Self> {
+        if reducers.is_empty() {
+            return None;
+        }
+
+        let mut iter = reducers.into_iter();
+        let mut tail = ReducerChain::new(Arc::from(iter.next()?));
+
+        for reducer in iter {
+            tail = tail.chain(Arc::from(reducer));
+        }
+
+        Some(tail)
+    }
+
+    /// Execute the reducer chain, starting from the first reducer
+    /// Returns (final_state, effects, need_dispatch)
+    pub fn execute(&self, mut state: State, action: &Action) -> (State, Vec<Effect<Action>>, bool) {
+        let mut accum_effects = Vec::new();
+
+        // Execute current reducer
+        let need_dispatch = match self.reducer.reduce(&state, action) {
+            DispatchOp::Dispatch(new_state, mut effects) => {
+                state = new_state;
+                accum_effects.append(&mut effects);
+                true
+            }
+            DispatchOp::Keep(new_state, mut effects) => {
+                state = new_state;
+                accum_effects.append(&mut effects);
+                false
+            }
+        };
+
+        // Continue with next reducer if exists
+        if let Some(ref next) = self.next {
+            let (final_state, next_effects, next_dispatch) = next.execute(state, action);
+            accum_effects.extend(next_effects);
+            // The last reducer's decision wins (next executes after current, so next_dispatch takes precedence)
+            (final_state, accum_effects, next_dispatch)
+        } else {
+            (state, accum_effects, need_dispatch)
+        }
+    }
+}
+
+// Implement Clone for ReducerChain to support recursive chaining
+impl<State, Action> Clone for ReducerChain<State, Action>
+where
+    State: Send + Sync + Clone,
+    Action: Send + Sync + std::fmt::Debug + 'static,
+{
+    fn clone(&self) -> Self {
+        Self {
+            reducer: self.reducer.clone(),
+            next: self.next.as_ref().map(|n| Box::new(n.as_ref().clone())),
+        }
+    }
 }
 
 /// FnReducer is a reducer that is created from a function.

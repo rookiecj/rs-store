@@ -2,8 +2,9 @@ use crate::channel::{BackpressureChannel, BackpressurePolicy, ReceiverChannel, S
 use crate::dispatcher::{Dispatcher, WeakDispatcher};
 use crate::metrics::{CountMetrics, Metrics, MetricsSnapshot};
 use crate::middleware::Middleware;
+use crate::reducer::ReducerChain;
 use crate::subscriber::SubscriberWithId;
-use crate::{DispatchOp, Effect, MiddlewareOp, Reducer, SenderError, Subscriber, Subscription};
+use crate::{Effect, MiddlewareOp, Reducer, SenderError, Subscriber, Subscription};
 use rusty_pool::ThreadPool;
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
@@ -83,7 +84,7 @@ where
     #[allow(dead_code)]
     pub(crate) name: String,
     state: Mutex<State>,
-    pub(crate) reducers: Mutex<Vec<Box<dyn Reducer<State, Action> + Send + Sync>>>,
+    pub(crate) reducer_chain: Mutex<Option<ReducerChain<State, Action>>>,
     pub(crate) subscribers: Arc<Mutex<Vec<SubscriberWithId<State, Action>>>>,
     /// temporary vector to store subscribers to be added
     adding_subscribers: Arc<Mutex<Vec<SubscriberWithId<State, Action>>>>,
@@ -167,10 +168,12 @@ where
             Some(metrics.clone()),
         );
 
+        let reducer_chain = ReducerChain::from_vec(reducers);
+
         let store_impl = StoreImpl {
             name: name.clone(),
             state: Mutex::new(state),
-            reducers: Mutex::new(reducers),
+            reducer_chain: Mutex::new(reducer_chain),
             subscribers: Arc::new(Mutex::new(Vec::default())),
             adding_subscribers: Arc::new(Mutex::new(Vec::default())),
             state_functions: Arc::new(Mutex::new(Vec::default())),
@@ -304,10 +307,18 @@ where
         (&(*self.metrics)).into()
     }
 
-    /// add a reducer to the store
-    pub fn add_reducer(&self, reducer: Box<dyn Reducer<State, Action> + Send + Sync>) {
-        self.reducers.lock().unwrap().push(reducer);
-    }
+    // /// add a reducer to the store
+    // pub(crate) fn add_reducer(&self, reducer: Box<dyn Reducer<State, Action> + Send + Sync>) {
+    //     let reducer_arc = Arc::from(reducer);
+    //     let mut chain_guard = self.reducer_chain.lock().unwrap();
+    //     if let Some(reducer_chain) = chain_guard.take() {
+    //         // Chain the new reducer to the existing chain
+    //         *chain_guard = Some(reducer_chain.chain(reducer_arc));
+    //     } else {
+    //         // Create new chain if none exists
+    //         *chain_guard = Some(ReducerChain::new(reducer_arc));
+    //     }
+    // }
 
     /// add a subscriber to the store
     pub fn add_subscriber(
@@ -453,20 +464,11 @@ where
         if reduce_action {
             let reducer_start = Instant::now();
 
-            for reducer in self.reducers.lock().unwrap().iter() {
-                match reducer.reduce(&state, action) {
-                    DispatchOp::Dispatch(new_state, effects) => {
-                        state = new_state;
-                        need_dispatch = true;
-                        accum_effects.extend(effects);
-                    }
-                    DispatchOp::Keep(new_state, effects) => {
-                        // keep the state but do not dispatch
-                        state = new_state;
-                        accum_effects.extend(effects);
-                        need_dispatch = false;
-                    }
-                }
+            if let Some(ref chain) = self.reducer_chain.lock().unwrap().as_ref() {
+                let (final_state, effects, dispatch_flag) = chain.execute(state, action);
+                state = final_state;
+                accum_effects = effects;
+                need_dispatch = dispatch_flag;
             }
 
             // reducer 실행 시간 측정 종료 및 기록
