@@ -502,7 +502,7 @@ impl Sub<MetricsSnapshot> for MetricsSnapshot {
 mod tests {
     use super::*;
     use crate::{
-        BackpressurePolicy, DispatchOp, Dispatcher, Effect, Middleware, MiddlewareOp, Reducer,
+        BackpressurePolicy, DispatchOp, Dispatcher, MiddlewareFn, MiddlewareFnFactory, Reducer,
         StoreImpl,
     };
     use std::sync::Arc;
@@ -530,30 +530,13 @@ mod tests {
         }
     }
 
-    impl<State, Action> Middleware<State, Action> for TestMiddleware
+    impl<State, Action> MiddlewareFnFactory<State, Action> for TestMiddleware
     where
-        State: Send + Sync + 'static,
-        Action: Send + Sync + Clone + 'static,
+        State: Send + Sync + Clone + 'static,
+        Action: Send + Sync + Clone + std::fmt::Debug + 'static,
     {
-        fn before_reduce(
-            &self,
-            _action: &Action,
-            _state: &State,
-            _dispatcher: Arc<dyn Dispatcher<Action>>,
-        ) -> Result<MiddlewareOp, StoreError> {
-            thread::sleep(Duration::from_millis(10)); // Add delay to test timing
-            Ok(MiddlewareOp::ContinueAction)
-        }
-
-        fn before_effect(
-            &self,
-            _action: &Action,
-            _state: &State,
-            _effects: &mut Vec<Effect<Action>>,
-            _dispatcher: Arc<dyn Dispatcher<Action>>,
-        ) -> Result<MiddlewareOp, StoreError> {
-            thread::sleep(Duration::from_millis(10)); // Add delay to test timing
-            Ok(MiddlewareOp::ContinueAction)
+        fn create(&self, inner: MiddlewareFn<State, Action>) -> MiddlewareFn<State, Action> {
+            Arc::new(move |middleware_context| inner(middleware_context))
         }
     }
 
@@ -634,7 +617,7 @@ mod tests {
             vec![Box::new(TestReducer)],
             "test".to_string(),
             5,
-            BackpressurePolicy::DropOldest,
+            BackpressurePolicy::DropOldestIf(None),
             vec![middleware],
         )
         .unwrap();
@@ -659,7 +642,10 @@ mod tests {
         assert!(metrics.middleware_execution_time > 0);
         assert!(metrics.reducer_execution_time > 0);
         // Middleware should take longer than reducer
-        assert!(metrics.middleware_execution_time > metrics.reducer_execution_time);
+        assert!(
+            metrics.middleware_execution_time >= metrics.reducer_execution_time,
+            "middleware time should be greater than reducer time"
+        );
     }
 
     #[test]

@@ -1,7 +1,7 @@
 use crate::metrics::Metrics;
-use crate::ActionOp;
 #[cfg(feature = "store-log")]
 use crate::store_impl::describe_action_op;
+use crate::ActionOp;
 use std::collections::VecDeque;
 use std::fmt;
 use std::marker::PhantomData;
@@ -16,19 +16,15 @@ where
     /// Block the sender when the queue is full
     #[default]
     BlockOnFull,
-    /// Drop an item from the oldest to the newest when the queue is full
-    #[deprecated(note = "Use DropOldestIf(None) instead")]
-    DropOldest,
-    /// Drop an item from the newest to the oldest when the queue is full
-    #[deprecated(note = "Use DropLatestIf(None) instead")]
-    DropLatest,
     /// Drop items based on predicate when the queue is full, it drops from the newest to the oldest
     /// With this policy, [send] method can be Err when all items are not droppable
     /// Predicate is only applied to ActionOp::Action variants, other variants are never dropped
+    #[allow(clippy::type_complexity)]
     DropLatestIf(Option<Box<dyn Fn(&T) -> bool + Send + Sync>>),
     /// Drop items based on predicate when the queue is full, it drops from the oldest to the newest
     /// With this policy, [send] method can be Err when all items are not droppable
     /// Predicate is only applied to ActionOp::Action variants, other variants are never dropped
+    #[allow(clippy::type_complexity)]
     DropOldestIf(Option<Box<dyn Fn(&T) -> bool + Send + Sync>>),
 }
 
@@ -84,10 +80,9 @@ where
     /// send put an item to the queue with backpressure policy
     /// when it is full, the send will try to drop an item based on the policy:
     /// - with BlockOnFull policy, the send will block until the space is available
-    /// - with DropOldest policy, the send will drop the oldest item and put the new item to the queue
-    /// - with DropLatest policy, the send will drop the newest item and put the new item to the queue
     /// - with DropOldestIf policy, the send will drop an item if the predicate is true from the oldest to the newest
     /// - with DropLatestIf policy, the send will drop an item if the predicate is true from the latest to the oldest
+    ///
     /// if nothing is dropped, the send will block until the space is available
     fn send(&self, item: ActionOp<T>) -> Result<i64, SenderError<ActionOp<T>>> {
         // Check if channel is closed
@@ -119,7 +114,7 @@ where
                     }
                     // Continue loop to add item
                 }
-                BackpressurePolicy::DropOldest | BackpressurePolicy::DropOldestIf(None) => {
+                BackpressurePolicy::DropOldestIf(None) => {
                     // Drop the oldest item, but only if it's an Action variant
                     let mut found_action_to_drop = false;
                     let mut i = 0;
@@ -148,7 +143,7 @@ where
                     }
                     // Continue loop to add item
                 }
-                BackpressurePolicy::DropLatest | BackpressurePolicy::DropLatestIf(None) => {
+                BackpressurePolicy::DropLatestIf(None) => {
                     // Drop the new item only if it's an Action variant
                     let mut found_action_to_drop = false;
                     let mut i = 0;
@@ -299,7 +294,7 @@ where
                 BackpressurePolicy::BlockOnFull => {
                     return Err(SenderError::SendError(item));
                 }
-                BackpressurePolicy::DropOldest | BackpressurePolicy::DropOldestIf(None) => {
+                BackpressurePolicy::DropOldestIf(None) => {
                     // Drop the oldest item, but only if it's an Action variant
                     let mut found_action_to_drop = false;
                     let mut i = 0;
@@ -330,7 +325,7 @@ where
                         return Err(SenderError::SendError(item));
                     }
                 }
-                BackpressurePolicy::DropLatest | BackpressurePolicy::DropLatestIf(None) => {
+                BackpressurePolicy::DropLatestIf(None) => {
                     let mut found_action_to_drop = false;
                     let mut i = 0;
                     while i < queue.len() {

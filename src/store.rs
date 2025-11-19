@@ -48,7 +48,7 @@ where
         subscriber: Arc<dyn Subscriber<State, Action> + Send + Sync>,
     ) -> Result<Box<dyn Subscription>, StoreError>;
 
-    /// Iterate over the store's state and action pairs
+    ///// Iterate over the store's state and action pairs
     //fn iter(&self) -> impl Iterator<Item = (State, Action)>;
 
     /// subscribe to the store in new context
@@ -319,7 +319,7 @@ mod tests {
             .with_reducer(Box::new(TestReducer))
             .with_name("custom-store".into())
             .with_capacity(32)
-            .with_policy(BackpressurePolicy::DropLatest)
+            .with_policy(BackpressurePolicy::DropLatestIf(None))
             .build()
             .unwrap();
 

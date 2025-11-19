@@ -1,9 +1,8 @@
 use crate::store::{StoreError, DEFAULT_CAPACITY};
-use crate::BackpressurePolicy;
-use crate::Middleware;
 use crate::Reducer;
 use crate::StoreImpl;
 use crate::{channel, Store};
+use crate::{BackpressurePolicy, MiddlewareFnFactory};
 use std::sync::Arc;
 
 pub struct StoreBuilder<State, Action>
@@ -17,7 +16,7 @@ where
     without_reducer: bool,
     capacity: usize,
     policy: BackpressurePolicy<Action>,
-    middlewares: Vec<Arc<dyn Middleware<State, Action> + Send + Sync>>,
+    middlewares: Vec<Arc<dyn MiddlewareFnFactory<State, Action> + Send + Sync>>,
 }
 
 impl<State, Action> StoreBuilder<State, Action>
@@ -89,11 +88,12 @@ where
         self
     }
 
-    /// Create a store without reducers.
-    pub fn without_reducer(mut self) -> Self {
-        self.without_reducer = true;
-        self
-    }
+    //
+    // /// Create a store without reducers.
+    // pub(crate) fn without_reducer(mut self) -> Self {
+    //     self.without_reducer = true;
+    //     self
+    // }
 
     /// Set the capacity of the store.
     pub fn with_capacity(mut self, capacity: usize) -> Self {
@@ -111,7 +111,7 @@ where
     /// Set the middleware of the store.
     pub fn with_middleware(
         mut self,
-        middleware: Arc<dyn Middleware<State, Action> + Send + Sync>,
+        middleware: Arc<dyn MiddlewareFnFactory<State, Action> + Send + Sync>,
     ) -> Self {
         self.middlewares = vec![middleware];
         self
@@ -120,7 +120,7 @@ where
     /// Set the middlewares of the store.
     pub fn with_middlewares(
         mut self,
-        middlewares: Vec<Arc<dyn Middleware<State, Action> + Send + Sync>>,
+        middlewares: Vec<Arc<dyn MiddlewareFnFactory<State, Action> + Send + Sync>>,
     ) -> Self {
         self.middlewares = middlewares;
         self
@@ -129,7 +129,7 @@ where
     /// Add a middleware to the store.
     pub fn add_middleware(
         mut self,
-        middleware: Arc<dyn Middleware<State, Action> + Send + Sync>,
+        middleware: Arc<dyn MiddlewareFnFactory<State, Action> + Send + Sync>,
     ) -> Self {
         self.middlewares.push(middleware);
         self
@@ -164,7 +164,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::{DispatchOp, Dispatcher, MiddlewareOp};
+    use crate::{DispatchOp, MiddlewareFn};
 
     use super::*;
 
@@ -200,11 +200,12 @@ mod tests {
         assert!(store.is_ok());
     }
 
-    #[test]
-    fn test_builder_without_reducer() {
-        let store = StoreBuilder::<i32, i32>::new(0).without_reducer().build();
-        assert!(store.is_ok());
-    }
+    // #[test]
+    // #[ignore]
+    // fn test_builder_without_reducer() {
+    //     let store = StoreBuilder::<i32, i32>::new(0).without_reducer().build();
+    //     assert!(store.is_err());
+    // }
 
     #[test]
     fn test_builder_with_capacity() {
@@ -214,23 +215,15 @@ mod tests {
     }
 
     struct TestMiddleware;
-    impl Middleware<i32, i32> for TestMiddleware {
-        fn before_reduce(
-            &self,
-            _action: &i32,
-            _state: &i32,
-            _dispatcher: Arc<dyn Dispatcher<i32>>,
-        ) -> Result<MiddlewareOp, StoreError> {
-            Ok(MiddlewareOp::ContinueAction)
-        }
-        fn before_effect(
-            &self,
-            _action: &i32,
-            _state: &i32,
-            _effects: &mut Vec<crate::Effect<i32>>,
-            _dispatcher: Arc<dyn Dispatcher<i32>>,
-        ) -> Result<MiddlewareOp, StoreError> {
-            Ok(MiddlewareOp::ContinueAction)
+
+    impl MiddlewareFnFactory<i32, i32> for TestMiddleware {
+        fn create(&self, inner: MiddlewareFn<i32, i32>) -> MiddlewareFn<i32, i32> {
+            Arc::new(move |middleware_context| {
+                println!("TestMiddleware: before action");
+                let r = inner(middleware_context);
+                println!("TestMiddleware: after action");
+                r
+            })
         }
     }
 

@@ -74,32 +74,38 @@ where
     }
 
     /// Execute the reducer chain, starting from the first reducer
-    /// Returns (final_state, effects, need_dispatch)
-    pub fn execute(&self, mut state: State, action: &Action) -> (State, Vec<Effect<Action>>, bool) {
-        let mut accum_effects = Vec::new();
-
-        // Execute current reducer
-        let need_dispatch = match self.reducer.reduce(&state, action) {
-            DispatchOp::Dispatch(new_state, mut effects) => {
-                state = new_state;
-                accum_effects.append(&mut effects);
-                true
-            }
-            DispatchOp::Keep(new_state, mut effects) => {
-                state = new_state;
-                accum_effects.append(&mut effects);
-                false
-            }
-        };
-
+    /// Returns DispatchOp with final state and accumulated effects
+    pub fn execute(&self, state: &State, action: &Action) -> DispatchOp<State, Action> {
         // Continue with next reducer if exists
         if let Some(ref next) = self.next {
-            let (final_state, next_effects, next_dispatch) = next.execute(state, action);
-            accum_effects.extend(next_effects);
+            let mut accum_effects = Vec::new();
+            // Execute current reducer
+            let dispatch_op = self.reducer.reduce(state, action);
+            let next_op = match dispatch_op {
+                DispatchOp::Dispatch(intermediate_state, effects) => {
+                    accum_effects.extend(effects);
+                    // Continue with next reducer
+                    next.execute(&intermediate_state, action)
+                }
+                DispatchOp::Keep(intermediate_state, effects) => {
+                    accum_effects.extend(effects);
+                    // Continue with next reducer
+                    next.execute(&intermediate_state, action)
+                }
+            };
             // The last reducer's decision wins (next executes after current, so next_dispatch takes precedence)
-            (final_state, accum_effects, next_dispatch)
+            match next_op {
+                DispatchOp::Dispatch(final_state, effects) => {
+                    accum_effects.extend(effects);
+                    DispatchOp::Dispatch(final_state, accum_effects)
+                }
+                DispatchOp::Keep(final_state, effects) => {
+                    accum_effects.extend(effects);
+                    DispatchOp::Keep(final_state, accum_effects)
+                }
+            }
         } else {
-            (state, accum_effects, need_dispatch)
+            self.reducer.reduce(state, action)
         }
     }
 }
@@ -115,6 +121,16 @@ where
             reducer: self.reducer.clone(),
             next: self.next.as_ref().map(|n| Box::new(n.as_ref().clone())),
         }
+    }
+}
+
+impl<State, Action> Reducer<State, Action> for ReducerChain<State, Action>
+where
+    State: Send + Sync + Clone,
+    Action: Send + Sync + std::fmt::Debug + 'static,
+{
+    fn reduce(&self, state: &State, action: &Action) -> DispatchOp<State, Action> {
+        self.execute(state, action)
     }
 }
 

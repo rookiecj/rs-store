@@ -1,10 +1,9 @@
 use crate::channel::{BackpressureChannel, BackpressurePolicy, ReceiverChannel, SenderChannel};
 use crate::dispatcher::{Dispatcher, WeakDispatcher};
 use crate::metrics::{CountMetrics, Metrics, MetricsSnapshot};
-use crate::middleware::Middleware;
-use crate::reducer::ReducerChain;
+use crate::middleware::{MiddlewareContext, MiddlewareFn, MiddlewareFnFactory};
 use crate::subscriber::SubscriberWithId;
-use crate::{Effect, MiddlewareOp, Reducer, SenderError, Subscriber, Subscription};
+use crate::{DispatchOp, Effect, Reducer, SenderError, Subscriber, Subscription};
 use rusty_pool::ThreadPool;
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
@@ -26,8 +25,6 @@ where
     Action(Action),
     /// AddSubscriber is used to add a subscriber to the store
     AddSubscriber,
-    // /// RemoveSubscriber is used to remove a subscriber from the store
-    // RemoveSubscriber(u64),
     /// StateFunction is used to execute a function with the current state
     StateFunction,
     /// Exit is used to exit the store and should not be dropped
@@ -84,13 +81,15 @@ where
     #[allow(dead_code)]
     pub(crate) name: String,
     state: Mutex<State>,
-    pub(crate) reducer_chain: Mutex<Option<ReducerChain<State, Action>>>,
+    pub(crate) reducers: Mutex<Vec<Box<dyn Reducer<State, Action> + Send + Sync>>>,
     pub(crate) subscribers: Arc<Mutex<Vec<SubscriberWithId<State, Action>>>>,
     /// temporary vector to store subscribers to be added
     adding_subscribers: Arc<Mutex<Vec<SubscriberWithId<State, Action>>>>,
     state_functions: Arc<Mutex<Vec<Box<dyn FnOnce(&State) + Send + Sync + 'static>>>>,
     pub(crate) dispatch_tx: Mutex<Option<SenderChannel<Action>>>,
-    middlewares: Mutex<Vec<Arc<dyn Middleware<State, Action> + Send + Sync>>>,
+    #[allow(dead_code)]
+    middleware_factories: Mutex<Vec<Arc<dyn MiddlewareFnFactory<State, Action> + Send + Sync>>>, // New middleware chain
+
     pub(crate) metrics: Arc<CountMetrics>,
     /// thread pool for the store
     pub(crate) pool: Mutex<Option<ThreadPool>>,
@@ -115,24 +114,31 @@ where
     State: Send + Sync + Clone + 'static,
     Action: Send + Sync + Clone + std::fmt::Debug + 'static,
 {
-    /// create a new store with an initial state
-    pub fn new(state: State) -> Result<Arc<StoreImpl<State, Action>>, StoreError> {
-        Self::new_with(
-            state,
-            vec![],
-            DEFAULT_STORE_NAME.into(),
-            DEFAULT_CAPACITY,
-            BackpressurePolicy::default(),
-            vec![],
-        )
-    }
+    // /// create a new store with an initial state
+    // pub(crate) fn new(state: State) -> Result<Arc<StoreImpl<State, Action>>, StoreError> {
+    //     Self::new_with(
+    //         state,
+    //         vec![],
+    //         DEFAULT_STORE_NAME.into(),
+    //         DEFAULT_CAPACITY,
+    //         BackpressurePolicy::default(),
+    //         vec![],
+    //     )
+    // }
 
     /// create a new store with a reducer and an initial state
     pub fn new_with_reducer(
         state: State,
         reducer: Box<dyn Reducer<State, Action> + Send + Sync>,
     ) -> Result<Arc<StoreImpl<State, Action>>, StoreError> {
-        Self::new_with_name(state, reducer, DEFAULT_STORE_NAME.into())
+        Self::new_with(
+            state,
+            vec![reducer],
+            DEFAULT_STORE_NAME.into(),
+            DEFAULT_CAPACITY,
+            BackpressurePolicy::default(),
+            vec![],
+        )
     }
 
     /// create a new store with name
@@ -158,7 +164,7 @@ where
         name: String,
         capacity: usize,
         policy: BackpressurePolicy<Action>,
-        middlewares: Vec<Arc<dyn Middleware<State, Action> + Send + Sync>>,
+        middlewares: Vec<Arc<dyn MiddlewareFnFactory<State, Action> + Send + Sync>>,
     ) -> Result<Arc<StoreImpl<State, Action>>, StoreError> {
         let metrics = Arc::new(CountMetrics::default());
         let (tx, rx) = BackpressureChannel::<Action>::pair_with(
@@ -168,16 +174,20 @@ where
             Some(metrics.clone()),
         );
 
-        let reducer_chain = ReducerChain::from_vec(reducers);
+        if reducers.is_empty() {
+            return Err(StoreError::InitError(
+                "At least one reducer is required".to_string(),
+            ));
+        }
 
         let store_impl = StoreImpl {
             name: name.clone(),
             state: Mutex::new(state),
-            reducer_chain: Mutex::new(reducer_chain),
+            reducers: Mutex::new(reducers),
             subscribers: Arc::new(Mutex::new(Vec::default())),
             adding_subscribers: Arc::new(Mutex::new(Vec::default())),
             state_functions: Arc::new(Mutex::new(Vec::default())),
-            middlewares: Mutex::new(middlewares),
+            middleware_factories: Mutex::new(middlewares),
             dispatch_tx: Mutex::new(Some(tx)),
             metrics,
             pool: Mutex::new(Some(
@@ -219,6 +229,58 @@ where
         #[cfg(feature = "store-log")]
         eprintln!("store: reducer thread started");
 
+        let store_clone = store_impl.clone();
+        let reducer_middleware: MiddlewareFn<State, Action> =
+            Arc::new(move |ctx: &mut MiddlewareContext<State, Action>| {
+                let mut need_to_dispatch = true;
+                let started_at = Instant::now();
+                if store_clone.reducers.lock().unwrap().len() == 1 {
+                    let dispatch_op =
+                        store_clone.reducers.lock().unwrap()[0].reduce(&ctx.state, &ctx.action);
+                    match dispatch_op {
+                        DispatchOp::Dispatch(state, effects) => {
+                            need_to_dispatch = true;
+                            ctx.state = state;
+                            ctx.effects.extend(effects);
+                        }
+                        DispatchOp::Keep(state, effects) => {
+                            need_to_dispatch = false;
+                            ctx.state = state;
+                            ctx.effects.extend(effects);
+                        }
+                    }
+                } else {
+                    for reducer in store_clone.reducers.lock().unwrap().iter() {
+                        let dispatch_op = reducer.reduce(&ctx.state, &ctx.action);
+                        match dispatch_op {
+                            DispatchOp::Dispatch(state, effects) => {
+                                ctx.state = state;
+                                ctx.effects.extend(effects);
+                                need_to_dispatch = true;
+                            }
+                            DispatchOp::Keep(state, effects) => {
+                                ctx.state = state;
+                                ctx.effects.extend(effects);
+                                need_to_dispatch = false;
+                            }
+                        }
+                    }
+                }
+                store_clone.metrics.action_reduced(
+                    Some(&ctx.action),
+                    started_at.elapsed(),
+                    ctx.action_at.elapsed(),
+                );
+                Ok(need_to_dispatch)
+            });
+
+        let mut middleware_deco = reducer_middleware;
+        // chain middlewares in reverse order
+        for middleware in store_impl.middleware_factories.lock().unwrap().iter().rev() {
+            middleware_deco = middleware.create(middleware_deco);
+        }
+
+        let middleware_deco_arc = Arc::new(middleware_deco);
         while let Some(action_op) = rx.recv() {
             let action_received_at = Instant::now();
             store_impl.metrics.action_received(Some(&action_op));
@@ -231,28 +293,41 @@ where
             match action_op {
                 ActionOp::Action(action) => {
                     // do reduce
-                    let current_state = store_impl.state.lock().unwrap().clone();
-                    let (need_dispatch, new_state, effects) = store_impl.do_reduce(
-                        &action,
-                        current_state,
-                        store_impl.clone(),
-                        action_received_at,
-                    );
-                    *store_impl.state.lock().unwrap() = new_state.clone();
+                    let mut middleware_context = MiddlewareContext {
+                        action: action.clone(),
+                        action_at: action_received_at,
+                        state: store_impl.state.lock().unwrap().clone(),
+                        effects: vec![],
+                        dispatcher: Arc::new(WeakDispatcher::new(store_impl.clone())),
+                    };
+                    let result =
+                        store_impl.do_reduce(&mut middleware_context, middleware_deco_arc.clone());
 
-                    // do effects remain
-                    if let Some(mut effects) = effects {
-                        store_impl.do_effect(&action, &new_state, &mut effects, store_impl.clone());
-                    }
-
-                    // do notify subscribers
-                    if need_dispatch {
-                        store_impl.do_notify(
-                            &action,
-                            &new_state,
-                            store_impl.clone(),
-                            action_received_at,
-                        );
+                    match result {
+                        Ok(need_dispatch) => {
+                            // state
+                            *store_impl.state.lock().unwrap() = middleware_context.state.clone();
+                            // do effects remain
+                            store_impl
+                                .do_effect(&mut middleware_context.effects, store_impl.clone());
+                            // do notify subscribers
+                            if need_dispatch {
+                                store_impl.do_notify(
+                                    &action,
+                                    &store_impl.state.lock().unwrap(),
+                                    store_impl.clone(),
+                                    action_received_at,
+                                );
+                            }
+                        }
+                        Err(_e) => {
+                            #[cfg(feature = "store-log")]
+                            eprintln!(
+                                "store: error do_reduce: action: {:?}, remains: {}",
+                                action,
+                                rx.len()
+                            );
+                        }
                     }
 
                     store_impl.metrics.action_executed(Some(&action), action_received_at.elapsed());
@@ -262,7 +337,7 @@ where
                     let new_subscribers_len = new_subscribers.len();
                     if new_subscribers_len > 0 {
                         let current_state = store_impl.state.lock().unwrap().clone();
-                        let iter_subscribers = new_subscribers.drain(..).into_iter();
+                        let iter_subscribers = new_subscribers.drain(..);
 
                         store_impl.do_subscribe(&current_state, iter_subscribers);
                     }
@@ -412,118 +487,31 @@ where
     /// * effects : side effects
     pub(crate) fn do_reduce(
         &self,
-        action: &Action,
-        mut state: State,
-        dispatcher: Arc<StoreImpl<State, Action>>,
-        action_received_at: Instant,
-    ) -> (bool, State, Option<Vec<Effect<Action>>>) {
-        //let state = self.state.lock().unwrap().clone();
+        middleware_context: &mut MiddlewareContext<State, Action>,
+        middleware_deco: Arc<MiddlewareFn<State, Action>>,
+    ) -> Result<bool, StoreError> {
+        let started_at = Instant::now();
 
-        #[cfg(feature = "store-log")]
-        eprintln!(
-            "store: reduce: action: {}",
-            crate::store_impl::describe_action(action)
+        // call middleware chain
+        let result = middleware_deco(middleware_context);
+
+        self.metrics.middleware_executed(
+            Some(&middleware_context.action),
+            "",
+            1,
+            started_at.elapsed(),
         );
 
-        let mut reduce_action = true;
-        if !self.middlewares.lock().unwrap().is_empty() {
-            let middleware_start = Instant::now();
-            let mut middleware_executed = 0;
-            let weak_dispatcher = Arc::new(WeakDispatcher::new(dispatcher.clone()));
-            for middleware in self.middlewares.lock().unwrap().iter() {
-                middleware_executed += 1;
-                match middleware.before_reduce(action, &state, weak_dispatcher.clone()) {
-                    Ok(MiddlewareOp::ContinueAction) => {
-                        // continue dispatching the action
-                    }
-                    Ok(MiddlewareOp::DoneAction) => {
-                        // stop dispatching the action
-                        // last middleware wins
-                        reduce_action = false;
-                    }
-                    Ok(MiddlewareOp::BreakChain) => {
-                        // break the middleware chain
-                        break;
-                    }
-                    Err(e) => {
-                        middleware.on_error(e);
-                    }
-                }
-            }
-            let middleware_duration = middleware_start.elapsed();
-            self.metrics.middleware_executed(
-                Some(action),
-                "before_reduce",
-                middleware_executed,
-                middleware_duration,
-            );
-        }
-
-        let mut accum_effects = vec![];
-        let mut need_dispatch = true;
-        if reduce_action {
-            let reducer_start = Instant::now();
-
-            if let Some(ref chain) = self.reducer_chain.lock().unwrap().as_ref() {
-                let (final_state, effects, dispatch_flag) = chain.execute(state, action);
-                state = final_state;
-                accum_effects = effects;
-                need_dispatch = dispatch_flag;
-            }
-
-            // reducer 실행 시간 측정 종료 및 기록
-            let reducer_duration = reducer_start.elapsed();
-            self.metrics.action_reduced(
-                Some(action),
-                reducer_duration,
-                action_received_at.elapsed(),
-            );
-        }
-
-        (need_dispatch, state, Some(accum_effects))
+        result
     }
 
     pub(crate) fn do_effect(
         &self,
-        action: &Action,
-        state: &State,
         effects: &mut Vec<Effect<Action>>,
         dispatcher: Arc<StoreImpl<State, Action>>,
     ) {
         let effect_start = Instant::now();
         self.metrics.effect_issued(effects.len());
-
-        if !self.middlewares.lock().unwrap().is_empty() {
-            let middleware_start = Instant::now();
-            let mut middleware_executed = 0;
-            let weak_dispatcher = Arc::new(WeakDispatcher::new(dispatcher.clone()));
-            for middleware in self.middlewares.lock().unwrap().iter() {
-                middleware_executed += 1;
-                match middleware.before_effect(action, state, effects, weak_dispatcher.clone()) {
-                    Ok(MiddlewareOp::ContinueAction) => {
-                        // do nothing
-                    }
-                    Ok(MiddlewareOp::DoneAction) => {
-                        // do nothing
-                    }
-                    Ok(MiddlewareOp::BreakChain) => {
-                        // break the middleware chain
-                        break;
-                    }
-                    Err(e) => {
-                        middleware.on_error(e);
-                    }
-                }
-            }
-
-            let middleware_duration = middleware_start.elapsed();
-            self.metrics.middleware_executed(
-                Some(action),
-                "before_effect",
-                middleware_executed,
-                middleware_duration,
-            );
-        }
 
         let effects_total = effects.len();
         while !effects.is_empty() {
@@ -563,7 +551,7 @@ where
         &self,
         action: &Action,
         next_state: &State,
-        dispatcher: Arc<StoreImpl<State, Action>>,
+        _dispatcher: Arc<StoreImpl<State, Action>>,
         _action_received_at: Instant,
     ) {
         let _notify_start = Instant::now();
@@ -575,47 +563,12 @@ where
             crate::store_impl::describe_action(action)
         );
 
-        let mut need_notify = true;
-        if !self.middlewares.lock().unwrap().is_empty() {
-            let middleware_start = Instant::now();
-            let mut middleware_executed = 0;
-            let weak_dispatcher = Arc::new(WeakDispatcher::new(dispatcher.clone()));
-            for middleware in self.middlewares.lock().unwrap().iter() {
-                middleware_executed += 1;
-                match middleware.before_dispatch(action, next_state, weak_dispatcher.clone()) {
-                    Ok(MiddlewareOp::ContinueAction) => {
-                        // do nothing
-                    }
-                    Ok(MiddlewareOp::DoneAction) => {
-                        // last win
-                        need_notify = false;
-                    }
-                    Ok(MiddlewareOp::BreakChain) => {
-                        // break the middleware chain
-                        break;
-                    }
-                    Err(e) => {
-                        middleware.on_error(e);
-                    }
-                }
-            }
-            let middleware_duration = middleware_start.elapsed();
-            self.metrics.middleware_executed(
-                Some(action),
-                "before_dispatch",
-                middleware_executed,
-                middleware_duration,
-            );
+        let subscribers = self.subscribers.lock().unwrap().clone();
+        for subscriber_with_id in subscribers.iter() {
+            subscriber_with_id.on_notify(next_state, action);
         }
-
-        if need_notify {
-            let subscribers = self.subscribers.lock().unwrap().clone();
-            for subscriber_with_id in subscribers.iter() {
-                subscriber_with_id.on_notify(next_state, action);
-            }
-            let duration = _notify_start.elapsed();
-            self.metrics.subscriber_notified(Some(action), subscribers.len(), duration);
-        }
+        let duration = _notify_start.elapsed();
+        self.metrics.subscriber_notified(Some(action), subscribers.len(), duration);
     }
 
     fn do_subscribe(
@@ -669,7 +622,6 @@ where
             Err(_e) => {
                 #[cfg(feature = "store-log")]
                 eprintln!("store: Error while locking state functions: {:?}", _e);
-                return;
             }
         };
     }
@@ -853,20 +805,20 @@ where
                     ))),
                 };
             }
-            return Err(StoreError::DispatchError(
+            Err(StoreError::DispatchError(
                 "Dispatch channel is closed".to_string(),
-            ));
+            ))
         } else {
-            return Err(StoreError::DispatchError(
+            Err(StoreError::DispatchError(
                 "Dispatch channel is closed".to_string(),
-            ));
+            ))
         }
     }
 
-    /// Add middleware
-    pub fn add_middleware(&self, middleware: Arc<dyn Middleware<State, Action> + Send + Sync>) {
-        self.middlewares.lock().unwrap().push(middleware.clone());
-    }
+    // /// Add middleware
+    // pub(crate) fn add_middleware(&self, middleware: Arc<dyn NewMiddlewareFnFactory<State, Action> + Send + Sync>) {
+    //     self.middleware_factories.lock().unwrap().push(middleware);
+    // }
 
     /// Iterator for the state
     ///
@@ -963,8 +915,10 @@ where
 
         // subscribe to the store
         let channel_subscriber = Arc::new(ChanneledSubscriber::new(handle, tx));
-        let subscription = self.add_subscriber(channel_subscriber.clone());
+        let subscription = self.add_subscriber(channel_subscriber);
 
+        // return subscription
+        #[allow(clippy::let_and_return)]
         subscription
     }
 
@@ -1190,8 +1144,7 @@ where
 mod tests {
     use super::*;
     use crate::{
-        BackpressurePolicy, DispatchOp, Dispatcher, Effect, FnReducer, Middleware, MiddlewareOp,
-        Reducer, StoreBuilder,
+        BackpressurePolicy, DispatchOp, Dispatcher, Effect, FnReducer, Reducer, StoreBuilder,
     };
     use std::sync::Arc;
     use std::thread;
@@ -1796,28 +1749,13 @@ mod tests {
         // given: store with middleware
         struct TestMiddleware;
 
-        impl<State, Action> Middleware<State, Action> for TestMiddleware
+        impl<State, Action> MiddlewareFnFactory<State, Action> for TestMiddleware
         where
-            State: Send + Sync + 'static,
-            Action: Send + Sync + Clone + 'static,
+            State: Send + Sync + Clone + 'static,
+            Action: Send + Sync + Clone + std::fmt::Debug + 'static,
         {
-            fn before_reduce(
-                &self,
-                _action: &Action,
-                _state: &State,
-                _dispatcher: Arc<dyn Dispatcher<Action>>,
-            ) -> Result<MiddlewareOp, StoreError> {
-                Ok(MiddlewareOp::ContinueAction)
-            }
-
-            fn before_effect(
-                &self,
-                _action: &Action,
-                _state: &State,
-                _effects: &mut Vec<Effect<Action>>,
-                _dispatcher: Arc<dyn Dispatcher<Action>>,
-            ) -> Result<MiddlewareOp, StoreError> {
-                Ok(MiddlewareOp::ContinueAction)
+            fn create(&self, inner: MiddlewareFn<State, Action>) -> MiddlewareFn<State, Action> {
+                inner
             }
         }
 
