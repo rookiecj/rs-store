@@ -14,17 +14,12 @@ pub enum Effect<Action> {
     /// A function which has a result.
     /// The result is an Any type which can be downcasted to the expected type,
     /// you should know the type and the String key can help.
-    /// The result default ignored, if you want to get the result of the function, you can use `EffectMiddleware` to receive the result.
+    /// The result default ignored, if you want to get the result of the function, you can use a middleware like `EffectMiddleware` or handle the result in the reducer.
     Function(String, EffectFunction),
 }
 
 pub type EffectResult = Result<Box<dyn std::any::Any>, Box<dyn std::error::Error>>;
 pub type EffectFunction = Box<dyn FnOnce() -> EffectResult + Send>;
-
-/// EffectResultReceiver is a trait that can receive the result of an effect function.
-pub trait EffectResultReceiver {
-    fn receive(&self, key: String, result: EffectResult);
-}
 
 #[cfg(test)]
 mod tests {

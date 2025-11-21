@@ -35,6 +35,7 @@ impl CloneCounter {
         self.locations.lock().unwrap().clone()
     }
 
+    #[allow(dead_code)]
     fn reset(&self) {
         *self.count.lock().unwrap() = 0;
         self.locations.lock().unwrap().clear();
@@ -49,6 +50,7 @@ struct SmallState {
 }
 
 impl SmallState {
+    #[allow(dead_code)]
     fn new(counter: i32, clone_counter: CloneCounter) -> Self {
         SmallState {
             counter,
@@ -431,8 +433,11 @@ fn main() {
     // 큰 State 테스트
     test_large_state();
 
-    // 매우 큰 State 테스트
+    // 매우 큰 State 테스트 (값으로 전달)
     test_very_large_state();
+
+    // 매우 큰 State 테스트 (Arc로 전달)
+    test_very_large_state_with_arc();
 }
 
 fn test_small_state() {
@@ -512,7 +517,7 @@ fn test_medium_state() {
 }
 
 fn test_large_state() {
-    println!("--- Large State 테스트 (1MB, 100 actions) ---");
+    println!("--- Large State 테스트 (1MB, 1000 actions) ---");
     let reducer_times = Arc::new(Mutex::new(Vec::<std::time::Duration>::new()));
     let subscriber_times = Arc::new(Mutex::new(Vec::<std::time::Duration>::new()));
 
@@ -541,7 +546,7 @@ fn test_large_state() {
     run_test(
         "Large (1MB)",
         LargeState::default(),
-        100,
+        1000,
         reducer,
         Arc::new(subscriber),
         reducer_times,
@@ -550,7 +555,7 @@ fn test_large_state() {
 }
 
 fn test_very_large_state() {
-    println!("--- Very Large State 테스트 (10MB, 10 actions) ---");
+    println!("--- Very Large State 테스트 (10MB, 값으로 전달, 1000 actions) ---");
     let reducer_times = Arc::new(Mutex::new(Vec::<std::time::Duration>::new()));
     let subscriber_times = Arc::new(Mutex::new(Vec::<std::time::Duration>::new()));
 
@@ -577,9 +582,58 @@ fn test_very_large_state() {
     });
 
     run_test(
-        "Very Large (10MB)",
+        "Very Large (10MB, 값으로 전달)",
         VeryLargeState::default(),
-        10,
+        1000,
+        reducer,
+        Arc::new(subscriber),
+        reducer_times,
+        subscriber_times,
+    );
+}
+
+fn test_very_large_state_with_arc() {
+    println!("--- Very Large State 테스트 (10MB, Arc로 전달, 1000 actions) ---");
+    let reducer_times = Arc::new(Mutex::new(Vec::<std::time::Duration>::new()));
+    let subscriber_times = Arc::new(Mutex::new(Vec::<std::time::Duration>::new()));
+
+    let reducer_times_clone = reducer_times.clone();
+    let subscriber_times_clone = subscriber_times.clone();
+
+    // Arc<VeryLargeState>를 State로 사용
+    type ArcVeryLargeState = Arc<VeryLargeState>;
+
+    let reducer = FnReducer::from(move |state: ArcVeryLargeState, action: TestAction| {
+        let start = Instant::now();
+        // Arc::make_mut()을 사용하여 copy-on-write 방식으로 수정
+        // Arc가 단일 소유권이면 in-place 수정, 여러 소유권이면 복사 후 수정
+        let mut new_state = state.clone(); // Arc clone (참조 카운트만 증가)
+        let inner = Arc::make_mut(&mut new_state); // 필요시에만 실제 데이터 복사
+        match action {
+            TestAction::Increment => {
+                inner.set_counter(inner.counter() + 1);
+            }
+            TestAction::Decrement => {
+                inner.set_counter(inner.counter() - 1);
+            }
+        }
+        let elapsed = start.elapsed();
+        reducer_times_clone.lock().unwrap().push(elapsed);
+        DispatchOp::Dispatch(new_state, vec![])
+    });
+
+    let subscriber = FnSubscriber::from(move |state: ArcVeryLargeState, _action: TestAction| {
+        let start = Instant::now();
+        // Arc clone은 매우 빠름 (참조 카운트만 증가)
+        let _ = state.clone();
+        let elapsed = start.elapsed();
+        subscriber_times_clone.lock().unwrap().push(elapsed);
+    });
+
+    run_test_with_arc(
+        "Very Large (10MB, Arc로 전달)",
+        Arc::new(VeryLargeState::default()),
+        1000, // Arc를 사용하면 더 많은 액션을 빠르게 처리할 수 있음
         reducer,
         Arc::new(subscriber),
         reducer_times,
@@ -599,9 +653,13 @@ fn run_test<State>(
     State: Send + Sync + Clone + std::fmt::Debug + 'static,
 {
     // Store 생성
-    let store = StoreBuilder::new(initial_state)
+    let store: Arc<dyn rs_store::Store<State, TestAction>> = StoreBuilder::new(initial_state)
         .with_reducer(
-            Box::new(reducer) as Box<dyn rs_store::Reducer<State, TestAction> + Send + Sync>
+            // Box::new(reducer)만으로는 컴파일러가 목표 타입(Reducer<State, TestAction>)을 알 수 없습니다.
+            // trait object로의 unsized coercion을 수행하여 목표 타입을 지정해줘야 합니다.
+            // 목표 type 추론할 수 있도록 store에 타입을 선언했다. 이제 cast 제거 가능
+            // Box::new(reducer) as Box<dyn rs_store::Reducer<State, TestAction> + Send + Sync>
+            Box::new(reducer),
         )
         .build()
         .unwrap();
@@ -663,6 +721,10 @@ fn run_test<State>(
     println!("  Reducer 호출 횟수: {}", reducer_times_vec.len());
     println!("  Subscriber 호출 횟수: {}", subscriber_times_vec.len());
     println!("  전체 Clone 횟수: {}", clone_count);
+    println!(
+        "  평균 Clone 횟수: {:0.2}",
+        clone_count as f64 / num_actions as f64
+    );
     if !clone_locations.is_empty() {
         println!("  Clone 발생 위치 (처음 5개):");
         for (i, location) in clone_locations.iter().take(5).enumerate() {
@@ -685,6 +747,8 @@ fn get_clone_count(state: &dyn std::any::Any) -> u64 {
         large.get_clone_count()
     } else if let Some(very_large) = state.downcast_ref::<VeryLargeState>() {
         very_large.get_clone_count()
+    } else if let Some(arc_very_large) = state.downcast_ref::<Arc<VeryLargeState>>() {
+        arc_very_large.get_clone_count()
     } else {
         0
     }
@@ -700,7 +764,103 @@ fn get_clone_locations(state: &dyn std::any::Any) -> Vec<String> {
         large.get_clone_locations()
     } else if let Some(very_large) = state.downcast_ref::<VeryLargeState>() {
         very_large.get_clone_locations()
+    } else if let Some(arc_very_large) = state.downcast_ref::<Arc<VeryLargeState>>() {
+        arc_very_large.get_clone_locations()
     } else {
         Vec::new()
     }
+}
+
+// Arc<VeryLargeState>를 사용하는 경우의 테스트 함수
+fn run_test_with_arc(
+    _name: &str,
+    initial_state: Arc<VeryLargeState>,
+    num_actions: usize,
+    reducer: impl rs_store::Reducer<Arc<VeryLargeState>, TestAction> + Send + Sync + 'static,
+    subscriber: Arc<dyn rs_store::Subscriber<Arc<VeryLargeState>, TestAction> + Send + Sync>,
+    reducer_times: Arc<Mutex<Vec<std::time::Duration>>>,
+    subscriber_times: Arc<Mutex<Vec<std::time::Duration>>>,
+) {
+    // Store 생성
+    let store = StoreBuilder::new(initial_state)
+        .with_reducer(Box::new(reducer)
+            as Box<
+                dyn rs_store::Reducer<Arc<VeryLargeState>, TestAction> + Send + Sync,
+            >)
+        .build()
+        .unwrap();
+
+    // Subscriber 추가
+    store.add_subscriber(subscriber).unwrap();
+
+    // 전체 시간 측정 시작
+    let total_start = Instant::now();
+
+    // 여러 액션 dispatch
+    for i in 0..num_actions {
+        if i % 2 == 0 {
+            store.dispatch(TestAction::Increment).unwrap();
+        } else {
+            store.dispatch(TestAction::Decrement).unwrap();
+        }
+    }
+
+    // Store 정지 및 모든 액션 처리 완료 대기
+    store.stop().unwrap();
+
+    // 전체 시간 측정 종료
+    let total_time = total_start.elapsed();
+
+    // 결과 계산
+    let reducer_times_vec = reducer_times.lock().unwrap();
+    let subscriber_times_vec = subscriber_times.lock().unwrap();
+
+    let reducer_total: std::time::Duration = reducer_times_vec.iter().sum::<std::time::Duration>();
+    let subscriber_total: std::time::Duration =
+        subscriber_times_vec.iter().sum::<std::time::Duration>();
+
+    let avg_reducer_time = if !reducer_times_vec.is_empty() {
+        reducer_total / reducer_times_vec.len() as u32
+    } else {
+        std::time::Duration::ZERO
+    };
+
+    let avg_subscriber_time = if !subscriber_times_vec.is_empty() {
+        subscriber_total / subscriber_times_vec.len() as u32
+    } else {
+        std::time::Duration::ZERO
+    };
+
+    let avg_time_per_action = total_time / num_actions as u32;
+
+    // Clone 횟수 추출 (Arc<VeryLargeState>인 경우)
+    let final_state = store.get_state();
+    let clone_count = final_state.get_clone_count();
+    let clone_locations = final_state.get_clone_locations();
+
+    // 결과 출력
+    println!("  전체 시간: {:?}", total_time);
+    println!("  액션당 평균 시간: {:?}", avg_time_per_action);
+    println!("  Reducer 총 시간: {:?}", reducer_total);
+    println!("  Reducer 평균 시간: {:?}", avg_reducer_time);
+    println!("  Subscriber 총 시간: {:?}", subscriber_total);
+    println!("  Subscriber 평균 시간: {:?}", avg_subscriber_time);
+    println!("  Reducer 호출 횟수: {}", reducer_times_vec.len());
+    println!("  Subscriber 호출 횟수: {}", subscriber_times_vec.len());
+    println!("  전체 Clone 횟수: {}", clone_count);
+    println!(
+        "  평균 Clone 횟수: {:0.2}",
+        clone_count as f64 / num_actions as f64
+    );
+    println!("  ⚠️  참고: Arc를 사용하면 Clone은 참조 카운트만 증가하므로 실제 데이터 복사가 발생하지 않습니다.");
+    if !clone_locations.is_empty() {
+        println!("  Clone 발생 위치 (처음 5개):");
+        for (i, location) in clone_locations.iter().take(5).enumerate() {
+            println!("    {}: {}", i + 1, location);
+        }
+        if clone_locations.len() > 5 {
+            println!("    ... (총 {}개 위치)", clone_locations.len());
+        }
+    }
+    println!();
 }

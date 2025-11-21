@@ -235,8 +235,8 @@ where
                 let mut need_to_dispatch = true;
                 let started_at = Instant::now();
                 if store_clone.reducers.lock().unwrap().len() == 1 {
-                    let dispatch_op =
-                        store_clone.reducers.lock().unwrap()[0].reduce(ctx.state.clone(), ctx.action.clone());
+                    let dispatch_op = store_clone.reducers.lock().unwrap()[0]
+                        .reduce(ctx.state.clone(), ctx.action.clone());
                     match dispatch_op {
                         DispatchOp::Dispatch(state, effects) => {
                             need_to_dispatch = true;
@@ -329,8 +329,7 @@ where
                             );
                         }
                     }
-
-                    store_impl.metrics.action_executed(Some(&action), action_received_at.elapsed());
+                    // store_impl.metrics.action_executed(Some(&action), action_received_at.elapsed());
                 }
                 ActionOp::AddSubscriber => {
                     let mut new_subscribers = store_impl.adding_subscribers.lock().unwrap();
@@ -361,6 +360,7 @@ where
                     break;
                 }
             }
+            store_impl.metrics.action_executed(None, action_received_at.elapsed());
         }
 
         // drop all subscribers
@@ -1043,13 +1043,7 @@ where
     fn on_notify(&self, state: State, action: Action) {
         match self.tx.lock() {
             Ok(tx) => {
-                tx.as_ref().map(|tx| {
-                    tx.send(ActionOp::Action((
-                        Instant::now(),
-                        state,
-                        action,
-                    )))
-                });
+                tx.as_ref().map(|tx| tx.send(ActionOp::Action((Instant::now(), state, action))));
             }
             Err(_e) => {
                 #[cfg(feature = "store-log")]
