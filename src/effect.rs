@@ -66,13 +66,13 @@ mod tests {
     impl Reducer<TestState, TestAction> for TestReducer {
         fn reduce(
             &self,
-            state: &TestState,
-            action: &TestAction,
+            state: TestState,
+            action: TestAction,
         ) -> DispatchOp<TestState, TestAction> {
             match action {
                 TestAction::SetValue(value) => {
                     let new_state = TestState {
-                        value: *value,
+                        value: value,
                         messages: state.messages.clone(),
                     };
                     // Effect::Action - dispatch another action
@@ -113,7 +113,7 @@ mod tests {
                         messages: state.messages.clone(),
                     };
                     // Effect::Thunk - task that uses dispatcher
-                    let value_clone = *value; // Clone the value to avoid lifetime issues
+                    let value_clone = value; // Clone the value to avoid lifetime issues
                     let effect = Effect::Thunk(Box::new(move |dispatcher| {
                         thread::sleep(Duration::from_millis(10));
                         let _ = dispatcher.dispatch(TestAction::AddValue(value_clone));
@@ -149,7 +149,7 @@ mod tests {
     }
 
     impl Subscriber<TestState, TestAction> for TestSubscriber {
-        fn on_notify(&self, state: &TestState, action: &TestAction) {
+        fn on_notify(&self, state: TestState, action: TestAction) {
             self.states.lock().unwrap().push(state.clone());
             self.actions.lock().unwrap().push(action.clone());
         }

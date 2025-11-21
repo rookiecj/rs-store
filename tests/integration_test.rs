@@ -28,7 +28,7 @@ impl Default for TestState {
 struct TestReducer;
 
 impl Reducer<TestState, TestAction> for TestReducer {
-    fn reduce(&self, state: &TestState, action: &TestAction) -> DispatchOp<TestState, TestAction> {
+    fn reduce(&self, state: TestState, action: TestAction) -> DispatchOp<TestState, TestAction> {
         match action {
             TestAction::Increment => {
                 let new_state = TestState {
@@ -46,7 +46,7 @@ impl Reducer<TestState, TestAction> for TestReducer {
             }
             TestAction::SetValue(value) => {
                 let new_state = TestState {
-                    counter: *value,
+                    counter: value,
                     name: state.name.clone(),
                 };
                 DispatchOp::Dispatch(new_state, vec![])
@@ -94,14 +94,14 @@ impl IntegrationTestSubscriber {
 }
 
 impl Subscriber<TestState, TestAction> for IntegrationTestSubscriber {
-    fn on_subscribe(&self, state: &TestState) {
+    fn on_subscribe(&self, state: TestState) {
         // println!("[{}] on_subscribe called with state: {:?}", self.id, state);
         *self.subscribe_called.lock().unwrap() = true;
         *self.initial_state.lock().unwrap() = Some(state.clone());
         self.received_states.lock().unwrap().push(state.clone());
     }
 
-    fn on_notify(&self, state: &TestState, action: &TestAction) {
+    fn on_notify(&self, state: TestState, action: TestAction) {
         // println!(
         //     "[{}] on_notify called with state: {:?}, action: {:?}",
         //     self.id, state, action

@@ -30,7 +30,7 @@ impl Default for CalcState {
 }
 
 impl Reducer<CalcState, CalcAction> for CalcReducer {
-    fn reduce(&self, state: &CalcState, action: &CalcAction) -> DispatchOp<CalcState, CalcAction> {
+    fn reduce(&self, state: CalcState, action: CalcAction) -> DispatchOp<CalcState, CalcAction> {
         match action {
             CalcAction::Add(i) => {
                 println!("CalcReducer::reduce: + {}", i);
@@ -82,7 +82,7 @@ impl CalcSubscriberWithSubscribe {
 }
 
 impl Subscriber<CalcState, CalcAction> for CalcSubscriberWithSubscribe {
-    fn on_subscribe(&self, state: &CalcState) {
+    fn on_subscribe(&self, state: CalcState) {
         println!(
             "CalcSubscriber::on_subscribe: id:{}, received initial state: {:?}",
             self.id, state
@@ -92,7 +92,7 @@ impl Subscriber<CalcState, CalcAction> for CalcSubscriberWithSubscribe {
         *self.last.lock().unwrap() = state.clone();
     }
 
-    fn on_notify(&self, state: &CalcState, action: &CalcAction) {
+    fn on_notify(&self, state: CalcState, action: CalcAction) {
         println!(
             "CalcSubscriber::on_notify: id:{}, state: {:?} <- last: {:?} + action: {:?}",
             self.id,

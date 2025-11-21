@@ -30,7 +30,7 @@ impl Default for CalcState {
 }
 
 impl Reducer<CalcState, CalcAction> for CalcReducer {
-    fn reduce(&self, state: &CalcState, action: &CalcAction) -> DispatchOp<CalcState, CalcAction> {
+    fn reduce(&self, state: CalcState, action: CalcAction) -> DispatchOp<CalcState, CalcAction> {
         match action {
             CalcAction::Add(i) => {
                 println!("CalcReducer::reduce: + {}", i);
@@ -78,7 +78,7 @@ impl CalcSubscriber {
 }
 
 impl Subscriber<CalcState, CalcAction> for CalcSubscriber {
-    fn on_notify(&self, state: &CalcState, action: &CalcAction) {
+    fn on_notify(&self, state: CalcState, action: CalcAction) {
         match action {
             CalcAction::Add(_i) => {
                 println!(

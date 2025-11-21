@@ -1,7 +1,7 @@
-use crate::channel::{ReceiverChannel, SenderChannel};
-use crate::store_impl::ActionOp;
-use crate::{Subscriber, Subscription};
 use std::time::Instant;
+use crate::channel::{ReceiverChannel, SenderChannel};
+use crate::{Subscriber, Subscription};
+use crate::store_impl::ActionOp;
 
 /// StateIteratorSubscriber is a subscriber that sends state and action pairs to an iterator
 #[allow(dead_code)]
@@ -17,9 +17,9 @@ where
     State: Send + Sync + Clone + 'static,
     Action: Send + Sync + Clone + std::fmt::Debug + 'static,
 {
-    fn on_notify(&self, state: &State, action: &Action) {
+    fn on_notify(&self, state: State, action: Action) {
         if let Some(iter_tx) = self.iter_tx.as_ref() {
-            match iter_tx.send(ActionOp::Action((state.clone(), action.clone()))) {
+            match iter_tx.send(ActionOp::Action((state, action))) {
                 Ok(_) => {}
                 Err(_e) => {
                     #[cfg(feature = "store-log")]
@@ -30,16 +30,23 @@ where
     }
 
     fn on_unsubscribe(&self) {
-        // when the subscriber is unsubscribed, send an exit message to the iterator not to wait forever
+        // when the subscriber is unsubscribed, close the channel
         if let Some(iter_tx) = self.iter_tx.as_ref() {
-            let _ = iter_tx.send(ActionOp::Exit(Instant::now()));
+            // break the next loop in the iterator
+            match iter_tx.send(ActionOp::Exit(Instant::now())) {
+                Ok(_) => {}
+                Err(_e) => {
+                    #[cfg(feature = "store-log")]
+                    eprintln!("store: Error while sending Exit to iterator");
+                }
+            }
         }
     }
 }
 
-impl<State> Drop for StateIteratorSubscriber<State>
+impl<T> Drop for StateIteratorSubscriber<T>
 where
-    State: Send + Sync + Clone + 'static,
+    T: Send + Sync + Clone + 'static,
 {
     fn drop(&mut self) {
         if let Some(iter_tx) = self.iter_tx.take() {
@@ -83,6 +90,7 @@ where
 
         if let Some(iter_rx) = self.iter_rx.as_ref() {
             while let Some(action) = iter_rx.recv() {
+                // tx측에서 ActionOp::Action/Exit만 송신
                 match action {
                     ActionOp::Action((state, action)) => return Some((state, action)),
                     ActionOp::Exit(_) => {
@@ -90,9 +98,11 @@ where
                         eprintln!("store: StateIterator exit");
                         break;
                     }
+                    // not expected, but handle it anyway
                     ActionOp::AddSubscriber => {
                         continue;
                     }
+                    // not expected, but handle it anyway
                     ActionOp::StateFunction => {
                         continue;
                     }

@@ -102,7 +102,7 @@ pub fn main() {
     // Example usage of MetricsMiddleware
     let metrics_middleware: MetricsMiddleware<String, String> =
         MetricsMiddleware::new("example_metrics".to_string());
-    let reducer = Box::new(FnReducer::from(|state: &String, action: &String| {
+    let reducer = Box::new(FnReducer::from(|state: String, action: String| {
         let new_state = format!("{} + {}", state, action);
         DispatchOp::Dispatch(new_state, vec![])
     }));

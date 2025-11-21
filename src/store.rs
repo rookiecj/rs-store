@@ -123,8 +123,8 @@ mod tests {
     impl Reducer<TestState, TestAction> for TestReducer {
         fn reduce(
             &self,
-            state: &TestState,
-            action: &TestAction,
+            state: TestState,
+            action: TestAction,
         ) -> DispatchOp<TestState, TestAction> {
             match action {
                 TestAction::Increment => {
@@ -161,7 +161,7 @@ mod tests {
     struct TestChannneledReducer;
 
     impl Reducer<i32, i32> for TestChannneledReducer {
-        fn reduce(&self, state: &i32, action: &i32) -> DispatchOp<i32, i32> {
+        fn reduce(&self, state: i32, action: i32) -> DispatchOp<i32, i32> {
             DispatchOp::Dispatch(state + action, vec![])
         }
     }
@@ -177,9 +177,9 @@ mod tests {
     }
 
     impl Subscriber<i32, i32> for TestChannelSubscriber {
-        fn on_notify(&self, state: &i32, action: &i32) {
+        fn on_notify(&self, state: i32, action: i32) {
             //println!("TestChannelSubscriber: state={}, action={}", state, action);
-            self.received.lock().unwrap().push((*state, *action));
+            self.received.lock().unwrap().push((state, action));
         }
     }
 
@@ -195,10 +195,10 @@ mod tests {
     }
 
     impl Subscriber<i32, i32> for SlowSubscriber {
-        fn on_notify(&self, state: &i32, action: &i32) {
+        fn on_notify(&self, state: i32, action: i32) {
             //println!("SlowSubscriber: state={}, action={}", state, action);
             std::thread::sleep(self.delay);
-            self.received.lock().unwrap().push((*state, *action));
+            self.received.lock().unwrap().push((state, action));
         }
     }
 

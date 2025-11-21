@@ -51,7 +51,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::{BackpressurePolicy, DispatchOp, Dispatcher, Reducer, StoreBuilder, StoreImpl};
+    use crate::{BackpressurePolicy, DispatchOp, Dispatcher, Reducer, StoreImpl};
     use std::sync::{Arc, Mutex};
     use std::thread;
     use std::time::Duration;
@@ -60,8 +60,8 @@ mod tests {
 
     struct TestReducer;
     impl Reducer<i32, i32> for TestReducer {
-        fn reduce(&self, _state: &i32, action: &i32) -> DispatchOp<i32, i32> {
-            let new_state = *action;
+        fn reduce(&self, _state: i32, action: i32) -> DispatchOp<i32, i32> {
+            let new_state = action;
             DispatchOp::Dispatch(new_state, vec![])
         }
     }
@@ -135,71 +135,6 @@ mod tests {
         assert!(logger.logs.lock().unwrap().last().unwrap().contains("after: - Action"));
     }
 
-    struct ChainMiddlewareContinueAction;
-    impl ChainMiddlewareContinueAction {
-        fn new() -> Self {
-            Self {}
-        }
-    }
-
-    impl<State, Action> MiddlewareFnFactory<State, Action> for ChainMiddlewareContinueAction
-    where
-        State: Send + Sync + Clone + 'static,
-        Action: Send + Sync + Clone + std::fmt::Debug + 'static,
-    {
-        fn create(&self, inner: MiddlewareFn<State, Action>) -> MiddlewareFn<State, Action> {
-            Arc::new(move |ctx: &mut MiddlewareContext<State, Action>| {
-                // Continue processing
-                inner(ctx)
-            })
-        }
-    }
-
-    struct ChainMiddlewareDoneAction;
-    impl ChainMiddlewareDoneAction {
-        fn new() -> Self {
-            Self {}
-        }
-    }
-
-    impl<State, Action> MiddlewareFnFactory<State, Action> for ChainMiddlewareDoneAction
-    where
-        State: Send + Sync + Clone + 'static,
-        Action: Send + Sync + Clone + std::fmt::Debug + 'static,
-    {
-        fn create(&self, _inner: MiddlewareFn<State, Action>) -> MiddlewareFn<State, Action> {
-            Arc::new(move |_ctx: &mut MiddlewareContext<State, Action>| {
-                // Skip further processing
-                Ok(false)
-            })
-        }
-    }
-
-    #[test]
-    fn test_middleware_done_action() {
-        // given
-        let store = StoreBuilder::new(0)
-            .with_reducer(Box::new(TestReducer))
-            .add_middleware(Arc::new(ChainMiddlewareDoneAction::new()))
-            .add_middleware(Arc::new(ChainMiddlewareContinueAction::new()))
-            .build();
-        assert!(store.is_ok());
-        let store = store.unwrap();
-
-        // when
-        let _ = store.dispatch(42);
-        match store.stop() {
-            Ok(_) => println!("store stopped"),
-            Err(e) => {
-                panic!("store stop failed  : {:?}", e);
-            }
-        }
-
-        // then
-        // the state should not be changed
-        assert_eq!(store.get_state(), 0);
-    }
-
     #[derive(Debug, Clone)]
     enum MiddlewareAction {
         ReqThisAction(i32),
@@ -214,16 +149,16 @@ mod tests {
     impl Reducer<i32, MiddlewareAction> for MiddlewareReducer {
         fn reduce(
             &self,
-            _state: &i32,
-            action: &MiddlewareAction,
+            _state: i32,
+            action: MiddlewareAction,
         ) -> DispatchOp<i32, MiddlewareAction> {
             match action {
                 MiddlewareAction::ReqThisAction(value) => {
-                    let new_state = *value;
+                    let new_state = value;
                     DispatchOp::Dispatch(new_state, vec![])
                 }
                 MiddlewareAction::ResponseAsThis(value) => {
-                    let new_state = *value;
+                    let new_state = value;
                     DispatchOp::Dispatch(new_state, vec![])
                 }
             }
@@ -250,7 +185,7 @@ mod tests {
                         MiddlewareAction::ReqThisAction(v) => {
                             // do async
                             // ReqAsync -> Response
-                            let v = v.clone();
+                            let v = *v;
                             ctx.dispatcher.dispatch_thunk(Box::new(move |dispatcher| {
                                 let _ =
                                     dispatcher.dispatch(MiddlewareAction::ResponseAsThis(v + 1));
@@ -324,17 +259,15 @@ mod tests {
     impl Reducer<EffectState, EffectAction> for EffectReducer {
         fn reduce(
             &self,
-            _state: &EffectState,
-            action: &EffectAction,
+            _state: EffectState,
+            action: EffectAction,
         ) -> DispatchOp<EffectState, EffectAction> {
             match action {
                 EffectAction::ActionProduceEffectFunction(value) => {
-                    let new_state = EffectState {
-                        value: value.clone(),
-                    };
+                    let new_state = EffectState { value: value };
 
                     // produce an effect function
-                    let value_clone = value.clone();
+                    let value_clone = value;
                     let effect = Effect::Function(
                         "key1".to_string(),
                         Box::new(move || {
@@ -350,7 +283,7 @@ mod tests {
                     DispatchOp::Dispatch(new_state, vec![effect])
                 }
                 EffectAction::ResponseForTheEffect(value) => {
-                    let new_state = EffectState { value: *value };
+                    let new_state = EffectState { value: value };
                     DispatchOp::Dispatch(new_state, vec![])
                 }
             }

@@ -21,7 +21,7 @@ impl Default for CalcState {
     }
 }
 
-fn calc_reducer(state: &CalcState, action: &CalcAction) -> DispatchOp<CalcState, CalcAction> {
+fn calc_reducer(state: CalcState, action: CalcAction) -> DispatchOp<CalcState, CalcAction> {
     match action {
         CalcAction::Add(i) => {
             println!("CalcReducer::reduce: + {}", i);
@@ -44,7 +44,7 @@ fn calc_reducer(state: &CalcState, action: &CalcAction) -> DispatchOp<CalcState,
     }
 }
 
-fn calc_subscriber(state: &CalcState, action: &CalcAction) {
+fn calc_subscriber(state: CalcState, action: CalcAction) {
     match action {
         CalcAction::Add(i) => {
             println!("CalcSubscriber::on_notify: state:{:?}, action:{}", state, i);

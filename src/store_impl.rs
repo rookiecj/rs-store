@@ -85,7 +85,7 @@ where
     pub(crate) subscribers: Arc<Mutex<Vec<SubscriberWithId<State, Action>>>>,
     /// temporary vector to store subscribers to be added
     adding_subscribers: Arc<Mutex<Vec<SubscriberWithId<State, Action>>>>,
-    state_functions: Arc<Mutex<Vec<Box<dyn FnOnce(&State) + Send + Sync + 'static>>>>,
+    state_functions: Arc<Mutex<Vec<Box<dyn FnOnce(State) + Send + Sync + 'static>>>>,
     pub(crate) dispatch_tx: Mutex<Option<SenderChannel<Action>>>,
     #[allow(dead_code)]
     middleware_factories: Mutex<Vec<Arc<dyn MiddlewareFnFactory<State, Action> + Send + Sync>>>, // New middleware chain
@@ -236,7 +236,7 @@ where
                 let started_at = Instant::now();
                 if store_clone.reducers.lock().unwrap().len() == 1 {
                     let dispatch_op =
-                        store_clone.reducers.lock().unwrap()[0].reduce(&ctx.state, &ctx.action);
+                        store_clone.reducers.lock().unwrap()[0].reduce(ctx.state.clone(), ctx.action.clone());
                     match dispatch_op {
                         DispatchOp::Dispatch(state, effects) => {
                             need_to_dispatch = true;
@@ -251,7 +251,7 @@ where
                     }
                 } else {
                     for reducer in store_clone.reducers.lock().unwrap().iter() {
-                        let dispatch_op = reducer.reduce(&ctx.state, &ctx.action);
+                        let dispatch_op = reducer.reduce(ctx.state.clone(), ctx.action.clone());
                         match dispatch_op {
                             DispatchOp::Dispatch(state, effects) => {
                                 ctx.state = state;
@@ -313,8 +313,8 @@ where
                             // do notify subscribers
                             if need_dispatch {
                                 store_impl.do_notify(
-                                    &action,
-                                    &store_impl.state.lock().unwrap(),
+                                    middleware_context.action,
+                                    middleware_context.state,
                                     store_impl.clone(),
                                     action_received_at,
                                 );
@@ -339,7 +339,7 @@ where
                         let current_state = store_impl.state.lock().unwrap().clone();
                         let iter_subscribers = new_subscribers.drain(..);
 
-                        store_impl.do_subscribe(&current_state, iter_subscribers);
+                        store_impl.do_subscribe(current_state, iter_subscribers);
                     }
 
                     #[cfg(feature = "store-log")]
@@ -549,38 +549,38 @@ where
 
     pub(crate) fn do_notify(
         &self,
-        action: &Action,
-        next_state: &State,
+        action: Action,
+        next_state: State,
         _dispatcher: Arc<StoreImpl<State, Action>>,
         _action_received_at: Instant,
     ) {
         let _notify_start = Instant::now();
-        self.metrics.state_notified(Some(next_state));
+        self.metrics.state_notified(Some(&next_state));
 
         #[cfg(feature = "store-log")]
         eprintln!(
             "store: notify: action: {}",
-            crate::store_impl::describe_action(action)
+            crate::store_impl::describe_action(&action)
         );
 
         let subscribers = self.subscribers.lock().unwrap().clone();
         for subscriber_with_id in subscribers.iter() {
-            subscriber_with_id.on_notify(next_state, action);
+            subscriber_with_id.on_notify(next_state.clone(), action.clone());
         }
         let duration = _notify_start.elapsed();
-        self.metrics.subscriber_notified(Some(action), subscribers.len(), duration);
+        self.metrics.subscriber_notified(Some(&action), subscribers.len(), duration);
     }
 
     fn do_subscribe(
         &self,
-        state: &State,
+        state: State,
         new_subscribers: impl Iterator<Item = SubscriberWithId<State, Action>>,
     ) {
         let mut subscribers = self.subscribers.lock().unwrap();
 
         // notify new subscribers with the latest state and add to subscribers
         for subscriber_with_id in new_subscribers {
-            subscriber_with_id.on_subscribe(state);
+            subscriber_with_id.on_subscribe(state.clone());
 
             subscribers.push(subscriber_with_id);
         }
@@ -615,7 +615,7 @@ where
         match self.state_functions.lock() {
             Ok(mut state_functions) => {
                 for state_function in state_functions.drain(..) {
-                    state_function(&state_cloned);
+                    state_function(state_cloned.clone());
                 }
                 //state_functions.clear();
             }
@@ -791,7 +791,7 @@ where
     /// * Err(StoreError) : if the store is not available
     pub fn query_state<F>(&self, query_fn: F) -> Result<(), StoreError>
     where
-        F: FnOnce(&State) + Send + Sync + 'static,
+        F: FnOnce(State) + Send + Sync + 'static,
     {
         self.state_functions.lock().unwrap().push(Box::new(query_fn));
 
@@ -936,7 +936,7 @@ where
                 ActionOp::Action((created_at, state, action)) => {
                     let started_at = Instant::now();
                     {
-                        subscriber.on_notify(&state, &action);
+                        subscriber.on_notify(state.clone(), action.clone());
                     }
                     metrics.subscriber_notified(Some(&action), 1, started_at.elapsed());
 
@@ -1040,14 +1040,14 @@ where
     State: Send + Sync + Clone + 'static,
     Action: Send + Sync + Clone + std::fmt::Debug + 'static,
 {
-    fn on_notify(&self, state: &State, action: &Action) {
+    fn on_notify(&self, state: State, action: Action) {
         match self.tx.lock() {
             Ok(tx) => {
                 tx.as_ref().map(|tx| {
                     tx.send(ActionOp::Action((
                         Instant::now(),
-                        state.clone(),
-                        action.clone(),
+                        state,
+                        action,
                     )))
                 });
             }
@@ -1161,16 +1161,16 @@ mod tests {
     }
 
     impl Subscriber<i32, i32> for TestChannelSubscriber {
-        fn on_notify(&self, state: &i32, action: &i32) {
+        fn on_notify(&self, state: i32, action: i32) {
             //println!("TestChannelSubscriber: state={}, action={}", state, action);
-            self.received.lock().unwrap().push((*state, *action));
+            self.received.lock().unwrap().push((state, action));
         }
     }
 
     struct TestReducer;
 
     impl Reducer<i32, i32> for TestReducer {
-        fn reduce(&self, state: &i32, action: &i32) -> DispatchOp<i32, i32> {
+        fn reduce(&self, state: i32, action: i32) -> DispatchOp<i32, i32> {
             DispatchOp::Dispatch(state + action, vec![])
         }
     }
@@ -1187,10 +1187,10 @@ mod tests {
     }
 
     impl Subscriber<i32, i32> for SlowSubscriber {
-        fn on_notify(&self, state: &i32, action: &i32) {
+        fn on_notify(&self, state: i32, action: i32) {
             //println!("SlowSubscriber: state={}, action={}", state, action);
             std::thread::sleep(self.delay);
-            self.received.lock().unwrap().push((*state, *action));
+            self.received.lock().unwrap().push((state, action));
         }
     }
 
@@ -1370,13 +1370,13 @@ mod tests {
         }
 
         impl Subscriber<i32, i32> for TestSubscribeSubscriber {
-            fn on_subscribe(&self, state: &i32) {
-                self.received_states.lock().unwrap().push(*state);
+            fn on_subscribe(&self, state: i32) {
+                self.received_states.lock().unwrap().push(state);
                 *self.subscribe_called.lock().unwrap() = true;
             }
 
-            fn on_notify(&self, state: &i32, _action: &i32) {
-                self.received_states.lock().unwrap().push(*state);
+            fn on_notify(&self, state: i32, _action: i32) {
+                self.received_states.lock().unwrap().push(state);
             }
         }
 
@@ -1503,14 +1503,14 @@ mod tests {
         }
 
         impl Subscriber<i32, i32> for ModifyingSubscriber {
-            fn on_subscribe(&self, state: &i32) {
+            fn on_subscribe(&self, state: i32) {
                 // on_subscribe에서 상태를 수정해도 store의 상태는 변경되지 않음
-                self.received_states.lock().unwrap().push(*state);
+                self.received_states.lock().unwrap().push(state);
                 *self.subscribe_called.lock().unwrap() = true;
             }
 
-            fn on_notify(&self, state: &i32, _action: &i32) {
-                self.received_states.lock().unwrap().push(*state);
+            fn on_notify(&self, state: i32, _action: i32) {
+                self.received_states.lock().unwrap().push(state);
             }
         }
 
@@ -1646,7 +1646,7 @@ mod tests {
                 name: "initial".to_string(),
             },
             Box::new(FnReducer::from(
-                |state: &ComplexState, action: &ComplexAction| match action {
+                |state: ComplexState, action: ComplexAction| match action {
                     ComplexAction::Add(n) => DispatchOp::Dispatch(
                         ComplexState {
                             value: state.value + n,
@@ -1761,7 +1761,7 @@ mod tests {
 
         let store = StoreImpl::new_with(
             0,
-            vec![Box::new(FnReducer::from(|state: &i32, action: &i32| {
+            vec![Box::new(FnReducer::from(|state: i32, action: i32| {
                 DispatchOp::Dispatch(state + action, vec![])
             }))],
             "test".to_string(),
@@ -1791,9 +1791,9 @@ mod tests {
         // given: store with reducer that produces effects
         let store = StoreImpl::new_with_reducer(
             0,
-            Box::new(FnReducer::from(|state: &i32, action: &i32| {
+            Box::new(FnReducer::from(|state: i32, action: i32| {
                 let new_state = state + action;
-                let effects = if action > &5 {
+                let effects = if action > 5 {
                     vec![Effect::Task(Box::new(|| {
                         // effect that does nothing
                     }))]
@@ -1826,10 +1826,10 @@ mod tests {
         // StoreBuilder의 with_reducer는 기존 리듀서를 대체하므로
         // 실제로는 마지막 리듀서만 사용됩니다
         let store = StoreBuilder::new(0)
-            .with_reducer(Box::new(FnReducer::from(|state: &i32, action: &i32| {
+            .with_reducer(Box::new(FnReducer::from(|state: i32, action: i32| {
                 DispatchOp::Dispatch(state + action, vec![])
             })))
-            .with_reducer(Box::new(FnReducer::from(|state: &i32, _action: &i32| {
+            .with_reducer(Box::new(FnReducer::from(|state: i32, _action: i32| {
                 DispatchOp::Dispatch(state * 2, vec![])
             })))
             .build()
@@ -1884,7 +1884,7 @@ mod tests {
         // given: store with different backpressure policies
         let store = StoreImpl::new_with(
             0,
-            vec![Box::new(FnReducer::from(|state: &i32, action: &i32| {
+            vec![Box::new(FnReducer::from(|state: i32, action: i32| {
                 DispatchOp::Dispatch(state + action, vec![])
             }))],
             "test".to_string(),
@@ -1939,7 +1939,7 @@ mod tests {
         // given: store with string state and action
         let store = StoreImpl::new_with_reducer(
             "".to_string(),
-            Box::new(FnReducer::from(|state: &String, action: &String| {
+            Box::new(FnReducer::from(|state: String, action: String| {
                 let new_state = format!("{}{}", state, action);
                 DispatchOp::Dispatch(new_state, vec![])
             })),
@@ -1972,8 +1972,8 @@ mod tests {
         // given: store with reducer that doesn't change state
         let store = StoreImpl::new_with_reducer(
             0,
-            Box::new(FnReducer::from(|state: &i32, _action: &i32| {
-                DispatchOp::Dispatch(*state, vec![]) // return same state
+            Box::new(FnReducer::from(|state: i32, _action: i32| {
+                DispatchOp::Dispatch(state, vec![]) // return same state
             })),
         )
         .unwrap();
@@ -2009,7 +2009,7 @@ mod tests {
         let queried_value_clone = queried_value.clone();
         store
             .query_state(move |state| {
-                *queried_value_clone.lock().unwrap() = *state;
+                *queried_value_clone.lock().unwrap() = state;
             })
             .unwrap();
 
@@ -2040,7 +2040,7 @@ mod tests {
                 name: "initial".to_string(),
             },
             Box::new(FnReducer::from(
-                |state: &ComplexState, action: &ComplexAction| match action {
+                |state: ComplexState, action: ComplexAction| match action {
                     ComplexAction::Add(n) => DispatchOp::Dispatch(
                         ComplexState {
                             value: state.value + n,
@@ -2104,7 +2104,7 @@ mod tests {
         let query1_clone = query1_result.clone();
         store
             .query_state(move |state| {
-                *query1_clone.lock().unwrap() = *state;
+                *query1_clone.lock().unwrap() = state;
             })
             .unwrap();
 
@@ -2116,7 +2116,7 @@ mod tests {
         let query2_clone = query2_result.clone();
         store
             .query_state(move |state| {
-                *query2_clone.lock().unwrap() = *state;
+                *query2_clone.lock().unwrap() = state;
             })
             .unwrap();
 
@@ -2137,7 +2137,7 @@ mod tests {
         let queried_value = std::sync::Arc::new(std::sync::Mutex::new(0));
         let queried_value_clone = queried_value.clone();
         let result = store.query_state(move |state| {
-            *queried_value_clone.lock().unwrap() = *state;
+            *queried_value_clone.lock().unwrap() = state;
         });
 
         // then: should succeed and get the initial state
