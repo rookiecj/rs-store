@@ -1,28 +1,158 @@
 use crate::effect::Effect;
+use std::sync::Arc;
 
 /// determine if the action should be dispatched or not
 pub enum DispatchOp<State, Action> {
-    /// Dispatch new state
-    Dispatch(State, Option<Effect<Action>>),
+    /// Dispatch new state with effects
+    /// since 3.0.0
+    Dispatch(State, Vec<Effect<Action>>),
     /// Keep new state but do not dispatch
-    Keep(State, Option<Effect<Action>>),
+    Keep(State, Vec<Effect<Action>>),
 }
 
 /// Reducer reduces the state based on the action.
+///
+/// ## Parameters
+/// - `state`: Current state (reference)
+/// - `action`: Action to process (reference)
+///
+/// ## Returns
+/// - [`DispatchOp<State, Action>`]: result that contains the next state and any effects to run.
 pub trait Reducer<State, Action>
 where
     State: Send + Sync + Clone,
-    Action: Send + Sync + std::fmt::Debug + 'static,
+    Action: Send + Sync + Clone + std::fmt::Debug + 'static,
 {
     fn reduce(&self, state: &State, action: &Action) -> DispatchOp<State, Action>;
 }
 
+/// ReducerChain chains reducers together sequentially.
+/// The first reducer in the vector becomes the first reducer in the chain.
+/// Execution order: first reducer -> second reducer -> ... -> last reducer
+pub struct ReducerChain<State, Action>
+where
+    State: Send + Sync + Clone,
+    Action: Send + Sync + Clone + std::fmt::Debug + 'static,
+{
+    reducer: Arc<dyn Reducer<State, Action> + Send + Sync>,
+    next: Option<Box<ReducerChain<State, Action>>>,
+}
+
+impl<State, Action> ReducerChain<State, Action>
+where
+    State: Send + Sync + Clone,
+    Action: Send + Sync + Clone + std::fmt::Debug + 'static,
+{
+    /// Create a new reducer chain with a single reducer
+    pub fn new(reducer: Arc<dyn Reducer<State, Action> + Send + Sync>) -> Self {
+        Self {
+            reducer,
+            next: None,
+        }
+    }
+
+    /// Chain another reducer to this chain
+    pub fn chain(mut self, reducer: Arc<dyn Reducer<State, Action> + Send + Sync>) -> Self {
+        if let Some(ref mut next) = self.next {
+            // Recursively chain to the end
+            *next = Box::new(next.as_ref().clone().chain(reducer));
+        } else {
+            // add at tail of the chain
+            self.next = Some(Box::new(ReducerChain::new(reducer)));
+        }
+        self
+    }
+
+    /// Create a reducer chain from a vector of reducers
+    /// The first reducer in the vector becomes the first reducer in the chain.
+    pub fn from_vec(reducers: Vec<Box<dyn Reducer<State, Action> + Send + Sync>>) -> Option<Self> {
+        if reducers.is_empty() {
+            return None;
+        }
+
+        let mut iter = reducers.into_iter();
+        let mut tail = ReducerChain::new(Arc::from(iter.next()?));
+
+        for reducer in iter {
+            tail = tail.chain(Arc::from(reducer));
+        }
+
+        Some(tail)
+    }
+
+    // Note: execute method removed as it's no longer used with the new API
+    // Reducer chain is now handled directly in the reduce method
+}
+
+// Implement Clone for ReducerChain to support recursive chaining
+impl<State, Action> Clone for ReducerChain<State, Action>
+where
+    State: Send + Sync + Clone,
+    Action: Send + Sync + Clone + std::fmt::Debug + 'static,
+{
+    fn clone(&self) -> Self {
+        Self {
+            reducer: self.reducer.clone(),
+            next: self.next.as_ref().map(|n| Box::new(n.as_ref().clone())),
+        }
+    }
+}
+
+impl<State, Action> Reducer<State, Action> for ReducerChain<State, Action>
+where
+    State: Send + Sync + Clone,
+    Action: Send + Sync + Clone + std::fmt::Debug + 'static,
+{
+    fn reduce(&self, state: &State, action: &Action) -> DispatchOp<State, Action> {
+        // Execute current reducer
+        let mut result = self.reducer.reduce(state, action);
+
+        // Continue with next reducer if exists
+        if let Some(ref next) = self.next {
+            match result {
+                DispatchOp::Dispatch(current_state, current_effects) => {
+                    result = next.reduce(&current_state, action);
+                    // Merge effects from both reducers
+                    match result {
+                        DispatchOp::Dispatch(next_state, mut next_effects) => {
+                            next_effects.extend(current_effects);
+                            DispatchOp::Dispatch(next_state, next_effects)
+                        }
+                        DispatchOp::Keep(next_state, mut next_effects) => {
+                            next_effects.extend(current_effects);
+                            DispatchOp::Keep(next_state, next_effects)
+                        }
+                    }
+                }
+                DispatchOp::Keep(current_state, current_effects) => {
+                    result = next.reduce(&current_state, action);
+                    // Merge effects from both reducers
+                    match result {
+                        DispatchOp::Dispatch(next_state, mut next_effects) => {
+                            next_effects.extend(current_effects);
+                            DispatchOp::Dispatch(next_state, next_effects)
+                        }
+                        DispatchOp::Keep(next_state, mut next_effects) => {
+                            next_effects.extend(current_effects);
+                            DispatchOp::Keep(next_state, next_effects)
+                        }
+                    }
+                }
+            }
+        } else {
+            result
+        }
+    }
+}
+
 /// FnReducer is a reducer that is created from a function.
+///
+/// The function signature should match: `Fn(&State, &Action) -> DispatchOp<State, Action>`
 pub struct FnReducer<F, State, Action>
 where
     F: Fn(&State, &Action) -> DispatchOp<State, Action>,
     State: Send + Sync + Clone,
-    Action: Send + Sync + std::fmt::Debug + 'static,
+    Action: Send + Sync + Clone + std::fmt::Debug + 'static,
 {
     func: F,
     _marker: std::marker::PhantomData<(State, Action)>,
@@ -32,7 +162,7 @@ impl<F, State, Action> Reducer<State, Action> for FnReducer<F, State, Action>
 where
     F: Fn(&State, &Action) -> DispatchOp<State, Action>,
     State: Send + Sync + Clone,
-    Action: Send + Sync + std::fmt::Debug + 'static,
+    Action: Send + Sync + Clone + std::fmt::Debug + 'static,
 {
     fn reduce(&self, state: &State, action: &Action) -> DispatchOp<State, Action> {
         (self.func)(state, action)
@@ -43,7 +173,7 @@ impl<F, State, Action> From<F> for FnReducer<F, State, Action>
 where
     F: Fn(&State, &Action) -> DispatchOp<State, Action>,
     State: Send + Sync + Clone,
-    Action: Send + Sync + std::fmt::Debug + 'static,
+    Action: Send + Sync + Clone + std::fmt::Debug + 'static,
 {
     fn from(func: F) -> Self {
         Self {
@@ -66,8 +196,8 @@ mod tests {
     }
 
     impl Subscriber<i32, i32> for TestSubscriber {
-        fn on_notify(&self, state: &i32, _action: &i32) {
-            self.state_changes.lock().unwrap().push(*state);
+        fn on_notify(&self, state: i32, _action: i32) {
+            self.state_changes.lock().unwrap().push(state);
         }
     }
 
@@ -89,11 +219,11 @@ mod tests {
                     });
                     // keep state if panic
                     if result.is_err() {
-                        return DispatchOp::Keep(*state, None);
+                        return DispatchOp::Keep(state.clone(), vec![]);
                     }
                 }
                 // Normal operation for other actions
-                DispatchOp::Dispatch(state + action, None)
+                DispatchOp::Dispatch(state + action, vec![])
             }
         }
 
@@ -145,15 +275,15 @@ mod tests {
                 });
                 // keep state if panic
                 if result.is_err() {
-                    return DispatchOp::Keep(*state, None);
+                    return DispatchOp::Keep(state.clone(), vec![]);
                 }
-                DispatchOp::Dispatch(state + action, None)
+                DispatchOp::Dispatch(state + action, vec![])
             }
         }
 
         impl Reducer<i32, i32> for NormalReducer {
             fn reduce(&self, state: &i32, action: &i32) -> DispatchOp<i32, i32> {
-                DispatchOp::Dispatch(state + action, None)
+                DispatchOp::Dispatch(state + action, vec![])
             }
         }
 
@@ -184,8 +314,9 @@ mod tests {
     #[test]
     fn test_fn_reducer_basic() {
         // given
-        let reducer =
-            FnReducer::from(|state: &i32, action: &i32| DispatchOp::Dispatch(state + action, None));
+        let reducer = FnReducer::from(|state: &i32, action: &i32| {
+            DispatchOp::Dispatch(state + action, vec![])
+        });
         let store = StoreBuilder::new_with_reducer(0, Box::new(reducer)).build().unwrap();
 
         // when
@@ -216,11 +347,11 @@ mod tests {
                 Action::AddWithEffect(i) => {
                     let new_state = state + i;
                     let effect = Effect::Action(Action::Add(40)); // Effect that adds 40 more
-                    DispatchOp::Dispatch(new_state, Some(effect))
+                    DispatchOp::Dispatch(new_state, vec![effect])
                 }
                 Action::Add(i) => {
                     let new_state = state + i;
-                    DispatchOp::Dispatch(new_state, None)
+                    DispatchOp::Dispatch(new_state, vec![])
                 }
             }
         });
@@ -247,9 +378,9 @@ mod tests {
         let reducer = FnReducer::from(|state: &i32, action: &i32| {
             if *action < 0 {
                 // Keep current state for negative actions
-                DispatchOp::Keep(*state, None)
+                DispatchOp::Keep(state.clone(), vec![])
             } else {
-                DispatchOp::Dispatch(state + action, None)
+                DispatchOp::Dispatch(state + action, vec![])
             }
         });
         let store = StoreBuilder::new_with_reducer(0, Box::new(reducer)).build().unwrap();
@@ -283,10 +414,11 @@ mod tests {
     #[test]
     fn test_multiple_fn_reducers() {
         // given
-        let add_reducer =
-            FnReducer::from(|state: &i32, action: &i32| DispatchOp::Dispatch(state + action, None));
+        let add_reducer = FnReducer::from(|state: &i32, action: &i32| {
+            DispatchOp::Dispatch(state + action, vec![])
+        });
         let double_reducer =
-            FnReducer::from(|state: &i32, _action: &i32| DispatchOp::Dispatch(state * 2, None));
+            FnReducer::from(|state: &i32, _action: &i32| DispatchOp::Dispatch(state * 2, vec![]));
 
         let store = StoreBuilder::new(0)
             .with_reducer(Box::new(add_reducer))

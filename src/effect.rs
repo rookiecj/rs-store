@@ -14,22 +14,17 @@ pub enum Effect<Action> {
     /// A function which has a result.
     /// The result is an Any type which can be downcasted to the expected type,
     /// you should know the type and the String key can help.
-    /// The result default ignored, if you want to get the result of the function, you can use `EffectMiddleware` to receive the result.
+    /// The result default ignored, if you want to get the result of the function, you can use a middleware like `EffectMiddleware` or handle the result in the reducer.
     Function(String, EffectFunction),
 }
 
 pub type EffectResult = Result<Box<dyn std::any::Any>, Box<dyn std::error::Error>>;
 pub type EffectFunction = Box<dyn FnOnce() -> EffectResult + Send>;
 
-/// EffectResultReceiver is a trait that can receive the result of an effect function.
-pub trait EffectResultReceiver {
-    fn receive(&self, key: String, result: EffectResult);
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{DispatchOp, Reducer, StoreBuilder, Subscriber};
+    use crate::{Reducer, StoreBuilder, Subscriber};
     use std::sync::{Arc, Mutex};
     use std::thread;
     use std::time::Duration;
@@ -64,11 +59,7 @@ mod tests {
     struct TestReducer;
 
     impl Reducer<TestState, TestAction> for TestReducer {
-        fn reduce(
-            &self,
-            state: &TestState,
-            action: &TestAction,
-        ) -> DispatchOp<TestState, TestAction> {
+        fn reduce(&self, state: &TestState, action: &TestAction) -> crate::DispatchOp<TestState, TestAction> {
             match action {
                 TestAction::SetValue(value) => {
                     let new_state = TestState {
@@ -78,14 +69,14 @@ mod tests {
                     // Effect::Action - dispatch another action
                     let effect =
                         Effect::Action(TestAction::AddMessage(format!("Set to {}", value)));
-                    DispatchOp::Dispatch(new_state, Some(effect))
+                    crate::DispatchOp::Dispatch(new_state, vec![effect])
                 }
                 TestAction::AddValue(value) => {
                     let new_state = TestState {
                         value: state.value + value,
                         messages: state.messages.clone(),
                     };
-                    DispatchOp::Dispatch(new_state, None)
+                    crate::DispatchOp::Dispatch(new_state, vec![])
                 }
                 TestAction::AddMessage(msg) => {
                     let mut new_messages = state.messages.clone();
@@ -94,7 +85,7 @@ mod tests {
                         value: state.value,
                         messages: new_messages,
                     };
-                    DispatchOp::Dispatch(new_state, None)
+                    crate::DispatchOp::Dispatch(new_state, vec![])
                 }
                 TestAction::AsyncTask => {
                     let new_state = TestState {
@@ -105,7 +96,7 @@ mod tests {
                     let effect = Effect::Task(Box::new(|| {
                         thread::sleep(Duration::from_millis(10));
                     }));
-                    DispatchOp::Dispatch(new_state, Some(effect))
+                    crate::DispatchOp::Dispatch(new_state, vec![effect])
                 }
                 TestAction::ThunkTask(value) => {
                     let new_state = TestState {
@@ -118,7 +109,7 @@ mod tests {
                         thread::sleep(Duration::from_millis(10));
                         let _ = dispatcher.dispatch(TestAction::AddValue(value_clone));
                     }));
-                    DispatchOp::Dispatch(new_state, Some(effect))
+                    crate::DispatchOp::Dispatch(new_state, vec![effect])
                 }
                 TestAction::FunctionTask(key) => {
                     let new_state = TestState {
@@ -135,7 +126,7 @@ mod tests {
                                 as Box<dyn std::any::Any>)
                         }),
                     );
-                    DispatchOp::Dispatch(new_state, Some(effect))
+                    crate::DispatchOp::Dispatch(new_state, vec![effect])
                 }
             }
         }
@@ -149,7 +140,7 @@ mod tests {
     }
 
     impl Subscriber<TestState, TestAction> for TestSubscriber {
-        fn on_notify(&self, state: &TestState, action: &TestAction) {
+        fn on_notify(&self, state: TestState, action: TestAction) {
             self.states.lock().unwrap().push(state.clone());
             self.actions.lock().unwrap().push(action.clone());
         }

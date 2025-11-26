@@ -38,7 +38,7 @@ impl Reducer<CalcState, CalcAction> for CalcReducer {
                     CalcState {
                         count: state.count + i,
                     },
-                    Some(Effect::Thunk(subtract_effect_thunk(*i))),
+                    vec![Effect::Thunk(subtract_effect_thunk(*i))],
                 )
             }
             CalcAction::SubtractWillProduceEffectFunction(i) => {
@@ -48,10 +48,10 @@ impl Reducer<CalcState, CalcAction> for CalcReducer {
                         count: state.count - i,
                     },
                     // produce effect function
-                    Some(Effect::Function(
+                    vec![Effect::Function(
                         "subtract".to_string(),
-                        subtract_effect_fn(*i),
-                    )),
+                        subtract_effect_fn(i),
+                    )],
                 )
             }
         }
@@ -73,7 +73,7 @@ impl Default for CalcSubscriber {
 }
 
 impl Subscriber<CalcState, CalcAction> for CalcSubscriber {
-    fn on_notify(&self, state: &CalcState, action: &CalcAction) {
+    fn on_notify(&self, state: CalcState, action: CalcAction) {
         match action {
             CalcAction::AddWillProduceThunk(_i) => {
                 println!(
@@ -111,7 +111,7 @@ fn subtract_effect_thunk(i: i32) -> Box<dyn FnOnce(Box<dyn Dispatcher<CalcAction
     })
 }
 
-fn subtract_effect_fn(_i: i32) -> Box<dyn FnOnce() -> EffectResult + Send> {
+fn subtract_effect_fn(_i: &i32) -> Box<dyn FnOnce() -> EffectResult + Send> {
     Box::new(move || {
         println!("effect: working on long running task again....");
         thread::sleep(std::time::Duration::from_secs(1));

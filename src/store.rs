@@ -48,7 +48,7 @@ where
         subscriber: Arc<dyn Subscriber<State, Action> + Send + Sync>,
     ) -> Result<Box<dyn Subscription>, StoreError>;
 
-    /// Iterate over the store's state and action pairs
+    ///// Iterate over the store's state and action pairs
     //fn iter(&self) -> impl Iterator<Item = (State, Action)>;
 
     /// subscribe to the store in new context
@@ -79,7 +79,7 @@ where
     fn stop(&self) -> Result<(), StoreError>;
 
     /// Stop the store with timeout
-    fn stop_with_timeout(&self, timeout: Duration) -> Result<(), StoreError>;
+    fn stop_timeout(&self, timeout: Duration) -> Result<(), StoreError>;
 }
 
 #[cfg(test)]
@@ -87,7 +87,6 @@ mod tests {
     use super::*;
     use crate::builder::StoreBuilder;
     use crate::BackpressurePolicy;
-    use crate::DispatchOp;
     use crate::Reducer;
     use crate::StoreImpl;
     use std::sync::Arc;
@@ -121,26 +120,22 @@ mod tests {
     struct TestReducer;
 
     impl Reducer<TestState, TestAction> for TestReducer {
-        fn reduce(
-            &self,
-            state: &TestState,
-            action: &TestAction,
-        ) -> DispatchOp<TestState, TestAction> {
+        fn reduce(&self, state: &TestState, action: &TestAction) -> crate::DispatchOp<TestState, TestAction> {
             match action {
                 TestAction::Increment => {
                     let mut new_state = state.clone();
                     new_state.counter += 1;
-                    DispatchOp::Dispatch(new_state, None)
+                    crate::DispatchOp::Dispatch(new_state, vec![])
                 }
                 TestAction::Decrement => {
                     let mut new_state = state.clone();
                     new_state.counter -= 1;
-                    DispatchOp::Dispatch(new_state, None)
+                    crate::DispatchOp::Dispatch(new_state, vec![])
                 }
                 TestAction::SetMessage(msg) => {
                     let mut new_state = state.clone();
                     new_state.message = msg.clone();
-                    DispatchOp::Dispatch(new_state, None)
+                    crate::DispatchOp::Dispatch(new_state, vec![])
                 }
             }
         }
@@ -154,14 +149,15 @@ mod tests {
             16,
             BackpressurePolicy::default(),
             vec![],
-        ).unwrap()
+        )
+        .unwrap()
     }
 
     struct TestChannneledReducer;
 
     impl Reducer<i32, i32> for TestChannneledReducer {
-        fn reduce(&self, state: &i32, action: &i32) -> DispatchOp<i32, i32> {
-            DispatchOp::Dispatch(state + action, None)
+        fn reduce(&self, state: &i32, action: &i32) -> crate::DispatchOp<i32, i32> {
+            crate::DispatchOp::Dispatch(state + action, vec![])
         }
     }
 
@@ -176,9 +172,9 @@ mod tests {
     }
 
     impl Subscriber<i32, i32> for TestChannelSubscriber {
-        fn on_notify(&self, state: &i32, action: &i32) {
+        fn on_notify(&self, state: i32, action: i32) {
             //println!("TestChannelSubscriber: state={}, action={}", state, action);
-            self.received.lock().unwrap().push((*state, *action));
+            self.received.lock().unwrap().push((state, action));
         }
     }
 
@@ -194,10 +190,10 @@ mod tests {
     }
 
     impl Subscriber<i32, i32> for SlowSubscriber {
-        fn on_notify(&self, state: &i32, action: &i32) {
+        fn on_notify(&self, state: i32, action: i32) {
             //println!("SlowSubscriber: state={}, action={}", state, action);
             std::thread::sleep(self.delay);
-            self.received.lock().unwrap().push((*state, *action));
+            self.received.lock().unwrap().push((state, action));
         }
     }
 
@@ -318,7 +314,7 @@ mod tests {
             .with_reducer(Box::new(TestReducer))
             .with_name("custom-store".into())
             .with_capacity(32)
-            .with_policy(BackpressurePolicy::DropLatest)
+            .with_policy(BackpressurePolicy::DropLatestIf(None))
             .build()
             .unwrap();
 

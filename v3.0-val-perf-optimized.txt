@@ -1,0 +1,100 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.01s
+     Running `target/debug/examples/performance_state_size --nocapture`
+=== State 크기에 따른 성능 테스트 ===
+
+--- Small State 테스트 (8 bytes, 1000 actions) ---
+  전체 시간: 341.992791ms
+  액션당 평균 시간: 341.992µs
+  Reducer 총 시간: 71.193666ms
+  Reducer 평균 시간: 71.193µs
+  Subscriber 총 시간: 71.007026ms
+  Subscriber 평균 시간: 71.007µs
+  Reducer 호출 횟수: 1000
+  Subscriber 호출 횟수: 1000
+  전체 Clone 횟수: 5003
+  평균 Clone 횟수: 5.00
+  Clone 발생 위치 (처음 5개):
+    1: at ./examples/performance_state_size.rs:83:25 | 4: rs_store::store_impl::StoreImpl<State,Action>::reducer_thread
+    2: at ./examples/performance_state_size.rs:83:25 | 4: rs_store::store_impl::StoreImpl<State,Action>::do_subscribe
+    3: at ./examples/performance_state_size.rs:83:25 | 4: rs_store::store_impl::StoreImpl<State,Action>::reducer_thread
+    4: at ./examples/performance_state_size.rs:83:25 | 4: rs_store::store_impl::StoreImpl<State,Action>::reducer_thread::{{closure}}
+    5: at ./examples/performance_state_size.rs:83:25 | at ./examples/performance_state_size.rs:453:29
+    ... (총 5004개 위치)
+
+--- Medium State 테스트 (1KB, 1000 actions) ---
+  전체 시간: 322.016458ms
+  액션당 평균 시간: 322.016µs
+  Reducer 총 시간: 68.246217ms
+  Reducer 평균 시간: 68.246µs
+  Subscriber 총 시간: 68.879147ms
+  Subscriber 평균 시간: 68.879µs
+  Reducer 호출 횟수: 1000
+  Subscriber 호출 횟수: 1000
+  전체 Clone 횟수: 5003
+  평균 Clone 횟수: 5.00
+  Clone 발생 위치 (처음 5개):
+    1: at ./examples/performance_state_size.rs:173:25 | 4: rs_store::store_impl::StoreImpl<State,Action>::reducer_thread
+    2: at ./examples/performance_state_size.rs:173:25 | 4: rs_store::store_impl::StoreImpl<State,Action>::do_subscribe
+    3: at ./examples/performance_state_size.rs:173:25 | 4: rs_store::store_impl::StoreImpl<State,Action>::reducer_thread
+    4: at ./examples/performance_state_size.rs:173:25 | 4: rs_store::store_impl::StoreImpl<State,Action>::reducer_thread::{{closure}}
+    5: at ./examples/performance_state_size.rs:173:25 | at ./examples/performance_state_size.rs:491:29
+    ... (총 5004개 위치)
+
+--- Large State 테스트 (1MB, 1000 actions) ---
+  전체 시간: 564.909583ms
+  액션당 평균 시간: 564.909µs
+  Reducer 총 시간: 140.111999ms
+  Reducer 평균 시간: 140.111µs
+  Subscriber 총 시간: 99.916282ms
+  Subscriber 평균 시간: 99.916µs
+  Reducer 호출 횟수: 1000
+  Subscriber 호출 횟수: 1000
+  전체 Clone 횟수: 5003
+  평균 Clone 횟수: 5.00
+  Clone 발생 위치 (처음 5개):
+    1: at ./examples/performance_state_size.rs:265:25 | 4: rs_store::store_impl::StoreImpl<State,Action>::reducer_thread
+    2: at ./examples/performance_state_size.rs:265:25 | 4: rs_store::store_impl::StoreImpl<State,Action>::do_subscribe
+    3: at ./examples/performance_state_size.rs:265:25 | 4: rs_store::store_impl::StoreImpl<State,Action>::reducer_thread
+    4: at ./examples/performance_state_size.rs:265:25 | 4: rs_store::store_impl::StoreImpl<State,Action>::reducer_thread::{{closure}}
+    5: at ./examples/performance_state_size.rs:265:25 | at ./examples/performance_state_size.rs:529:29
+    ... (총 5004개 위치)
+
+--- Very Large State 테스트 (10MB, 값으로 전달, 1000 actions) ---
+  전체 시간: 1.95782925s
+  액션당 평균 시간: 1.957829ms
+  Reducer 총 시간: 398.848962ms
+  Reducer 평균 시간: 398.848µs
+  Subscriber 총 시간: 395.522794ms
+  Subscriber 평균 시간: 395.522µs
+  Reducer 호출 횟수: 1000
+  Subscriber 호출 횟수: 1000
+  전체 Clone 횟수: 5003
+  평균 Clone 횟수: 5.00
+  Clone 발생 위치 (처음 5개):
+    1: at ./examples/performance_state_size.rs:357:25 | 4: rs_store::store_impl::StoreImpl<State,Action>::reducer_thread | at ./src/store_impl.rs:347:45
+    2: at ./examples/performance_state_size.rs:357:25 | 4: rs_store::store_impl::StoreImpl<State,Action>::do_subscribe | at ./src/store_impl.rs:609:45
+    3: at ./examples/performance_state_size.rs:357:25 | 4: rs_store::store_impl::StoreImpl<State,Action>::reducer_thread | at ./src/store_impl.rs:299:25
+    4: at ./examples/performance_state_size.rs:357:25 | 4: rs_store::store_impl::StoreImpl<State,Action>::reducer_thread::{{closure}} | at ./src/store_impl.rs:239:33
+    5: at ./examples/performance_state_size.rs:357:25 | at ./examples/performance_state_size.rs:567:29 | 5: <rs_store::reducer::FnReducer<F,State,Action> as rs_store::reducer::Reducer<State,Action>>::reduce
+    ... (총 5004개 위치)
+
+--- Very Large State 테스트 (10MB, Arc로 전달, 1000 actions) ---
+  전체 시간: 405.935292ms
+  액션당 평균 시간: 405.935µs
+  Reducer 총 시간: 402.448716ms
+  Reducer 평균 시간: 402.448µs
+  Subscriber 총 시간: 30.373µs
+  Subscriber 평균 시간: 30ns
+  Reducer 호출 횟수: 1000
+  Subscriber 호출 횟수: 1000
+  전체 Clone 횟수: 1000
+  평균 Clone 횟수: 1.00
+  ⚠️  참고: Arc를 사용하면 Clone은 참조 카운트만 증가하므로 실제 데이터 복사가 발생하지 않습니다.
+  Clone 발생 위치 (처음 5개):
+    1: at ./examples/performance_state_size.rs:357:25 | 4: <T as core::clone::uninit::CopySpec>::clone_one | at /Users/rookiecj/.rustup/toolchains/stable-aarch64-apple-darwin/lib/rustlib/src/rust/library/core/src/clone/uninit.rs:19:29
+    2: at ./examples/performance_state_size.rs:357:25 | 4: <T as core::clone::uninit::CopySpec>::clone_one | at /Users/rookiecj/.rustup/toolchains/stable-aarch64-apple-darwin/lib/rustlib/src/rust/library/core/src/clone/uninit.rs:19:29
+    3: at ./examples/performance_state_size.rs:357:25 | 4: <T as core::clone::uninit::CopySpec>::clone_one | at /Users/rookiecj/.rustup/toolchains/stable-aarch64-apple-darwin/lib/rustlib/src/rust/library/core/src/clone/uninit.rs:19:29
+    4: at ./examples/performance_state_size.rs:357:25 | 4: <T as core::clone::uninit::CopySpec>::clone_one | at /Users/rookiecj/.rustup/toolchains/stable-aarch64-apple-darwin/lib/rustlib/src/rust/library/core/src/clone/uninit.rs:19:29
+    5: at ./examples/performance_state_size.rs:357:25 | 4: <T as core::clone::uninit::CopySpec>::clone_one | at /Users/rookiecj/.rustup/toolchains/stable-aarch64-apple-darwin/lib/rustlib/src/rust/library/core/src/clone/uninit.rs:19:29
+    ... (총 1000개 위치)
+

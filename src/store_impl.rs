@@ -1,9 +1,9 @@
 use crate::channel::{BackpressureChannel, BackpressurePolicy, ReceiverChannel, SenderChannel};
-use crate::dispatcher::{Dispatcher, WeakDispatcher};
+use crate::dispatcher::Dispatcher;
 use crate::metrics::{CountMetrics, Metrics, MetricsSnapshot};
-use crate::middleware::Middleware;
+use crate::middleware::{MiddlewareFn, MiddlewareFnFactory};
 use crate::subscriber::SubscriberWithId;
-use crate::{DispatchOp, Effect, MiddlewareOp, Reducer, SenderError, Subscriber, Subscription};
+use crate::{DispatchOp, Effect, Reducer, SenderError, Subscriber, Subscription};
 use rusty_pool::ThreadPool;
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
@@ -25,8 +25,6 @@ where
     Action(Action),
     /// AddSubscriber is used to add a subscriber to the store
     AddSubscriber,
-    // /// RemoveSubscriber is used to remove a subscriber from the store
-    // RemoveSubscriber(u64),
     /// StateFunction is used to execute a function with the current state
     StateFunction,
     /// Exit is used to exit the store and should not be dropped
@@ -69,11 +67,11 @@ where
     }
 }
 
-/// StoreImpl is the default implementation of a Redux store
+/// StoreImpl is the default implementation of a Redux store.
 ///
-/// # Caution
-/// [StoreImpl] is the default implementation of the Store trait, its iterface can be changed in the future.
-/// [Store] is the interface for the store you depend on.
+/// ## Caution
+/// [`StoreImpl`] is the default implementation of the [`Store`] trait, and its interface can be changed in the future.
+/// [`Store`] is the stable interface for the store that user code should depend on.
 #[allow(clippy::type_complexity)]
 pub struct StoreImpl<State, Action>
 where
@@ -87,9 +85,11 @@ where
     pub(crate) subscribers: Arc<Mutex<Vec<SubscriberWithId<State, Action>>>>,
     /// temporary vector to store subscribers to be added
     adding_subscribers: Arc<Mutex<Vec<SubscriberWithId<State, Action>>>>,
-    state_functions: Arc<Mutex<Vec<Box<dyn FnOnce(&State) + Send + Sync + 'static>>>>,
+    state_functions: Arc<Mutex<Vec<Box<dyn FnOnce(State) + Send + Sync + 'static>>>>,
     pub(crate) dispatch_tx: Mutex<Option<SenderChannel<Action>>>,
-    middlewares: Mutex<Vec<Arc<dyn Middleware<State, Action> + Send + Sync>>>,
+    /// middleware factories
+    middleware_factories: Mutex<Vec<Arc<dyn MiddlewareFnFactory<State, Action> + Send + Sync>>>, // New middleware chain
+
     pub(crate) metrics: Arc<CountMetrics>,
     /// thread pool for the store
     pub(crate) pool: Mutex<Option<ThreadPool>>,
@@ -114,24 +114,31 @@ where
     State: Send + Sync + Clone + 'static,
     Action: Send + Sync + Clone + std::fmt::Debug + 'static,
 {
-    /// create a new store with an initial state
-    pub fn new(state: State) -> Result<Arc<StoreImpl<State, Action>>, StoreError> {
-        Self::new_with(
-            state,
-            vec![],
-            DEFAULT_STORE_NAME.into(),
-            DEFAULT_CAPACITY,
-            BackpressurePolicy::default(),
-            vec![],
-        )
-    }
+    // /// create a new store with an initial state
+    // pub(crate) fn new(state: State) -> Result<Arc<StoreImpl<State, Action>>, StoreError> {
+    //     Self::new_with(
+    //         state,
+    //         vec![],
+    //         DEFAULT_STORE_NAME.into(),
+    //         DEFAULT_CAPACITY,
+    //         BackpressurePolicy::default(),
+    //         vec![],
+    //     )
+    // }
 
     /// create a new store with a reducer and an initial state
     pub fn new_with_reducer(
         state: State,
         reducer: Box<dyn Reducer<State, Action> + Send + Sync>,
     ) -> Result<Arc<StoreImpl<State, Action>>, StoreError> {
-        Self::new_with_name(state, reducer, DEFAULT_STORE_NAME.into())
+        Self::new_with(
+            state,
+            vec![reducer],
+            DEFAULT_STORE_NAME.into(),
+            DEFAULT_CAPACITY,
+            BackpressurePolicy::default(),
+            vec![],
+        )
     }
 
     /// create a new store with name
@@ -157,7 +164,7 @@ where
         name: String,
         capacity: usize,
         policy: BackpressurePolicy<Action>,
-        middlewares: Vec<Arc<dyn Middleware<State, Action> + Send + Sync>>,
+        middlewares: Vec<Arc<dyn MiddlewareFnFactory<State, Action> + Send + Sync>>,
     ) -> Result<Arc<StoreImpl<State, Action>>, StoreError> {
         let metrics = Arc::new(CountMetrics::default());
         let (tx, rx) = BackpressureChannel::<Action>::pair_with(
@@ -167,6 +174,12 @@ where
             Some(metrics.clone()),
         );
 
+        if reducers.is_empty() {
+            return Err(StoreError::InitError(
+                "At least one reducer is required".to_string(),
+            ));
+        }
+
         let store_impl = StoreImpl {
             name: name.clone(),
             state: Mutex::new(state),
@@ -174,7 +187,7 @@ where
             subscribers: Arc::new(Mutex::new(Vec::default())),
             adding_subscribers: Arc::new(Mutex::new(Vec::default())),
             state_functions: Arc::new(Mutex::new(Vec::default())),
-            middlewares: Mutex::new(middlewares),
+            middleware_factories: Mutex::new(middlewares),
             dispatch_tx: Mutex::new(Some(tx)),
             metrics,
             pool: Mutex::new(Some(
@@ -216,6 +229,71 @@ where
         #[cfg(feature = "store-log")]
         eprintln!("store: reducer thread started");
 
+        let store_clone = store_impl.clone();
+        let reducer_middleware: MiddlewareFn<State, Action> =
+            Arc::new(move |state: &State, action: &Action| {
+                let started_at = Instant::now();
+
+                let dispatch_op = if store_clone.reducers.lock().unwrap().len() == 1 {
+                    store_clone.reducers.lock().unwrap()[0].reduce(state, action)
+                } else {
+                    let reducers = store_clone.reducers.lock().unwrap();
+                    let mut iter = reducers.iter();
+
+                    // First reducer uses the input references directly
+                    let mut result = iter.next().unwrap().reduce(state, action);
+
+                    // Remaining reducers use the result from previous reducer
+                    for reducer in iter {
+                        match result {
+                            DispatchOp::Dispatch(current_state, current_effects) => {
+                                result = reducer.reduce(&current_state, action);
+                                // Merge effects from both reducers
+                                match result {
+                                    DispatchOp::Dispatch(s, mut e) => {
+                                        e.extend(current_effects);
+                                        result = DispatchOp::Dispatch(s, e);
+                                    }
+                                    DispatchOp::Keep(s, mut e) => {
+                                        e.extend(current_effects);
+                                        result = DispatchOp::Keep(s, e);
+                                    }
+                                }
+                            }
+                            DispatchOp::Keep(current_state, current_effects) => {
+                                result = reducer.reduce(&current_state, action);
+                                // Merge effects from both reducers
+                                match result {
+                                    DispatchOp::Dispatch(s, mut e) => {
+                                        e.extend(current_effects);
+                                        result = DispatchOp::Dispatch(s, e);
+                                    }
+                                    DispatchOp::Keep(s, mut e) => {
+                                        e.extend(current_effects);
+                                        result = DispatchOp::Keep(s, e);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    result
+                };
+
+                store_clone.metrics.action_reduced(
+                    Some(action),
+                    started_at.elapsed(),
+                    Instant::now().elapsed(),
+                );
+                Ok(dispatch_op)
+            });
+
+        let mut middleware_deco = reducer_middleware;
+        // chain middlewares in **REVERSE** order
+        for middleware in store_impl.middleware_factories.lock().unwrap().iter().rev() {
+            middleware_deco = middleware.create(middleware_deco);
+        }
+
+        let middleware_deco_arc = Arc::new(middleware_deco);
         while let Some(action_op) = rx.recv() {
             let action_received_at = Instant::now();
             store_impl.metrics.action_received(Some(&action_op));
@@ -228,40 +306,61 @@ where
             match action_op {
                 ActionOp::Action(action) => {
                     // do reduce
-                    let current_state = store_impl.state.lock().unwrap().clone();
-                    let (need_dispatch, new_state, effects) = store_impl.do_reduce(
+                    // Get current state reference while holding lock for minimal time
+                    let current_state_ref = {
+                        let state_guard = store_impl.state.lock().unwrap();
+                        state_guard.clone()
+                    };
+                    let mut effects = vec![];
+                    let result = store_impl.do_reduce(
+                        &current_state_ref,
                         &action,
-                        current_state,
-                        store_impl.clone(),
-                        action_received_at,
+                        &mut effects,
+                        middleware_deco_arc.clone(),
                     );
-                    *store_impl.state.lock().unwrap() = new_state.clone();
 
-                    // do effects remain
-                    if let Some(mut effects) = effects {
-                        store_impl.do_effect(&action, &new_state, &mut effects, store_impl.clone());
+                    match result {
+                        Ok(dispatch_op) => {
+                            // do effects remain
+                            store_impl.do_effect(&mut effects, store_impl.clone());
+                            // do notify subscribers and update store state
+                            match dispatch_op {
+                                DispatchOp::Dispatch(new_state, _) => {
+                                    // Clone state for store update before moving it to do_notify
+                                    let state_for_store = new_state.clone();
+                                    *store_impl.state.lock().unwrap() = state_for_store;
+                                    store_impl.do_notify(
+                                        action.clone(),
+                                        new_state,
+                                        store_impl.clone(),
+                                        action_received_at,
+                                    );
+                                }
+                                DispatchOp::Keep(new_state, _) => {
+                                    // Update store state even if not dispatching
+                                    *store_impl.state.lock().unwrap() = new_state;
+                                }
+                            }
+                        }
+                        Err(_e) => {
+                            #[cfg(feature = "store-log")]
+                            eprintln!(
+                                "store: error do_reduce: action: {:?}, remains: {}",
+                                action,
+                                rx.len()
+                            );
+                        }
                     }
-
-                    // do notify subscribers
-                    if need_dispatch {
-                        store_impl.do_notify(
-                            &action,
-                            &new_state,
-                            store_impl.clone(),
-                            action_received_at,
-                        );
-                    }
-
-                    store_impl.metrics.action_executed(Some(&action), action_received_at.elapsed());
+                    // store_impl.metrics.action_executed(Some(&action), action_received_at.elapsed());
                 }
                 ActionOp::AddSubscriber => {
                     let mut new_subscribers = store_impl.adding_subscribers.lock().unwrap();
                     let new_subscribers_len = new_subscribers.len();
                     if new_subscribers_len > 0 {
                         let current_state = store_impl.state.lock().unwrap().clone();
-                        let iter_subscribers = new_subscribers.drain(..).into_iter();
+                        let iter_subscribers = new_subscribers.drain(..);
 
-                        store_impl.do_subscribe(&current_state, iter_subscribers);
+                        store_impl.do_subscribe(current_state, iter_subscribers);
                     }
 
                     #[cfg(feature = "store-log")]
@@ -283,6 +382,7 @@ where
                     break;
                 }
             }
+            store_impl.metrics.action_executed(None, action_received_at.elapsed());
         }
 
         // drop all subscribers
@@ -304,10 +404,18 @@ where
         (&(*self.metrics)).into()
     }
 
-    /// add a reducer to the store
-    pub fn add_reducer(&self, reducer: Box<dyn Reducer<State, Action> + Send + Sync>) {
-        self.reducers.lock().unwrap().push(reducer);
-    }
+    // /// add a reducer to the store
+    // pub(crate) fn add_reducer(&self, reducer: Box<dyn Reducer<State, Action> + Send + Sync>) {
+    //     let reducer_arc = Arc::from(reducer);
+    //     let mut chain_guard = self.reducer_chain.lock().unwrap();
+    //     if let Some(reducer_chain) = chain_guard.take() {
+    //         // Chain the new reducer to the existing chain
+    //         *chain_guard = Some(reducer_chain.chain(reducer_arc));
+    //     } else {
+    //         // Create new chain if none exists
+    //         *chain_guard = Some(ReducerChain::new(reducer_arc));
+    //     }
+    // }
 
     /// add a subscriber to the store
     pub fn add_subscriber(
@@ -394,138 +502,51 @@ where
         }
     }
 
-    /// do reduce
+    /// Run middleware + reducers for a single action.
     ///
-    /// ### Return
-    /// * bool : true if the state to be dispatched
-    /// * effects : side effects
+    /// ### Parameters
+    /// * `state`: Current state reference
+    /// * `action`: Action reference
+    /// * `effects`: Mutable reference to an effects buffer that will be extended with all emitted effects
+    /// * `middleware_deco`: Middleware chain entry point
+    ///
+    /// ### Returns
+    /// * `Ok(DispatchOp<State, Action>)`: dispatch operation containing the next state and effects
+    /// * `Err(StoreError)`: if an error occurs in middleware or reducers
     pub(crate) fn do_reduce(
         &self,
+        state: &State,
         action: &Action,
-        mut state: State,
-        dispatcher: Arc<StoreImpl<State, Action>>,
-        action_received_at: Instant,
-    ) -> (bool, State, Option<Vec<Effect<Action>>>) {
-        //let state = self.state.lock().unwrap().clone();
+        effects: &mut Vec<Effect<Action>>,
+        middleware_deco: Arc<MiddlewareFn<State, Action>>,
+    ) -> Result<DispatchOp<State, Action>, StoreError> {
+        let started_at = Instant::now();
 
-        #[cfg(feature = "store-log")]
-        eprintln!(
-            "store: reduce: action: {}",
-            crate::store_impl::describe_action(action)
-        );
+        // call middleware chain
+        let mut dispatch_op = middleware_deco(state, action)?;
 
-        let mut reduce_action = true;
-        if !self.middlewares.lock().unwrap().is_empty() {
-            let middleware_start = Instant::now();
-            let mut middleware_executed = 0;
-            let weak_dispatcher = Arc::new(WeakDispatcher::new(dispatcher.clone()));
-            for middleware in self.middlewares.lock().unwrap().iter() {
-                middleware_executed += 1;
-                match middleware.before_reduce(action, &state, weak_dispatcher.clone()) {
-                    Ok(MiddlewareOp::ContinueAction) => {
-                        // continue dispatching the action
-                    }
-                    Ok(MiddlewareOp::DoneAction) => {
-                        // stop dispatching the action
-                        // last middleware wins
-                        reduce_action = false;
-                    }
-                    Ok(MiddlewareOp::BreakChain) => {
-                        // break the middleware chain
-                        break;
-                    }
-                    Err(e) => {
-                        middleware.on_error(e);
-                    }
-                }
+        // Extract effects from DispatchOp and add to effects vector (mutable parameter)
+        match &mut dispatch_op {
+            DispatchOp::Dispatch(_, ref mut result_effects) => {
+                effects.append(result_effects);
             }
-            let middleware_duration = middleware_start.elapsed();
-            self.metrics.middleware_executed(
-                Some(action),
-                "before_reduce",
-                middleware_executed,
-                middleware_duration,
-            );
+            DispatchOp::Keep(_, ref mut result_effects) => {
+                effects.append(result_effects);
+            }
         }
 
-        let mut effects = vec![];
-        let mut need_dispatch = true;
-        if reduce_action {
-            let reducer_start = Instant::now();
+        self.metrics.middleware_executed(Some(action), "", 1, started_at.elapsed());
 
-            for reducer in self.reducers.lock().unwrap().iter() {
-                match reducer.reduce(&state, action) {
-                    DispatchOp::Dispatch(new_state, effect) => {
-                        state = new_state;
-                        if let Some(effect) = effect {
-                            effects.push(effect);
-                        }
-                        need_dispatch = true;
-                    }
-                    DispatchOp::Keep(new_state, effect) => {
-                        // keep the state but do not dispatch
-                        state = new_state;
-                        if let Some(effect) = effect {
-                            effects.push(effect);
-                        }
-                        need_dispatch = false;
-                    }
-                }
-            }
-
-            // reducer 실행 시간 측정 종료 및 기록
-            let reducer_duration = reducer_start.elapsed();
-            self.metrics.action_reduced(
-                Some(action),
-                reducer_duration,
-                action_received_at.elapsed(),
-            );
-        }
-
-        (need_dispatch, state, Some(effects))
+        Ok(dispatch_op)
     }
 
     pub(crate) fn do_effect(
         &self,
-        action: &Action,
-        state: &State,
         effects: &mut Vec<Effect<Action>>,
         dispatcher: Arc<StoreImpl<State, Action>>,
     ) {
         let effect_start = Instant::now();
         self.metrics.effect_issued(effects.len());
-
-        if !self.middlewares.lock().unwrap().is_empty() {
-            let middleware_start = Instant::now();
-            let mut middleware_executed = 0;
-            let weak_dispatcher = Arc::new(WeakDispatcher::new(dispatcher.clone()));
-            for middleware in self.middlewares.lock().unwrap().iter() {
-                middleware_executed += 1;
-                match middleware.before_effect(action, state, effects, weak_dispatcher.clone()) {
-                    Ok(MiddlewareOp::ContinueAction) => {
-                        // do nothing
-                    }
-                    Ok(MiddlewareOp::DoneAction) => {
-                        // do nothing
-                    }
-                    Ok(MiddlewareOp::BreakChain) => {
-                        // break the middleware chain
-                        break;
-                    }
-                    Err(e) => {
-                        middleware.on_error(e);
-                    }
-                }
-            }
-
-            let middleware_duration = middleware_start.elapsed();
-            self.metrics.middleware_executed(
-                Some(action),
-                "before_effect",
-                middleware_executed,
-                middleware_duration,
-            );
-        }
 
         let effects_total = effects.len();
         while !effects.is_empty() {
@@ -549,9 +570,26 @@ where
                     dispatcher.dispatch_thunk(thunk);
                 }
                 Effect::Function(_tok, func) => {
+                    let dispatcher_clone = dispatcher.clone();
                     dispatcher.dispatch_task(Box::new(move || {
-                        // when the result of the function needs to be handled, it should be done in middleware
-                        let _ = func();
+                        // Execute the function and try to convert result to Action
+                        match func() {
+                            Ok(result) => {
+                                // Try to downcast the result to Action type first
+                                if let Ok(action) = result.downcast::<Action>() {
+                                    let _ = dispatcher_clone.dispatch(*action);
+                                    return;
+                                }
+                                // Note: Generic conversion from result to Action is not type-safe
+                                // Effect::Function results should be handled by middleware or
+                                // use Effect::Thunk/Effect::Action instead for type safety
+                            }
+                            Err(_e) => {
+                                // Error in effect function, ignore
+                                #[cfg(feature = "store-log")]
+                                eprintln!("Effect function error: {:?}", _e);
+                            }
+                        }
                     }));
                 }
             };
@@ -563,73 +601,55 @@ where
 
     pub(crate) fn do_notify(
         &self,
-        action: &Action,
-        next_state: &State,
-        dispatcher: Arc<StoreImpl<State, Action>>,
+        action: Action,
+        next_state: State,
+        _dispatcher: Arc<StoreImpl<State, Action>>,
         _action_received_at: Instant,
     ) {
-        let _notify_start = Instant::now();
-        self.metrics.state_notified(Some(next_state));
+        let notify_start = Instant::now();
+        self.metrics.state_notified(Some(&next_state));
 
         #[cfg(feature = "store-log")]
         eprintln!(
             "store: notify: action: {}",
-            crate::store_impl::describe_action(action)
+            crate::store_impl::describe_action(&action)
         );
 
-        let mut need_notify = true;
-        if !self.middlewares.lock().unwrap().is_empty() {
-            let middleware_start = Instant::now();
-            let mut middleware_executed = 0;
-            let weak_dispatcher = Arc::new(WeakDispatcher::new(dispatcher.clone()));
-            for middleware in self.middlewares.lock().unwrap().iter() {
-                middleware_executed += 1;
-                match middleware.before_dispatch(action, next_state, weak_dispatcher.clone()) {
-                    Ok(MiddlewareOp::ContinueAction) => {
-                        // do nothing
-                    }
-                    Ok(MiddlewareOp::DoneAction) => {
-                        // last win
-                        need_notify = false;
-                    }
-                    Ok(MiddlewareOp::BreakChain) => {
-                        // break the middleware chain
-                        break;
-                    }
-                    Err(e) => {
-                        middleware.on_error(e);
-                    }
+        let subscribers = self.subscribers.lock().unwrap().clone();
+        let subscriber_count = subscribers.len();
+
+        // Clone action for metrics before potentially moving it to subscribers
+        let action_for_metrics = action.clone();
+
+        match subscriber_count {
+            0 => {
+                // No subscribers, no clones needed
+            }
+            1 => {
+                // Single subscriber: move the state and action (no clone needed for subscriber)
+                subscribers[0].on_notify(next_state, action);
+            }
+            _ => {
+                // Multiple subscribers: each subscriber needs its own clone
+                for subscriber_with_id in subscribers.iter() {
+                    subscriber_with_id.on_notify(next_state.clone(), action.clone());
                 }
             }
-            let middleware_duration = middleware_start.elapsed();
-            self.metrics.middleware_executed(
-                Some(action),
-                "before_dispatch",
-                middleware_executed,
-                middleware_duration,
-            );
         }
-
-        if need_notify {
-            let subscribers = self.subscribers.lock().unwrap().clone();
-            for subscriber_with_id in subscribers.iter() {
-                subscriber_with_id.on_notify(next_state, action);
-            }
-            let duration = _notify_start.elapsed();
-            self.metrics.subscriber_notified(Some(action), subscribers.len(), duration);
-        }
+        let duration = notify_start.elapsed();
+        self.metrics.subscriber_notified(Some(&action_for_metrics), subscriber_count, duration);
     }
 
     fn do_subscribe(
         &self,
-        state: &State,
+        state: State,
         new_subscribers: impl Iterator<Item = SubscriberWithId<State, Action>>,
     ) {
         let mut subscribers = self.subscribers.lock().unwrap();
 
         // notify new subscribers with the latest state and add to subscribers
         for subscriber_with_id in new_subscribers {
-            subscriber_with_id.on_subscribe(state);
+            subscriber_with_id.on_subscribe(state.clone());
 
             subscribers.push(subscriber_with_id);
         }
@@ -664,14 +684,13 @@ where
         match self.state_functions.lock() {
             Ok(mut state_functions) => {
                 for state_function in state_functions.drain(..) {
-                    state_function(&state_cloned);
+                    state_function(state_cloned.clone());
                 }
                 //state_functions.clear();
             }
             Err(_e) => {
                 #[cfg(feature = "store-log")]
                 eprintln!("store: Error while locking state functions: {:?}", _e);
-                return;
             }
         };
     }
@@ -829,19 +848,20 @@ where
         }
     }
 
-    /// query the current state with a function
+    /// Query the current state with a function.
     ///
-    /// The function will be executed in the store thread with the current state.
+    /// The function will be executed in the store thread with the current state *moved* into it.
+    /// This is useful for read‑only inspections or aggregations that should observe a consistent snapshot.
     ///
     /// ### Parameters
-    /// * query_fn: A function that receives the current state as `&State`
+    /// * `query_fn`: A function that receives the current state by value (`State`)
     ///
-    /// ### Return
-    /// * Ok(()) : if the query is executed successfully
-    /// * Err(StoreError) : if the store is not available
+    /// ### Returns
+    /// * `Ok(())` : if the query is scheduled successfully
+    /// * `Err(StoreError)` : if the store is not available
     pub fn query_state<F>(&self, query_fn: F) -> Result<(), StoreError>
     where
-        F: FnOnce(&State) + Send + Sync + 'static,
+        F: FnOnce(State) + Send + Sync + 'static,
     {
         self.state_functions.lock().unwrap().push(Box::new(query_fn));
 
@@ -855,20 +875,20 @@ where
                     ))),
                 };
             }
-            return Err(StoreError::DispatchError(
+            Err(StoreError::DispatchError(
                 "Dispatch channel is closed".to_string(),
-            ));
+            ))
         } else {
-            return Err(StoreError::DispatchError(
+            Err(StoreError::DispatchError(
                 "Dispatch channel is closed".to_string(),
-            ));
+            ))
         }
     }
 
-    /// Add middleware
-    pub fn add_middleware(&self, middleware: Arc<dyn Middleware<State, Action> + Send + Sync>) {
-        self.middlewares.lock().unwrap().push(middleware.clone());
-    }
+    // /// Add middleware
+    // pub(crate) fn add_middleware(&self, middleware: Arc<dyn NewMiddlewareFnFactory<State, Action> + Send + Sync>) {
+    //     self.middleware_factories.lock().unwrap().push(middleware);
+    // }
 
     /// Iterator for the state
     ///
@@ -965,8 +985,10 @@ where
 
         // subscribe to the store
         let channel_subscriber = Arc::new(ChanneledSubscriber::new(handle, tx));
-        let subscription = self.add_subscriber(channel_subscriber.clone());
+        let subscription = self.add_subscriber(channel_subscriber);
 
+        // return subscription
+        #[allow(clippy::let_and_return)]
         subscription
     }
 
@@ -984,7 +1006,7 @@ where
                 ActionOp::Action((created_at, state, action)) => {
                     let started_at = Instant::now();
                     {
-                        subscriber.on_notify(&state, &action);
+                        subscriber.on_notify(state.clone(), action.clone());
                     }
                     metrics.subscriber_notified(Some(&action), 1, started_at.elapsed());
 
@@ -1088,16 +1110,10 @@ where
     State: Send + Sync + Clone + 'static,
     Action: Send + Sync + Clone + std::fmt::Debug + 'static,
 {
-    fn on_notify(&self, state: &State, action: &Action) {
+    fn on_notify(&self, state: State, action: Action) {
         match self.tx.lock() {
             Ok(tx) => {
-                tx.as_ref().map(|tx| {
-                    tx.send(ActionOp::Action((
-                        Instant::now(),
-                        state.clone(),
-                        action.clone(),
-                    )))
-                });
+                tx.as_ref().map(|tx| tx.send(ActionOp::Action((Instant::now(), state, action))));
             }
             Err(_e) => {
                 #[cfg(feature = "store-log")]
@@ -1183,7 +1199,7 @@ where
         self.stop()
     }
 
-    fn stop_with_timeout(&self, timeout: Duration) -> Result<(), StoreError> {
+    fn stop_timeout(&self, timeout: Duration) -> Result<(), StoreError> {
         self.stop_with_timeout(timeout)
     }
 }
@@ -1191,10 +1207,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        BackpressurePolicy, DispatchOp, Dispatcher, Effect, FnReducer, Middleware, MiddlewareOp,
-        Reducer, StoreBuilder,
-    };
+    use crate::{BackpressurePolicy, Dispatcher, Effect, FnReducer, Reducer, StoreBuilder};
     use std::sync::Arc;
     use std::thread;
     use std::time::Duration;
@@ -1210,9 +1223,9 @@ mod tests {
     }
 
     impl Subscriber<i32, i32> for TestChannelSubscriber {
-        fn on_notify(&self, state: &i32, action: &i32) {
+        fn on_notify(&self, state: i32, action: i32) {
             //println!("TestChannelSubscriber: state={}, action={}", state, action);
-            self.received.lock().unwrap().push((*state, *action));
+            self.received.lock().unwrap().push((state, action));
         }
     }
 
@@ -1220,7 +1233,7 @@ mod tests {
 
     impl Reducer<i32, i32> for TestReducer {
         fn reduce(&self, state: &i32, action: &i32) -> DispatchOp<i32, i32> {
-            DispatchOp::Dispatch(state + action, None)
+            DispatchOp::Dispatch(state + action, vec![])
         }
     }
 
@@ -1236,10 +1249,10 @@ mod tests {
     }
 
     impl Subscriber<i32, i32> for SlowSubscriber {
-        fn on_notify(&self, state: &i32, action: &i32) {
+        fn on_notify(&self, state: i32, action: i32) {
             //println!("SlowSubscriber: state={}, action={}", state, action);
             std::thread::sleep(self.delay);
-            self.received.lock().unwrap().push((*state, *action));
+            self.received.lock().unwrap().push((state, action));
         }
     }
 
@@ -1419,13 +1432,13 @@ mod tests {
         }
 
         impl Subscriber<i32, i32> for TestSubscribeSubscriber {
-            fn on_subscribe(&self, state: &i32) {
-                self.received_states.lock().unwrap().push(*state);
+            fn on_subscribe(&self, state: i32) {
+                self.received_states.lock().unwrap().push(state);
                 *self.subscribe_called.lock().unwrap() = true;
             }
 
-            fn on_notify(&self, state: &i32, _action: &i32) {
-                self.received_states.lock().unwrap().push(*state);
+            fn on_notify(&self, state: i32, _action: i32) {
+                self.received_states.lock().unwrap().push(state);
             }
         }
 
@@ -1552,14 +1565,14 @@ mod tests {
         }
 
         impl Subscriber<i32, i32> for ModifyingSubscriber {
-            fn on_subscribe(&self, state: &i32) {
+            fn on_subscribe(&self, state: i32) {
                 // on_subscribe에서 상태를 수정해도 store의 상태는 변경되지 않음
-                self.received_states.lock().unwrap().push(*state);
+                self.received_states.lock().unwrap().push(state);
                 *self.subscribe_called.lock().unwrap() = true;
             }
 
-            fn on_notify(&self, state: &i32, _action: &i32) {
-                self.received_states.lock().unwrap().push(*state);
+            fn on_notify(&self, state: i32, _action: i32) {
+                self.received_states.lock().unwrap().push(state);
             }
         }
 
@@ -1701,21 +1714,21 @@ mod tests {
                             value: state.value + n,
                             name: state.name.clone(),
                         },
-                        None,
+                        vec![],
                     ),
                     ComplexAction::SetName(name) => DispatchOp::Dispatch(
                         ComplexState {
                             value: state.value,
                             name: name.clone(),
                         },
-                        None,
+                        vec![],
                     ),
                     ComplexAction::Reset => DispatchOp::Dispatch(
                         ComplexState {
                             value: 0,
                             name: "reset".to_string(),
                         },
-                        None,
+                        vec![],
                     ),
                 },
             )),
@@ -1798,35 +1811,20 @@ mod tests {
         // given: store with middleware
         struct TestMiddleware;
 
-        impl<State, Action> Middleware<State, Action> for TestMiddleware
+        impl<State, Action> MiddlewareFnFactory<State, Action> for TestMiddleware
         where
-            State: Send + Sync + 'static,
-            Action: Send + Sync + Clone + 'static,
+            State: Send + Sync + Clone + 'static,
+            Action: Send + Sync + Clone + std::fmt::Debug + 'static,
         {
-            fn before_reduce(
-                &self,
-                _action: &Action,
-                _state: &State,
-                _dispatcher: Arc<dyn Dispatcher<Action>>,
-            ) -> Result<MiddlewareOp, StoreError> {
-                Ok(MiddlewareOp::ContinueAction)
-            }
-
-            fn before_effect(
-                &self,
-                _action: &Action,
-                _state: &State,
-                _effects: &mut Vec<Effect<Action>>,
-                _dispatcher: Arc<dyn Dispatcher<Action>>,
-            ) -> Result<MiddlewareOp, StoreError> {
-                Ok(MiddlewareOp::ContinueAction)
+            fn create(&self, inner: MiddlewareFn<State, Action>) -> MiddlewareFn<State, Action> {
+                inner
             }
         }
 
         let store = StoreImpl::new_with(
             0,
             vec![Box::new(FnReducer::from(|state: &i32, action: &i32| {
-                DispatchOp::Dispatch(state + action, None)
+                DispatchOp::Dispatch(state + action, vec![])
             }))],
             "test".to_string(),
             1,
@@ -1857,14 +1855,13 @@ mod tests {
             0,
             Box::new(FnReducer::from(|state: &i32, action: &i32| {
                 let new_state = state + action;
-                let effects = if action > &5 {
-                    Some(Effect::Task(Box::new(|| {
+                let mut effects_vec = vec![];
+                if *action > 5 {
+                    effects_vec.push(Effect::Task(Box::new(|| {
                         // effect that does nothing
-                    })))
-                } else {
-                    None
-                };
-                DispatchOp::Dispatch(new_state, effects)
+                    })));
+                }
+                DispatchOp::Dispatch(new_state, effects_vec)
             })),
         )
         .unwrap();
@@ -1891,10 +1888,10 @@ mod tests {
         // 실제로는 마지막 리듀서만 사용됩니다
         let store = StoreBuilder::new(0)
             .with_reducer(Box::new(FnReducer::from(|state: &i32, action: &i32| {
-                DispatchOp::Dispatch(state + action, None)
+                DispatchOp::Dispatch(state + action, vec![])
             })))
             .with_reducer(Box::new(FnReducer::from(|state: &i32, _action: &i32| {
-                DispatchOp::Dispatch(state * 2, None)
+                DispatchOp::Dispatch(state * 2, vec![])
             })))
             .build()
             .unwrap();
@@ -1949,7 +1946,7 @@ mod tests {
         let store = StoreImpl::new_with(
             0,
             vec![Box::new(FnReducer::from(|state: &i32, action: &i32| {
-                DispatchOp::Dispatch(state + action, None)
+                DispatchOp::Dispatch(state + action, vec![])
             }))],
             "test".to_string(),
             2,
@@ -2005,7 +2002,7 @@ mod tests {
             "".to_string(),
             Box::new(FnReducer::from(|state: &String, action: &String| {
                 let new_state = format!("{}{}", state, action);
-                DispatchOp::Dispatch(new_state, None)
+                DispatchOp::Dispatch(new_state, vec![])
             })),
         )
         .unwrap();
@@ -2037,7 +2034,7 @@ mod tests {
         let store = StoreImpl::new_with_reducer(
             0,
             Box::new(FnReducer::from(|state: &i32, _action: &i32| {
-                DispatchOp::Dispatch(*state, None) // return same state
+                DispatchOp::Dispatch(state.clone(), vec![]) // return same state
             })),
         )
         .unwrap();
@@ -2073,7 +2070,7 @@ mod tests {
         let queried_value_clone = queried_value.clone();
         store
             .query_state(move |state| {
-                *queried_value_clone.lock().unwrap() = *state;
+                *queried_value_clone.lock().unwrap() = state;
             })
             .unwrap();
 
@@ -2110,14 +2107,14 @@ mod tests {
                             value: state.value + n,
                             name: state.name.clone(),
                         },
-                        None,
+                        vec![],
                     ),
                     ComplexAction::SetName(name) => DispatchOp::Dispatch(
                         ComplexState {
                             value: state.value,
                             name: name.clone(),
                         },
-                        None,
+                        vec![],
                     ),
                 },
             )),
@@ -2168,7 +2165,7 @@ mod tests {
         let query1_clone = query1_result.clone();
         store
             .query_state(move |state| {
-                *query1_clone.lock().unwrap() = *state;
+                *query1_clone.lock().unwrap() = state;
             })
             .unwrap();
 
@@ -2180,7 +2177,7 @@ mod tests {
         let query2_clone = query2_result.clone();
         store
             .query_state(move |state| {
-                *query2_clone.lock().unwrap() = *state;
+                *query2_clone.lock().unwrap() = state;
             })
             .unwrap();
 
@@ -2201,7 +2198,7 @@ mod tests {
         let queried_value = std::sync::Arc::new(std::sync::Mutex::new(0));
         let queried_value_clone = queried_value.clone();
         let result = store.query_state(move |state| {
-            *queried_value_clone.lock().unwrap() = *state;
+            *queried_value_clone.lock().unwrap() = state;
         });
 
         // then: should succeed and get the initial state

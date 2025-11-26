@@ -29,7 +29,7 @@ fn calc_reducer(state: &CalcState, action: &CalcAction) -> DispatchOp<CalcState,
                 CalcState {
                     count: state.count + i,
                 },
-                None,
+                vec![],
             )
         }
         CalcAction::Subtract(i) => {
@@ -38,13 +38,13 @@ fn calc_reducer(state: &CalcState, action: &CalcAction) -> DispatchOp<CalcState,
                 CalcState {
                     count: state.count - i,
                 },
-                None,
+                vec![],
             )
         }
     }
 }
 
-fn calc_subscriber(state: &CalcState, action: &CalcAction) {
+fn calc_subscriber(state: CalcState, action: CalcAction) {
     match action {
         CalcAction::Add(i) => {
             println!("CalcSubscriber::on_notify: state:{:?}, action:{}", state, i);

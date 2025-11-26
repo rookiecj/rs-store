@@ -83,6 +83,9 @@ examples: ## example all
 example-dropoldest_if:
 	RUSTFLAGS="-D warnings" cargo run --features store-log --example dropoldest_if -- --nocapture --features store-log
 
+example-performance_state_size:
+	RUST_LOG=debug RUST_TRACEBACK=1 cargo run --example performance_state_size -- --nocapture
+
 
 VERSION := $(shell cargo pkgid -p "rs-store" | cut -d\# -f2 | cut -d@ -f2)
 

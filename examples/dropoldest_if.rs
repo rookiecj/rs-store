@@ -18,7 +18,7 @@ fn main() {
             // reducer에서 지연을 추가하여 backpressure 상황 생성
             std::thread::sleep(std::time::Duration::from_millis(200));
             println!("reducer: {} + {}", state, action);
-            DispatchOp::Dispatch(state + action, None)
+            DispatchOp::Dispatch(state + action, vec![])
         })))
         .with_capacity(2) // 매우 작은 capacity로 설정
         .with_policy(policy)
@@ -27,7 +27,7 @@ fn main() {
 
     // subscriber 추가
     store
-        .add_subscriber(Arc::new(FnSubscriber::from(|state: &i32, action: &i32| {
+        .add_subscriber(Arc::new(FnSubscriber::from(|state: i32, action: i32| {
             println!("subscriber: state: {}, action: {}", state, action);
         })))
         .unwrap();

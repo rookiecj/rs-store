@@ -6,18 +6,16 @@ pub fn main() {
     let store = StoreBuilder::new(0)
         .with_reducer(Box::new(FnReducer::from(|state: &i32, action: &i32| {
             println!("reducer: {} + {}", state, action);
-            DispatchOp::Dispatch(state + action, None)
+            DispatchOp::Dispatch(state + action, vec![])
         })))
         .build()
         .unwrap();
 
     // add subscriber
     store
-        .add_subscriber(Arc::new(FnSubscriber::from(
-            |state: &i32, _action: &i32| {
-                println!("subscriber: state: {}", state);
-            },
-        )))
+        .add_subscriber(Arc::new(FnSubscriber::from(|state: i32, _action: i32| {
+            println!("subscriber: state: {}", state);
+        })))
         .unwrap();
 
     // dispatch actions
