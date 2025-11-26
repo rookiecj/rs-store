@@ -1,46 +1,25 @@
 use std::sync::Arc;
-use std::time::Instant;
 
+use crate::reducer::DispatchOp;
 use crate::store::StoreError;
-use crate::Dispatcher;
-use crate::Effect;
 
-/// Context passed to middleware during processing
-pub struct MiddlewareContext<State, Action>
-where
-    State: Send + Sync + Clone,
-    Action: Send + Sync + Clone + std::fmt::Debug + 'static,
-{
-    /// The action being processed
-    pub action: Action,
-    /// time the action received
-    pub action_at: Instant,
-    /// The accumulated state as a result of processing middlewares and reducers
-    pub state: State,
-    /// The accumulated effects generated during processing
-    pub effects: Vec<Effect<Action>>,
-    /// Dispatcher to allow middleware to dispatch additional actions
-    pub dispatcher: Arc<dyn Dispatcher<Action>>,
-}
-
-/// Type alias for NewMiddleware function
-/// This is a boxed function that takes a mutable reference to MiddlewareContext and returns a Result
+/// Type alias for a middleware function.
 ///
 /// ## Arguments
-/// - ctx: &mut MiddlewareContext<State, Action> - the context containing action, state, and dispatcher,
-///   the middlewares can modify the context (e.g., action, state) as a result of processing
+/// - `state`: Current state (reference)
+/// - `action`: Action to process (reference)
 ///
 /// ## Returns
-/// - Ok(bool): true if the action should continue to be processed, false to stop processing
-/// - Err(StoreError): if an error occurs during processing
+/// - `Ok(DispatchOp<State, Action>)`: dispatch operation containing the next state and any effects
+/// - `Err(StoreError)`: if an error occurs during processing
 pub type MiddlewareFn<State, Action> = Arc<
-    dyn Fn(&mut MiddlewareContext<State, Action>) -> Result<bool, StoreError>
+    dyn Fn(&State, &Action) -> Result<DispatchOp<State, Action>, StoreError>
         + Send
         + Sync
         + 'static,
 >;
 
-/// Factory trait to create NewMiddlewareFn from an inner NewMiddlewareFn
+/// Factory trait to create a [`MiddlewareFn`] from an inner [`MiddlewareFn`].
 pub trait MiddlewareFnFactory<State, Action>
 where
     State: Send + Sync + Clone,
@@ -51,7 +30,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::{BackpressurePolicy, DispatchOp, Dispatcher, Reducer, StoreImpl};
+    use crate::{BackpressurePolicy, DispatchOp, Effect, Reducer, StoreImpl};
     use std::sync::{Arc, Mutex};
     use std::thread;
     use std::time::Duration;
@@ -60,9 +39,8 @@ mod tests {
 
     struct TestReducer;
     impl Reducer<i32, i32> for TestReducer {
-        fn reduce(&self, _state: i32, action: i32) -> DispatchOp<i32, i32> {
-            let new_state = action;
-            DispatchOp::Dispatch(new_state, vec![])
+        fn reduce(&self, _state: &i32, action: &i32) -> DispatchOp<i32, i32> {
+            DispatchOp::Dispatch(*action, vec![])
         }
     }
 
@@ -88,16 +66,16 @@ mod tests {
     {
         fn create(&self, inner: MiddlewareFn<State, Action>) -> MiddlewareFn<State, Action> {
             let logs_clone = self.logs.clone();
-            Arc::new(move |ctx: &mut MiddlewareContext<State, Action>| {
-                let log = format!("before: - Action: {:?}", ctx.action);
+            Arc::new(move |state: &State, action: &Action| {
+                let log = format!("before: - Action: {:?}", action);
                 println!("{}", log);
                 // (possible poisoned)
                 logs_clone.lock().unwrap().push(log);
 
                 // inner
-                let result = inner(ctx);
+                let result = inner(state, action);
 
-                let log = format!("after: - Action: {:?}", ctx.action);
+                let log = format!("after: - Action: {:?}", action);
                 println!("{}", log);
                 logs_clone.lock().unwrap().push(log);
 
@@ -149,18 +127,12 @@ mod tests {
     impl Reducer<i32, MiddlewareAction> for MiddlewareReducer {
         fn reduce(
             &self,
-            _state: i32,
-            action: MiddlewareAction,
+            _state: &i32,
+            action: &MiddlewareAction,
         ) -> DispatchOp<i32, MiddlewareAction> {
             match action {
-                MiddlewareAction::ReqThisAction(value) => {
-                    let new_state = value;
-                    DispatchOp::Dispatch(new_state, vec![])
-                }
-                MiddlewareAction::ResponseAsThis(value) => {
-                    let new_state = value;
-                    DispatchOp::Dispatch(new_state, vec![])
-                }
+                MiddlewareAction::ReqThisAction(value) => DispatchOp::Dispatch(*value, vec![]),
+                MiddlewareAction::ResponseAsThis(value) => DispatchOp::Dispatch(*value, vec![]),
             }
         }
     }
@@ -179,25 +151,21 @@ mod tests {
             &self,
             inner: MiddlewareFn<State, MiddlewareAction>,
         ) -> MiddlewareFn<State, MiddlewareAction> {
-            Arc::new(
-                move |ctx: &mut MiddlewareContext<State, MiddlewareAction>| {
-                    match &ctx.action {
-                        MiddlewareAction::ReqThisAction(v) => {
-                            // do async
-                            // ReqAsync -> Response
-                            let v = *v;
-                            ctx.dispatcher.dispatch_thunk(Box::new(move |dispatcher| {
-                                let _ =
-                                    dispatcher.dispatch(MiddlewareAction::ResponseAsThis(v + 1));
-                            }));
-                        }
-                        _ => {}
+            Arc::new(move |state: &State, action: &MiddlewareAction| {
+                match action {
+                    MiddlewareAction::ReqThisAction(v) => {
+                        // Create an effect that dispatches ResponseAsThis(v + 1)
+                        let value = *v + 1;
+                        let effect = Effect::Action(MiddlewareAction::ResponseAsThis(value));
+                        // Don't process the original action, just return the effect
+                        Ok(DispatchOp::Keep(state.clone(), vec![effect]))
                     }
-
-                    // continue to next middleware
-                    inner(ctx)
-                },
-            )
+                    _ => {
+                        // For other actions, pass through to next middleware
+                        inner(state, action)
+                    }
+                }
+            })
         }
     }
 
@@ -259,15 +227,15 @@ mod tests {
     impl Reducer<EffectState, EffectAction> for EffectReducer {
         fn reduce(
             &self,
-            _state: EffectState,
-            action: EffectAction,
+            _state: &EffectState,
+            action: &EffectAction,
         ) -> DispatchOp<EffectState, EffectAction> {
             match action {
                 EffectAction::ActionProduceEffectFunction(value) => {
-                    let new_state = EffectState { value: value };
+                    let new_state = EffectState { value: *value };
 
-                    // produce an effect function
-                    let value_clone = value;
+                    // produce an effect function that returns an Action
+                    let value_clone = *value;
                     let effect = Effect::Function(
                         "key1".to_string(),
                         Box::new(move || {
@@ -275,15 +243,15 @@ mod tests {
 
                             // do long running task
 
-                            // and return result of the task
-                            let new_result = Box::new(value_clone + 1);
-                            Ok(new_result)
+                            // return the result as an Action so it can be dispatched
+                            let action = EffectAction::ResponseForTheEffect(value_clone + 1);
+                            Ok(Box::new(action) as Box<dyn std::any::Any>)
                         }),
                     );
                     DispatchOp::Dispatch(new_state, vec![effect])
                 }
                 EffectAction::ResponseForTheEffect(value) => {
-                    let new_state = EffectState { value: value };
+                    let new_state = EffectState { value: *value };
                     DispatchOp::Dispatch(new_state, vec![])
                 }
             }
@@ -302,52 +270,13 @@ mod tests {
             &self,
             inner: MiddlewareFn<EffectState, EffectAction>,
         ) -> MiddlewareFn<EffectState, EffectAction> {
-            Arc::new(
-                move |ctx: &mut MiddlewareContext<EffectState, EffectAction>| {
-                    // call inner middleware/reducer
-                    let op = inner(ctx)?;
+            Arc::new(move |state: &EffectState, action: &EffectAction| {
+                // call inner middleware/reducer
+                let dispatch_op = inner(state, action)?;
 
-                    while ctx.effects.len() > 0 {
-                        let effect = ctx.effects.remove(0);
-                        match effect {
-                            Effect::Function(tok, effect_fn) => {
-                                // do async
-                                ctx.dispatcher.dispatch_thunk(Box::new(move |dispatcher| {
-                                    // do side effect
-                                    let result = effect_fn();
-
-                                    // send response
-                                    match result {
-                                        Ok(new_value) => {
-                                            // ensure the result type is i32
-                                            assert_eq!(tok, "key1");
-                                            // it is almost safe to cast.
-                                            let new_result = new_value.downcast::<i32>().unwrap();
-                                            // and can determine which action can be dispatched
-                                            dispatcher
-                                                .dispatch(EffectAction::ResponseForTheEffect(
-                                                    *new_result,
-                                                ))
-                                                .expect("no dispatch failed");
-                                        }
-                                        Err(e) => {
-                                            eprintln!("Error: {:?}", e);
-                                        }
-                                    }
-                                }));
-                            }
-                            _ => {
-                                //assert!(false);
-                                return Err(StoreError::MiddlewareError(
-                                    "Unexpected effect type".to_string(),
-                                ));
-                            }
-                        }
-                    }
-
-                    Ok(op)
-                },
-            )
+                // Pass through the DispatchOp - effect handling is done in do_effect
+                Ok(dispatch_op)
+            })
         }
     }
 

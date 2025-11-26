@@ -1,6 +1,4 @@
-use rs_store::{
-    DispatchOp, FnReducer, MiddlewareContext, MiddlewareFn, MiddlewareFnFactory, StoreBuilder,
-};
+use rs_store::{DispatchOp, FnReducer, MiddlewareFn, MiddlewareFnFactory, StoreBuilder};
 use std::sync::atomic::{AtomicU64, AtomicUsize};
 use std::sync::Arc;
 use std::time::Instant;
@@ -70,31 +68,24 @@ where
 {
     fn create(&self, inner: MiddlewareFn<State, Action>) -> MiddlewareFn<State, Action> {
         let metrics = self.metrics.clone();
-        let next = inner;
-        let middleware: MiddlewareFn<State, Action> =
-            Arc::new(move |ctx: &mut MiddlewareContext<State, Action>| {
-                let start_time = Instant::now();
+        Arc::new(move |state: &State, action: &Action| {
+            let start_time = Instant::now();
 
-                // middleware executed
-                // action executed
-                let action = ctx.action.clone();
-                // do more metrics here...
+            // Call the next middleware in the chain
+            let result = inner(state, action);
 
-                // Call the next middleware in the chain
-                let result = next(ctx);
+            let duration = start_time.elapsed();
 
-                let duration = start_time.elapsed();
+            // Record metrics
+            metrics.action_executed(Some(action), duration);
 
-                // Record metrics
-                metrics.action_executed(Some(&action), duration);
-
-                println!(
-                    "[MetricsMiddleware] Action executed: {:?}, Duration: {:?}",
-                    action, duration
-                );
-                result
-            });
-        middleware
+            #[cfg(feature = "store-log")]
+            eprintln!(
+                "[MetricsMiddleware] Action executed: {:?}, Duration: {:?}",
+                action, duration
+            );
+            result
+        })
     }
 }
 
@@ -102,7 +93,7 @@ pub fn main() {
     // Example usage of MetricsMiddleware
     let metrics_middleware: MetricsMiddleware<String, String> =
         MetricsMiddleware::new("example_metrics".to_string());
-    let reducer = Box::new(FnReducer::from(|state: String, action: String| {
+    let reducer = Box::new(FnReducer::from(|state: &String, action: &String| {
         let new_state = format!("{} + {}", state, action);
         DispatchOp::Dispatch(new_state, vec![])
     }));

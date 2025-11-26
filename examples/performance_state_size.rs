@@ -448,7 +448,7 @@ fn test_small_state() {
     let reducer_times_clone = reducer_times.clone();
     let subscriber_times_clone = subscriber_times.clone();
 
-    let reducer = FnReducer::from(move |state: SmallState, action: TestAction| {
+    let reducer = FnReducer::from(move |state: &SmallState, action: &TestAction| {
         let start = Instant::now();
         let mut new_state = state.clone();
         match action {
@@ -486,7 +486,7 @@ fn test_medium_state() {
     let reducer_times_clone = reducer_times.clone();
     let subscriber_times_clone = subscriber_times.clone();
 
-    let reducer = FnReducer::from(move |state: MediumState, action: TestAction| {
+    let reducer = FnReducer::from(move |state: &MediumState, action: &TestAction| {
         let start = Instant::now();
         let mut new_state = state.clone();
         match action {
@@ -524,7 +524,7 @@ fn test_large_state() {
     let reducer_times_clone = reducer_times.clone();
     let subscriber_times_clone = subscriber_times.clone();
 
-    let reducer = FnReducer::from(move |state: LargeState, action: TestAction| {
+    let reducer = FnReducer::from(move |state: &LargeState, action: &TestAction| {
         let start = Instant::now();
         let mut new_state = state.clone();
         match action {
@@ -562,7 +562,7 @@ fn test_very_large_state() {
     let reducer_times_clone = reducer_times.clone();
     let subscriber_times_clone = subscriber_times.clone();
 
-    let reducer = FnReducer::from(move |state: VeryLargeState, action: TestAction| {
+    let reducer = FnReducer::from(move |state: &VeryLargeState, action: &TestAction| {
         let start = Instant::now();
         let mut new_state = state.clone();
         match action {
@@ -603,7 +603,7 @@ fn test_very_large_state_with_arc() {
     // Arc<VeryLargeState>를 State로 사용
     type ArcVeryLargeState = Arc<VeryLargeState>;
 
-    let reducer = FnReducer::from(move |state: ArcVeryLargeState, action: TestAction| {
+    let reducer = FnReducer::from(move |state: &ArcVeryLargeState, action: &TestAction| {
         let start = Instant::now();
         // Arc::make_mut()을 사용하여 copy-on-write 방식으로 수정
         // Arc가 단일 소유권이면 in-place 수정, 여러 소유권이면 복사 후 수정

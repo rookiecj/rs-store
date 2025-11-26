@@ -14,7 +14,7 @@ fn main() {
 
     // 매우 작은 capacity로 store 생성하여 backpressure 상황 시뮬레이션
     let store = StoreBuilder::new(0)
-        .with_reducer(Box::new(FnReducer::from(|state: i32, action: i32| {
+        .with_reducer(Box::new(FnReducer::from(|state: &i32, action: &i32| {
             // reducer에서 지연을 추가하여 backpressure 상황 생성
             std::thread::sleep(std::time::Duration::from_millis(200));
             println!("reducer: {} + {}", state, action);

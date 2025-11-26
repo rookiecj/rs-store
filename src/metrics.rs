@@ -502,18 +502,17 @@ impl Sub<MetricsSnapshot> for MetricsSnapshot {
 mod tests {
     use super::*;
     use crate::{
-        BackpressurePolicy, DispatchOp, Dispatcher, MiddlewareFn, MiddlewareFnFactory, Reducer,
-        StoreImpl,
+        BackpressurePolicy, Dispatcher, MiddlewareFn, MiddlewareFnFactory, Reducer, StoreImpl,
     };
     use std::sync::Arc;
     use std::thread;
 
     struct TestReducer;
     impl Reducer<i32, i32> for TestReducer {
-        fn reduce(&self, state: i32, action: i32) -> DispatchOp<i32, i32> {
+        fn reduce(&self, state: &i32, action: &i32) -> crate::DispatchOp<i32, i32> {
             let new_state = state + action;
             thread::sleep(Duration::from_millis(10)); // Add delay to test timing
-            DispatchOp::Dispatch(new_state, vec![])
+            crate::DispatchOp::Dispatch(new_state, vec![])
         }
     }
 
@@ -536,7 +535,7 @@ mod tests {
         Action: Send + Sync + Clone + std::fmt::Debug + 'static,
     {
         fn create(&self, inner: MiddlewareFn<State, Action>) -> MiddlewareFn<State, Action> {
-            Arc::new(move |middleware_context| inner(middleware_context))
+            Arc::new(move |state: &State, action: &Action| inner(state, action))
         }
     }
 

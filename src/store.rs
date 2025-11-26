@@ -87,7 +87,6 @@ mod tests {
     use super::*;
     use crate::builder::StoreBuilder;
     use crate::BackpressurePolicy;
-    use crate::DispatchOp;
     use crate::Reducer;
     use crate::StoreImpl;
     use std::sync::Arc;
@@ -121,26 +120,22 @@ mod tests {
     struct TestReducer;
 
     impl Reducer<TestState, TestAction> for TestReducer {
-        fn reduce(
-            &self,
-            state: TestState,
-            action: TestAction,
-        ) -> DispatchOp<TestState, TestAction> {
+        fn reduce(&self, state: &TestState, action: &TestAction) -> crate::DispatchOp<TestState, TestAction> {
             match action {
                 TestAction::Increment => {
                     let mut new_state = state.clone();
                     new_state.counter += 1;
-                    DispatchOp::Dispatch(new_state, vec![])
+                    crate::DispatchOp::Dispatch(new_state, vec![])
                 }
                 TestAction::Decrement => {
                     let mut new_state = state.clone();
                     new_state.counter -= 1;
-                    DispatchOp::Dispatch(new_state, vec![])
+                    crate::DispatchOp::Dispatch(new_state, vec![])
                 }
                 TestAction::SetMessage(msg) => {
                     let mut new_state = state.clone();
                     new_state.message = msg.clone();
-                    DispatchOp::Dispatch(new_state, vec![])
+                    crate::DispatchOp::Dispatch(new_state, vec![])
                 }
             }
         }
@@ -161,8 +156,8 @@ mod tests {
     struct TestChannneledReducer;
 
     impl Reducer<i32, i32> for TestChannneledReducer {
-        fn reduce(&self, state: i32, action: i32) -> DispatchOp<i32, i32> {
-            DispatchOp::Dispatch(state + action, vec![])
+        fn reduce(&self, state: &i32, action: &i32) -> crate::DispatchOp<i32, i32> {
+            crate::DispatchOp::Dispatch(state + action, vec![])
         }
     }
 

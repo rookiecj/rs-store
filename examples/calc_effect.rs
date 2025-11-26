@@ -30,7 +30,7 @@ impl Default for CalcState {
 }
 
 impl Reducer<CalcState, CalcAction> for CalcReducer {
-    fn reduce(&self, state: CalcState, action: CalcAction) -> DispatchOp<CalcState, CalcAction> {
+    fn reduce(&self, state: &CalcState, action: &CalcAction) -> DispatchOp<CalcState, CalcAction> {
         match action {
             CalcAction::AddWillProduceThunk(i) => {
                 println!("CalcReducer::reduce: + {}", i);
@@ -38,7 +38,7 @@ impl Reducer<CalcState, CalcAction> for CalcReducer {
                     CalcState {
                         count: state.count + i,
                     },
-                    vec![Effect::Thunk(subtract_effect_thunk(i))],
+                    vec![Effect::Thunk(subtract_effect_thunk(*i))],
                 )
             }
             CalcAction::SubtractWillProduceEffectFunction(i) => {
@@ -111,7 +111,7 @@ fn subtract_effect_thunk(i: i32) -> Box<dyn FnOnce(Box<dyn Dispatcher<CalcAction
     })
 }
 
-fn subtract_effect_fn(_i: i32) -> Box<dyn FnOnce() -> EffectResult + Send> {
+fn subtract_effect_fn(_i: &i32) -> Box<dyn FnOnce() -> EffectResult + Send> {
     Box::new(move || {
         println!("effect: working on long running task again....");
         thread::sleep(std::time::Duration::from_secs(1));

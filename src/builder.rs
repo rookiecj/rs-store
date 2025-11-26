@@ -164,16 +164,15 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::{DispatchOp, MiddlewareFn};
+    use crate::MiddlewareFn;
 
     use super::*;
 
     struct TestReducer;
     //     Effect: Fn(Box<dyn Dispatcher<Action>>) + Send + Sync + 'static,
     impl Reducer<i32, i32> for TestReducer {
-        fn reduce(&self, state: i32, action: i32) -> DispatchOp<i32, i32> {
-            let new_state = state + action;
-            DispatchOp::Dispatch(new_state, vec![])
+        fn reduce(&self, state: &i32, action: &i32) -> crate::DispatchOp<i32, i32> {
+            crate::DispatchOp::Dispatch(state + action, vec![])
         }
     }
 
@@ -218,9 +217,9 @@ mod tests {
 
     impl MiddlewareFnFactory<i32, i32> for TestMiddleware {
         fn create(&self, inner: MiddlewareFn<i32, i32>) -> MiddlewareFn<i32, i32> {
-            Arc::new(move |middleware_context| {
+            Arc::new(move |state: &i32, action: &i32| {
                 println!("TestMiddleware: before action");
-                let r = inner(middleware_context);
+                let r = inner(state, action);
                 println!("TestMiddleware: after action");
                 r
             })

@@ -28,7 +28,7 @@ impl Default for TestState {
 struct TestReducer;
 
 impl Reducer<TestState, TestAction> for TestReducer {
-    fn reduce(&self, state: TestState, action: TestAction) -> DispatchOp<TestState, TestAction> {
+    fn reduce(&self, state: &TestState, action: &TestAction) -> DispatchOp<TestState, TestAction> {
         match action {
             TestAction::Increment => {
                 let new_state = TestState {
@@ -46,7 +46,7 @@ impl Reducer<TestState, TestAction> for TestReducer {
             }
             TestAction::SetValue(value) => {
                 let new_state = TestState {
-                    counter: value,
+                    counter: *value,
                     name: state.name.clone(),
                 };
                 DispatchOp::Dispatch(new_state, vec![])
