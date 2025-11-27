@@ -205,14 +205,14 @@ struct MySubscriber {
 }
 
 impl Subscriber<MyState, MyAction> for MySubscriber {
-    fn on_subscribe(&self, state: MyState) {
+    fn on_subscribe(&self, state: &MyState) {
         // Called when the subscriber is first added to the store
         // Receives the current state immediately
         println!("New subscriber received initial state: {:?}", state);
         self.received_states.lock().unwrap().push(state.clone());
     }
 
-    fn on_notify(&self, state: MyState, action: MyAction) {
+    fn on_notify(&self, state: &MyState, action: &MyAction) {
         // Called when the state changes due to an action
         println!("State updated: {:?}", state);
         self.received_states.lock().unwrap().push(state.clone());

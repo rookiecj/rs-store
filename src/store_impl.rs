@@ -55,7 +55,6 @@ where
     format!("Action<{}>(..)", std::any::type_name::<Action>())
 }
 
-
 // format ActionOp<Action> in which Action is not bound to Debug
 // #[cfg(feature = "store-log")]
 pub(crate) fn describe_action_op<Action>(action_op: &ActionOp<Action>) -> String
@@ -90,7 +89,7 @@ where
     pub(crate) subscribers: Arc<Mutex<Vec<SubscriberWithId<State, Action>>>>,
     /// temporary vector to store subscribers to be added
     adding_subscribers: Arc<Mutex<Vec<SubscriberWithId<State, Action>>>>,
-    state_functions: Arc<Mutex<Vec<Box<dyn FnOnce(State) + Send + Sync + 'static>>>>,
+    state_functions: Arc<Mutex<Vec<Box<dyn FnOnce(&State) + Send + Sync + 'static>>>>,
     pub(crate) dispatch_tx: Mutex<Option<SenderChannel<Action>>>,
     /// middleware factories
     middleware_factories: Mutex<Vec<Arc<dyn MiddlewareFnFactory<State, Action> + Send + Sync>>>, // New middleware chain
@@ -615,10 +614,7 @@ where
         self.metrics.state_notified(Some(next_state));
 
         #[cfg(feature = "store-log")]
-        eprintln!(
-            "store: notify: action: {}",
-            describe_action(action)
-        );
+        eprintln!("store: notify: action: {}", describe_action(action));
 
         let subscribers = self.subscribers.lock().unwrap().clone();
         let subscriber_count = subscribers.len();
@@ -668,8 +664,8 @@ where
     }
 
     fn do_state_function(&self) {
-        let state_cloned = match self.state.lock() {
-            Ok(state) => state.clone(),
+        let state_ref = match self.state.lock() {
+            Ok(state) => state,
             Err(_e) => {
                 #[cfg(feature = "store-log")]
                 eprintln!("store: Error while locking state: {:?}", _e);
@@ -679,7 +675,7 @@ where
         match self.state_functions.lock() {
             Ok(mut state_functions) => {
                 for state_function in state_functions.drain(..) {
-                    state_function(state_cloned.clone());
+                    state_function(&state_ref);
                 }
                 //state_functions.clear();
             }
@@ -857,7 +853,7 @@ where
     /// * `Err(StoreError)` : if the store is not available
     pub fn query_state<F>(&self, query_fn: F) -> Result<(), StoreError>
     where
-        F: FnOnce(State) + Send + Sync + 'static,
+        F: FnOnce(&State) + Send + Sync + 'static,
     {
         self.state_functions.lock().unwrap().push(Box::new(query_fn));
 
@@ -2073,7 +2069,7 @@ mod tests {
         let queried_value_clone = queried_value.clone();
         store
             .query_state(move |state| {
-                *queried_value_clone.lock().unwrap() = state;
+                *queried_value_clone.lock().unwrap() = *state;
             })
             .unwrap();
 
@@ -2168,7 +2164,7 @@ mod tests {
         let query1_clone = query1_result.clone();
         store
             .query_state(move |state| {
-                *query1_clone.lock().unwrap() = state;
+                *query1_clone.lock().unwrap() = *state;
             })
             .unwrap();
 
@@ -2180,7 +2176,7 @@ mod tests {
         let query2_clone = query2_result.clone();
         store
             .query_state(move |state| {
-                *query2_clone.lock().unwrap() = state;
+                *query2_clone.lock().unwrap() = *state;
             })
             .unwrap();
 
@@ -2201,7 +2197,7 @@ mod tests {
         let queried_value = std::sync::Arc::new(std::sync::Mutex::new(0));
         let queried_value_clone = queried_value.clone();
         let result = store.query_state(move |state| {
-            *queried_value_clone.lock().unwrap() = state;
+            *queried_value_clone.lock().unwrap() = *state;
         });
 
         // then: should succeed and get the initial state
