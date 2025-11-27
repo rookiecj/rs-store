@@ -41,7 +41,7 @@ where
 impl<State, Action> SubscriberWithId<State, Action>
 where
     State: Send + Sync + Clone,
-    Action: Send + Sync + Clone + std::fmt::Debug + 'static,
+    Action: Send + Sync + Clone + 'static,
 {
     /// Create a new SubscriberWithId with auto-generated ID
     pub fn new(subscriber: Arc<dyn Subscriber<State, Action> + Send + Sync>) -> Self {
@@ -61,7 +61,7 @@ where
 impl<State, Action> Subscriber<State, Action> for SubscriberWithId<State, Action>
 where
     State: Send + Sync + Clone,
-    Action: Send + Sync + Clone + std::fmt::Debug + 'static,
+    Action: Send + Sync + Clone + 'static,
 {
     fn on_subscribe(&self, state: &State) {
         self.subscriber.on_subscribe(state)
@@ -86,7 +86,7 @@ pub struct FnSubscriber<F, State, Action>
 where
     F: Fn(&State, &Action),
     State: Send + Sync + Clone,
-    Action: Send + Sync + Clone + std::fmt::Debug + 'static,
+    Action: Send + Sync + Clone + 'static,
 {
     func: F,
     // error[E0392]: parameter `State` is never used
@@ -97,7 +97,7 @@ impl<F, State, Action> Subscriber<State, Action> for FnSubscriber<F, State, Acti
 where
     F: Fn(&State, &Action),
     State: Send + Sync + Clone,
-    Action: Send + Sync + Clone + std::fmt::Debug + 'static,
+    Action: Send + Sync + Clone + 'static,
 {
     fn on_notify(&self, state: &State, action: &Action) {
         (self.func)(state, action)
@@ -108,7 +108,7 @@ impl<F, State, Action> From<F> for FnSubscriber<F, State, Action>
 where
     F: Fn(&State, &Action),
     State: Send + Sync + Clone,
-    Action: Send + Sync + Clone + std::fmt::Debug + 'static,
+    Action: Send + Sync + Clone + 'static,
 {
     fn from(func: F) -> Self {
         Self {

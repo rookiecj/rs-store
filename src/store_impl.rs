@@ -46,6 +46,7 @@ where
     }
 }
 
+// format Action without Debug
 #[cfg(feature = "store-log")]
 pub(crate) fn describe_action<Action>(_action: &Action) -> String
 where
@@ -54,13 +55,17 @@ where
     format!("Action<{}>(..)", std::any::type_name::<Action>())
 }
 
-#[cfg(feature = "store-log")]
+
+// format ActionOp<Action> in which Action is not bound to Debug
+// #[cfg(feature = "store-log")]
 pub(crate) fn describe_action_op<Action>(action_op: &ActionOp<Action>) -> String
 where
     Action: Send + Sync + Clone + 'static,
 {
     match action_op {
-        ActionOp::Action(_) => format!("Action<{}>(..)", std::any::type_name::<Action>()),
+        ActionOp::Action(_) => {
+            format!("Action<{}>(..)", std::any::type_name::<Action>())
+        }
         ActionOp::AddSubscriber => "AddSubscriber".to_string(),
         ActionOp::StateFunction => "StateFunction".to_string(),
         ActionOp::Exit(instant) => format!("Exit({instant:?})"),
@@ -76,7 +81,7 @@ where
 pub struct StoreImpl<State, Action>
 where
     State: Send + Sync + Clone + 'static,
-    Action: Send + Sync + Clone + std::fmt::Debug + 'static,
+    Action: Send + Sync + Clone + 'static,
 {
     #[allow(dead_code)]
     pub(crate) name: String,
@@ -112,7 +117,7 @@ impl Subscription for SubscriberSubscription {
 impl<State, Action> StoreImpl<State, Action>
 where
     State: Send + Sync + Clone + 'static,
-    Action: Send + Sync + Clone + std::fmt::Debug + 'static,
+    Action: Send + Sync + Clone + 'static,
 {
     // /// create a new store with an initial state
     // pub(crate) fn new(state: State) -> Result<Arc<StoreImpl<State, Action>>, StoreError> {
@@ -299,8 +304,8 @@ where
             store_impl.metrics.action_received(Some(&action_op));
             #[cfg(feature = "store-log")]
             eprintln!(
-                "store: dispatch: action: {}, remains: {}",
-                crate::store_impl::describe_action_op(&action_op),
+                "store: dispatch: action: {:?}, remains: {}",
+                describe_action_op(&action_op),
                 rx.len()
             );
             match action_op {
@@ -345,8 +350,8 @@ where
                         Err(_e) => {
                             #[cfg(feature = "store-log")]
                             eprintln!(
-                                "store: error do_reduce: action: {:?}, remains: {}",
-                                action,
+                                "store: error do_reduce: action: {}, remains: {}",
+                                describe_action(&action),
                                 rx.len()
                             );
                         }
@@ -612,7 +617,7 @@ where
         #[cfg(feature = "store-log")]
         eprintln!(
             "store: notify: action: {}",
-            crate::store_impl::describe_action(action)
+            describe_action(action)
         );
 
         let subscribers = self.subscribers.lock().unwrap().clone();
@@ -815,10 +820,11 @@ where
                     Ok(())
                 }
                 Err(e) => match e {
-                    SenderError::SendError(e) => {
+                    SenderError::SendError(action_op) => {
+                        let action_desc = describe_action_op(&action_op);
                         let err = StoreError::DispatchError(format!(
-                            "Error while sending action to dispatch channel: {:?}",
-                            e
+                            "Error while sending '{}' to dispatch channel",
+                            action_desc
                         ));
                         self.metrics.error_occurred(&err);
                         Err(err)
@@ -1098,7 +1104,7 @@ where
 impl<State, Action> Subscriber<State, Action> for ChanneledSubscriber<(Instant, State, Action)>
 where
     State: Send + Sync + Clone + 'static,
-    Action: Send + Sync + Clone + std::fmt::Debug + 'static,
+    Action: Send + Sync + Clone + 'static,
 {
     fn on_notify(&self, state: &State, action: &Action) {
         match self.tx.lock() {
@@ -1138,7 +1144,7 @@ where
 impl<State, Action> Drop for StoreImpl<State, Action>
 where
     State: Send + Sync + Clone + 'static,
-    Action: Send + Sync + Clone + std::fmt::Debug + 'static,
+    Action: Send + Sync + Clone + 'static,
 {
     fn drop(&mut self) {
         let _ = self.close();
