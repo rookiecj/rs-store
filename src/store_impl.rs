@@ -587,6 +587,8 @@ where
                                 // Note: Generic conversion from result to Action is not type-safe
                                 // Effect::Function results should be handled by middleware or
                                 // use Effect::Thunk/Effect::Action instead for type safety
+                                #[cfg(feature = "store-log")]
+                                eprintln!("Effect function should be handled by a middleware, did you miss a middleware?");
                             }
                             Err(_e) => {
                                 // Error in effect function, ignore

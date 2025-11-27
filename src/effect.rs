@@ -13,8 +13,11 @@ pub enum Effect<Action> {
     Thunk(Box<dyn FnOnce(Box<dyn Dispatcher<Action>>) + Send>),
     /// A function which has a result.
     /// The result is an Any type which can be downcasted to the expected type,
-    /// you should know the type and the String key can help.
-    /// The result default ignored, if you want to get the result of the function, you can use a middleware like `EffectMiddleware` or handle the result in the reducer.
+    /// It is useful when you want to produce an effect without any dependency of 'store'
+    ///
+    /// ### Caution
+    /// The result default ignored, if you want to get the result of the function,
+    /// you can use a middleware like `TestEffectMiddleware`
     Function(String, EffectFunction),
 }
 
@@ -24,7 +27,10 @@ pub type EffectFunction = Box<dyn FnOnce() -> EffectResult + Send>;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Reducer, StoreBuilder, Subscriber};
+    use crate::{
+        DispatchOp, MiddlewareFn, MiddlewareFnFactory, Reducer, StoreBuilder, StoreError,
+        Subscriber,
+    };
     use std::sync::{Arc, Mutex};
     use std::thread;
     use std::time::Duration;
@@ -52,14 +58,18 @@ mod tests {
         AddMessage(String),
         AsyncTask,
         ThunkTask(i32),
-        FunctionTask(String),
+        FunctionTask,
     }
 
     // Test reducer that produces different types of effects
     struct TestReducer;
 
     impl Reducer<TestState, TestAction> for TestReducer {
-        fn reduce(&self, state: &TestState, action: &TestAction) -> crate::DispatchOp<TestState, TestAction> {
+        fn reduce(
+            &self,
+            state: &TestState,
+            action: &TestAction,
+        ) -> crate::DispatchOp<TestState, TestAction> {
             match action {
                 TestAction::SetValue(value) => {
                     let new_state = TestState {
@@ -111,19 +121,19 @@ mod tests {
                     }));
                     crate::DispatchOp::Dispatch(new_state, vec![effect])
                 }
-                TestAction::FunctionTask(key) => {
+                TestAction::FunctionTask => {
                     let new_state = TestState {
                         value: state.value,
                         messages: state.messages.clone(),
                     };
                     // Effect::Function - function that returns a result
-                    let key_clone = key.clone();
+                    // key == test-key
+                    let key = "test-key".to_string();
                     let effect = Effect::Function(
-                        key_clone.clone(),
+                        key.clone(),
                         Box::new(move || {
                             thread::sleep(Duration::from_millis(10));
-                            Ok(Box::new(format!("Result for {}", key_clone))
-                                as Box<dyn std::any::Any>)
+                            Ok(Box::new(format!("Result for {}", key)) as Box<dyn std::any::Any>)
                         }),
                     );
                     crate::DispatchOp::Dispatch(new_state, vec![effect])
@@ -262,6 +272,81 @@ mod tests {
         println!("Effect::Thunk test passed");
     }
 
+    struct TestEffectMiddleware;
+    impl TestEffectMiddleware {
+        fn new() -> Self {
+            Self {}
+        }
+    }
+    impl MiddlewareFnFactory<TestState, TestAction> for TestEffectMiddleware {
+        fn create(
+            &self,
+            inner: MiddlewareFn<TestState, TestAction>,
+        ) -> MiddlewareFn<TestState, TestAction> {
+            Arc::new(move |state: &TestState, action: &TestAction| {
+                // inner
+                let result: Result<DispatchOp<TestState, TestAction>, StoreError> =
+                    inner(state, action);
+
+                // effects 를 순회하면서 function 을 변환
+                let (need_to_dispatch, state, effects) = match result {
+                    Ok(DispatchOp::Dispatch(state, effects)) => (true, state, effects),
+                    Ok(DispatchOp::Keep(state, effects)) => (false, state, effects),
+                    Err(e) => {
+                        return Err(e);
+                    }
+                };
+
+                // convert function effect to task effect if key is "test-key"
+                let new_effects: Vec<Effect<TestAction>> = effects
+                    .into_iter()
+                    .map(|effect| match effect {
+                        Effect::Function(key, function) => {
+                            if key == "test-key" {
+                                // convert the function to task or thunk as you want, here we use task
+                                return Effect::Task(Box::new(move || {
+                                    let result = function();
+                                    // result for 'test-key'should be Box<String>
+                                    match result {
+                                        Ok(result) => {
+                                            let result_string: Box<String> =
+                                                result.downcast().unwrap();
+                                            println!("result_string: {:?}", result_string);
+                                            assert_eq!(
+                                                result_string.to_string(),
+                                                "Result for test-key".to_string()
+                                            );
+                                        }
+                                        Err(e) => {
+                                            assert!(false, "result should be Ok: {:?}", e);
+                                        }
+                                    }
+                                }));
+                            } else {
+                                return Effect::Function(key, function);
+                            }
+                        }
+                        Effect::Action(action) => {
+                            return Effect::Action(action);
+                        }
+                        Effect::Task(task) => {
+                            return Effect::Task(task);
+                        }
+                        Effect::Thunk(thunk) => {
+                            return Effect::Thunk(thunk);
+                        }
+                    })
+                    .collect();
+
+                if need_to_dispatch {
+                    Ok(DispatchOp::Dispatch(state, new_effects))
+                } else {
+                    Ok(DispatchOp::Keep(state, new_effects))
+                }
+            })
+        }
+    }
+
     #[test]
     fn test_effect_function() {
         // Test Effect::Function - function that returns a result
@@ -269,6 +354,7 @@ mod tests {
 
         let store = StoreBuilder::new_with_reducer(TestState::default(), Box::new(TestReducer))
             .with_name("test-function-effect".into())
+            .with_middleware(Arc::new(TestEffectMiddleware::new()))
             .build()
             .unwrap();
 
@@ -276,7 +362,7 @@ mod tests {
         store.add_subscriber(subscriber.clone()).unwrap();
 
         // Dispatch action that produces Effect::Function
-        store.dispatch(TestAction::FunctionTask("test-key".to_string())).unwrap();
+        store.dispatch(TestAction::FunctionTask).unwrap();
 
         // Wait for effect to be processed
         thread::sleep(Duration::from_millis(100));
@@ -287,7 +373,7 @@ mod tests {
         let actions = subscriber.get_actions();
 
         // Should have received the FunctionTask action
-        assert!(actions.iter().any(|a| matches!(a, TestAction::FunctionTask(_))));
+        assert!(actions.iter().any(|a| matches!(a, TestAction::FunctionTask)));
 
         println!("Effect::Function test passed");
     }

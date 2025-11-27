@@ -44,13 +44,13 @@ mod tests {
         }
     }
 
-    struct LoggerMiddleware {
+    struct TestLoggerMiddleware {
         logs: Arc<Mutex<Vec<String>>>,
         #[allow(dead_code)]
         errors: Arc<Mutex<Vec<StoreError>>>,
     }
 
-    impl LoggerMiddleware {
+    impl TestLoggerMiddleware {
         fn new() -> Self {
             Self {
                 logs: Arc::new(Mutex::new(vec![])),
@@ -59,7 +59,7 @@ mod tests {
         }
     }
 
-    impl<State, Action> MiddlewareFnFactory<State, Action> for LoggerMiddleware
+    impl<State, Action> MiddlewareFnFactory<State, Action> for TestLoggerMiddleware
     where
         State: Send + Sync + Clone + 'static,
         Action: Send + Sync + Clone + std::fmt::Debug + 'static,
@@ -88,7 +88,7 @@ mod tests {
     #[test]
     fn test_logger_middleware() {
         let reducer = Box::new(TestReducer);
-        let logger = Arc::new(LoggerMiddleware::new());
+        let logger = Arc::new(TestLoggerMiddleware::new());
         let store = StoreImpl::new_with(
             0,
             vec![reducer],
@@ -316,7 +316,7 @@ mod tests {
     fn test_middleware_poisoned() {
         let reducer = Box::new(TestReducer);
         // Add logger middleware
-        let logger = Arc::new(LoggerMiddleware::new());
+        let logger = Arc::new(TestLoggerMiddleware::new());
         let store = StoreImpl::new_with(
             0,
             vec![reducer],
