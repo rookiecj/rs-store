@@ -30,7 +30,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-rs-store = "2.9"
+rs-store = "3.0"
 ```
 
 ## Quick Start
@@ -44,7 +44,7 @@ pub fn main() {
     let store = StoreBuilder::new(0)
         .with_reducer(Box::new(FnReducer::from(|state: &i32, action: &i32| {
             println!("reducer: {} + {}", state, action);
-            DispatchOp::Dispatch(state + action, None)
+            DispatchOp::Dispatch(state + action, vec![])
         })))
         .build()
         .unwrap();
@@ -138,7 +138,7 @@ This means reducers can produce asynchronous operations.
 
 ```rust
 impl Reducer<CalcState, CalcAction> for CalcReducer {
-    fn reduce(&self, state: CalcState, action: CalcAction) -> DispatchOp<CalcState, CalcAction> {
+    fn reduce(&self, state: &CalcState, action: &CalcAction) -> DispatchOp<CalcState, CalcAction> {
         match action {
             CalcAction::AddWillProduceThunk(i) => {
                 println!("CalcReducer::reduce: + {}", i);
@@ -146,7 +146,7 @@ impl Reducer<CalcState, CalcAction> for CalcReducer {
                     CalcState {
                         count: state.count + i,
                     },
-                    Some(Effect::Thunk(subtract_effect_thunk(i))),
+                    vec![Effect::Thunk(subtract_effect_thunk(i))],
                 )
             }
         }
@@ -191,10 +191,10 @@ impl Reducer<MyState, MyAction> for MyReducer {
     fn reduce(&self, state: &MyState, action: &MyAction) -> DispatchOp<MyState, MyAction> {
         match action {
             MyAction::Increment => {
-                DispatchOp::Dispatch(MyState { counter: state.counter + 1 }, None)
+                DispatchOp::Dispatch(MyState { counter: state.counter + 1 }, vec![])
             }
             MyAction::Decrement => {
-                DispatchOp::Dispatch(MyState { counter: state.counter - 1 }, None)
+                DispatchOp::Dispatch(MyState { counter: state.counter - 1 }, vec![])
             }
         }
     }
@@ -205,14 +205,14 @@ struct MySubscriber {
 }
 
 impl Subscriber<MyState, MyAction> for MySubscriber {
-    fn on_subscribe(&self, state: &MyState) {
+    fn on_subscribe(&self, state: MyState) {
         // Called when the subscriber is first added to the store
         // Receives the current state immediately
         println!("New subscriber received initial state: {:?}", state);
         self.received_states.lock().unwrap().push(state.clone());
     }
 
-    fn on_notify(&self, state: &MyState, action: &MyAction) {
+    fn on_notify(&self, state: MyState, action: MyAction) {
         // Called when the state changes due to an action
         println!("State updated: {:?}", state);
         self.received_states.lock().unwrap().push(state.clone());
@@ -245,7 +245,7 @@ The metrics feature provides a way to collect metrics.
 
 For detailed documentation, visit:
 
-- [API Documentation (docs.rs)](https://docs.rs/rs-store/2.9.0/rs_store/)
+- [API Documentation (docs.rs)](https://docs.rs/rs-store/latest/rs_store/)
 - [Crate Page (crates.io)](https://crates.io/crates/rs-store)
 
 ## Implementation Status
@@ -256,7 +256,7 @@ For detailed documentation, visit:
 - [-] ~~Stop store after all effects are scheduled~~ (removed)
 - [X] drop store after all references are dropped
 - [x] dispatcher has weak reference to the store
-- [ ] effects system
+- [x] effects system
 
 ## Contributing
 

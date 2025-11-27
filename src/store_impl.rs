@@ -46,6 +46,7 @@ where
     }
 }
 
+// format Action without Debug
 #[cfg(feature = "store-log")]
 pub(crate) fn describe_action<Action>(_action: &Action) -> String
 where
@@ -54,13 +55,17 @@ where
     format!("Action<{}>(..)", std::any::type_name::<Action>())
 }
 
-#[cfg(feature = "store-log")]
+
+// format ActionOp<Action> in which Action is not bound to Debug
+// #[cfg(feature = "store-log")]
 pub(crate) fn describe_action_op<Action>(action_op: &ActionOp<Action>) -> String
 where
     Action: Send + Sync + Clone + 'static,
 {
     match action_op {
-        ActionOp::Action(_) => format!("Action<{}>(..)", std::any::type_name::<Action>()),
+        ActionOp::Action(_) => {
+            format!("Action<{}>(..)", std::any::type_name::<Action>())
+        }
         ActionOp::AddSubscriber => "AddSubscriber".to_string(),
         ActionOp::StateFunction => "StateFunction".to_string(),
         ActionOp::Exit(instant) => format!("Exit({instant:?})"),
@@ -76,7 +81,7 @@ where
 pub struct StoreImpl<State, Action>
 where
     State: Send + Sync + Clone + 'static,
-    Action: Send + Sync + Clone + std::fmt::Debug + 'static,
+    Action: Send + Sync + Clone + 'static,
 {
     #[allow(dead_code)]
     pub(crate) name: String,
@@ -112,7 +117,7 @@ impl Subscription for SubscriberSubscription {
 impl<State, Action> StoreImpl<State, Action>
 where
     State: Send + Sync + Clone + 'static,
-    Action: Send + Sync + Clone + std::fmt::Debug + 'static,
+    Action: Send + Sync + Clone + 'static,
 {
     // /// create a new store with an initial state
     // pub(crate) fn new(state: State) -> Result<Arc<StoreImpl<State, Action>>, StoreError> {
@@ -299,8 +304,8 @@ where
             store_impl.metrics.action_received(Some(&action_op));
             #[cfg(feature = "store-log")]
             eprintln!(
-                "store: dispatch: action: {}, remains: {}",
-                crate::store_impl::describe_action_op(&action_op),
+                "store: dispatch: action: {:?}, remains: {}",
+                describe_action_op(&action_op),
                 rx.len()
             );
             match action_op {
@@ -326,12 +331,12 @@ where
                             // do notify subscribers and update store state
                             match dispatch_op {
                                 DispatchOp::Dispatch(new_state, _) => {
-                                    // Clone state for store update before moving it to do_notify
-                                    let state_for_store = new_state.clone();
-                                    *store_impl.state.lock().unwrap() = state_for_store;
+                                    // Update store state
+                                    *store_impl.state.lock().unwrap() = new_state.clone();
+                                    // Notify subscribers with refs
                                     store_impl.do_notify(
-                                        action.clone(),
-                                        new_state,
+                                        &action,
+                                        &new_state,
                                         store_impl.clone(),
                                         action_received_at,
                                     );
@@ -345,8 +350,8 @@ where
                         Err(_e) => {
                             #[cfg(feature = "store-log")]
                             eprintln!(
-                                "store: error do_reduce: action: {:?}, remains: {}",
-                                action,
+                                "store: error do_reduce: action: {}, remains: {}",
+                                describe_action(&action),
                                 rx.len()
                             );
                         }
@@ -601,41 +606,31 @@ where
 
     pub(crate) fn do_notify(
         &self,
-        action: Action,
-        next_state: State,
+        action: &Action,
+        next_state: &State,
         _dispatcher: Arc<StoreImpl<State, Action>>,
         _action_received_at: Instant,
     ) {
         let notify_start = Instant::now();
-        self.metrics.state_notified(Some(&next_state));
+        self.metrics.state_notified(Some(next_state));
 
         #[cfg(feature = "store-log")]
         eprintln!(
             "store: notify: action: {}",
-            crate::store_impl::describe_action(&action)
+            describe_action(action)
         );
 
         let subscribers = self.subscribers.lock().unwrap().clone();
         let subscriber_count = subscribers.len();
 
-        // Clone action for metrics before potentially moving it to subscribers
+        // Clone action for metrics
         let action_for_metrics = action.clone();
 
-        match subscriber_count {
-            0 => {
-                // No subscribers, no clones needed
-            }
-            1 => {
-                // Single subscriber: move the state and action (no clone needed for subscriber)
-                subscribers[0].on_notify(next_state, action);
-            }
-            _ => {
-                // Multiple subscribers: each subscriber needs its own clone
-                for subscriber_with_id in subscribers.iter() {
-                    subscriber_with_id.on_notify(next_state.clone(), action.clone());
-                }
-            }
+        // Notify all subscribers with refs (no clone needed)
+        for subscriber_with_id in subscribers.iter() {
+            subscriber_with_id.on_notify(next_state, action);
         }
+
         let duration = notify_start.elapsed();
         self.metrics.subscriber_notified(Some(&action_for_metrics), subscriber_count, duration);
     }
@@ -649,7 +644,7 @@ where
 
         // notify new subscribers with the latest state and add to subscribers
         for subscriber_with_id in new_subscribers {
-            subscriber_with_id.on_subscribe(state.clone());
+            subscriber_with_id.on_subscribe(&state);
 
             subscribers.push(subscriber_with_id);
         }
@@ -825,10 +820,11 @@ where
                     Ok(())
                 }
                 Err(e) => match e {
-                    SenderError::SendError(e) => {
+                    SenderError::SendError(action_op) => {
+                        let action_desc = describe_action_op(&action_op);
                         let err = StoreError::DispatchError(format!(
-                            "Error while sending action to dispatch channel: {:?}",
-                            e
+                            "Error while sending '{}' to dispatch channel",
+                            action_desc
                         ));
                         self.metrics.error_occurred(&err);
                         Err(err)
@@ -1006,7 +1002,7 @@ where
                 ActionOp::Action((created_at, state, action)) => {
                     let started_at = Instant::now();
                     {
-                        subscriber.on_notify(state.clone(), action.clone());
+                        subscriber.on_notify(&state, &action);
                     }
                     metrics.subscriber_notified(Some(&action), 1, started_at.elapsed());
 
@@ -1108,12 +1104,19 @@ where
 impl<State, Action> Subscriber<State, Action> for ChanneledSubscriber<(Instant, State, Action)>
 where
     State: Send + Sync + Clone + 'static,
-    Action: Send + Sync + Clone + std::fmt::Debug + 'static,
+    Action: Send + Sync + Clone + 'static,
 {
-    fn on_notify(&self, state: State, action: Action) {
+    fn on_notify(&self, state: &State, action: &Action) {
         match self.tx.lock() {
             Ok(tx) => {
-                tx.as_ref().map(|tx| tx.send(ActionOp::Action((Instant::now(), state, action))));
+                // Clone needed for sending through channel
+                tx.as_ref().map(|tx| {
+                    tx.send(ActionOp::Action((
+                        Instant::now(),
+                        state.clone(),
+                        action.clone(),
+                    )))
+                });
             }
             Err(_e) => {
                 #[cfg(feature = "store-log")]
@@ -1141,7 +1144,7 @@ where
 impl<State, Action> Drop for StoreImpl<State, Action>
 where
     State: Send + Sync + Clone + 'static,
-    Action: Send + Sync + Clone + std::fmt::Debug + 'static,
+    Action: Send + Sync + Clone + 'static,
 {
     fn drop(&mut self) {
         let _ = self.close();
@@ -1223,9 +1226,9 @@ mod tests {
     }
 
     impl Subscriber<i32, i32> for TestChannelSubscriber {
-        fn on_notify(&self, state: i32, action: i32) {
+        fn on_notify(&self, state: &i32, action: &i32) {
             //println!("TestChannelSubscriber: state={}, action={}", state, action);
-            self.received.lock().unwrap().push((state, action));
+            self.received.lock().unwrap().push((*state, *action));
         }
     }
 
@@ -1249,10 +1252,10 @@ mod tests {
     }
 
     impl Subscriber<i32, i32> for SlowSubscriber {
-        fn on_notify(&self, state: i32, action: i32) {
+        fn on_notify(&self, state: &i32, action: &i32) {
             //println!("SlowSubscriber: state={}, action={}", state, action);
             std::thread::sleep(self.delay);
-            self.received.lock().unwrap().push((state, action));
+            self.received.lock().unwrap().push((*state, *action));
         }
     }
 
@@ -1432,13 +1435,13 @@ mod tests {
         }
 
         impl Subscriber<i32, i32> for TestSubscribeSubscriber {
-            fn on_subscribe(&self, state: i32) {
-                self.received_states.lock().unwrap().push(state);
+            fn on_subscribe(&self, state: &i32) {
+                self.received_states.lock().unwrap().push(*state);
                 *self.subscribe_called.lock().unwrap() = true;
             }
 
-            fn on_notify(&self, state: i32, _action: i32) {
-                self.received_states.lock().unwrap().push(state);
+            fn on_notify(&self, state: &i32, _action: &i32) {
+                self.received_states.lock().unwrap().push(*state);
             }
         }
 
@@ -1565,14 +1568,14 @@ mod tests {
         }
 
         impl Subscriber<i32, i32> for ModifyingSubscriber {
-            fn on_subscribe(&self, state: i32) {
+            fn on_subscribe(&self, state: &i32) {
                 // on_subscribe에서 상태를 수정해도 store의 상태는 변경되지 않음
-                self.received_states.lock().unwrap().push(state);
+                self.received_states.lock().unwrap().push(*state);
                 *self.subscribe_called.lock().unwrap() = true;
             }
 
-            fn on_notify(&self, state: i32, _action: i32) {
-                self.received_states.lock().unwrap().push(state);
+            fn on_notify(&self, state: &i32, _action: &i32) {
+                self.received_states.lock().unwrap().push(*state);
             }
         }
 

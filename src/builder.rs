@@ -8,7 +8,7 @@ use std::sync::Arc;
 pub struct StoreBuilder<State, Action>
 where
     State: Send + Sync + Clone + 'static,
-    Action: Send + Sync + Clone + std::fmt::Debug + 'static,
+    Action: Send + Sync + Clone + 'static,
 {
     name: String,
     state: State,

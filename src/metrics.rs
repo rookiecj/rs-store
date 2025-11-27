@@ -532,7 +532,7 @@ mod tests {
     impl<State, Action> MiddlewareFnFactory<State, Action> for TestMiddleware
     where
         State: Send + Sync + Clone + 'static,
-        Action: Send + Sync + Clone + std::fmt::Debug + 'static,
+        Action: Send + Sync + Clone + 'static,
     {
         fn create(&self, inner: MiddlewareFn<State, Action>) -> MiddlewareFn<State, Action> {
             Arc::new(move |state: &State, action: &Action| inner(state, action))

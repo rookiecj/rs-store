@@ -460,7 +460,7 @@ fn test_small_state() {
         DispatchOp::Dispatch(new_state, vec![])
     });
 
-    let subscriber = FnSubscriber::from(move |state: SmallState, _action: TestAction| {
+    let subscriber = FnSubscriber::from(move |state: &SmallState, _action: &TestAction| {
         let start = Instant::now();
         let _ = state.clone();
         let elapsed = start.elapsed();
@@ -498,7 +498,7 @@ fn test_medium_state() {
         DispatchOp::Dispatch(new_state, vec![])
     });
 
-    let subscriber = FnSubscriber::from(move |state: MediumState, _action: TestAction| {
+    let subscriber = FnSubscriber::from(move |state: &MediumState, _action: &TestAction| {
         let start = Instant::now();
         let _ = state.clone();
         let elapsed = start.elapsed();
@@ -536,7 +536,7 @@ fn test_large_state() {
         DispatchOp::Dispatch(new_state, vec![])
     });
 
-    let subscriber = FnSubscriber::from(move |state: LargeState, _action: TestAction| {
+    let subscriber = FnSubscriber::from(move |state: &LargeState, _action: &TestAction| {
         let start = Instant::now();
         let _ = state.clone();
         let elapsed = start.elapsed();
@@ -574,7 +574,7 @@ fn test_very_large_state() {
         DispatchOp::Dispatch(new_state, vec![])
     });
 
-    let subscriber = FnSubscriber::from(move |state: VeryLargeState, _action: TestAction| {
+    let subscriber = FnSubscriber::from(move |state: &VeryLargeState, _action: &TestAction| {
         let start = Instant::now();
         let _ = state.clone();
         let elapsed = start.elapsed();
@@ -622,7 +622,7 @@ fn test_very_large_state_with_arc() {
         DispatchOp::Dispatch(new_state, vec![])
     });
 
-    let subscriber = FnSubscriber::from(move |state: ArcVeryLargeState, _action: TestAction| {
+    let subscriber = FnSubscriber::from(move |state: &ArcVeryLargeState, _action: &TestAction| {
         let start = Instant::now();
         // Arc clone은 매우 빠름 (참조 카운트만 증가)
         let _ = state.clone();

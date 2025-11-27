@@ -78,7 +78,7 @@ impl CalcSubscriber {
 }
 
 impl Subscriber<CalcState, CalcAction> for CalcSubscriber {
-    fn on_notify(&self, state: CalcState, action: CalcAction) {
+    fn on_notify(&self, state: &CalcState, action: &CalcAction) {
         match action {
             CalcAction::Add(_i) => {
                 println!(

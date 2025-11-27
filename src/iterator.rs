@@ -1,7 +1,7 @@
-use std::time::Instant;
 use crate::channel::{ReceiverChannel, SenderChannel};
-use crate::{Subscriber, Subscription};
 use crate::store_impl::ActionOp;
+use crate::{Subscriber, Subscription};
+use std::time::Instant;
 
 /// StateIteratorSubscriber is a subscriber that sends state and action pairs to an iterator
 #[allow(dead_code)]
@@ -15,11 +15,12 @@ where
 impl<State, Action> Subscriber<State, Action> for StateIteratorSubscriber<(State, Action)>
 where
     State: Send + Sync + Clone + 'static,
-    Action: Send + Sync + Clone + std::fmt::Debug + 'static,
+    Action: Send + Sync + Clone + 'static,
 {
-    fn on_notify(&self, state: State, action: Action) {
+    fn on_notify(&self, state: &State, action: &Action) {
         if let Some(iter_tx) = self.iter_tx.as_ref() {
-            match iter_tx.send(ActionOp::Action((state, action))) {
+            // Clone needed for sending through channel
+            match iter_tx.send(ActionOp::Action((state.clone(), action.clone()))) {
                 Ok(_) => {}
                 Err(_e) => {
                     #[cfg(feature = "store-log")]
@@ -70,7 +71,7 @@ where
 pub(crate) struct StateIterator<State, Action>
 where
     State: Send + Sync + Clone + 'static,
-    Action: Send + Sync + Clone + std::fmt::Debug + 'static,
+    Action: Send + Sync + Clone + 'static,
 {
     iter_rx: Option<ReceiverChannel<(State, Action)>>,
     /// subscription for StateSubscriber
@@ -80,7 +81,7 @@ where
 impl<State, Action> Iterator for StateIterator<State, Action>
 where
     State: Send + Sync + Clone + 'static,
-    Action: Send + Sync + Clone + std::fmt::Debug + 'static,
+    Action: Send + Sync + Clone + 'static,
 {
     type Item = (State, Action);
 
@@ -130,7 +131,7 @@ where
 impl<State, Action> Drop for StateIterator<State, Action>
 where
     State: Send + Sync + Clone,
-    Action: Send + Sync + Clone + std::fmt::Debug,
+    Action: Send + Sync + Clone,
 {
     fn drop(&mut self) {
         if let Some(rx) = self.iter_rx.take() {
@@ -147,7 +148,7 @@ where
 impl<State, Action> StateIterator<State, Action>
 where
     State: Send + Sync + Clone + 'static,
-    Action: Send + Sync + Clone + std::fmt::Debug + 'static,
+    Action: Send + Sync + Clone + 'static,
 {
     pub(crate) fn new(
         iter_rx: ReceiverChannel<(State, Action)>,

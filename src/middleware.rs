@@ -23,7 +23,7 @@ pub type MiddlewareFn<State, Action> = Arc<
 pub trait MiddlewareFnFactory<State, Action>
 where
     State: Send + Sync + Clone,
-    Action: Send + Sync + Clone + std::fmt::Debug + 'static,
+    Action: Send + Sync + Clone + 'static,
 {
     fn create(&self, inner: MiddlewareFn<State, Action>) -> MiddlewareFn<State, Action>;
 }

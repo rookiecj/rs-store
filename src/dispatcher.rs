@@ -3,7 +3,7 @@ use crate::{StoreError, StoreImpl};
 use std::sync::{Arc, Weak};
 
 /// Dispatcher dispatches actions to the store
-pub trait Dispatcher<Action: Send + Clone + std::fmt::Debug>: Send {
+pub trait Dispatcher<Action: Send + Clone>: Send {
     /// dispatch is used to dispatch an action to the store
     /// the action can be dropped if the store is full
     fn dispatch(&self, action: Action) -> Result<(), StoreError>;
@@ -22,7 +22,7 @@ pub trait Dispatcher<Action: Send + Clone + std::fmt::Debug>: Send {
 pub(crate) struct WeakDispatcher<State, Action>
 where
     State: Send + Sync + Clone + 'static,
-    Action: Send + Sync + Clone + std::fmt::Debug + 'static,
+    Action: Send + Sync + Clone + 'static,
 {
     store: Weak<StoreImpl<State, Action>>,
 }
@@ -31,21 +31,21 @@ where
 unsafe impl<State, Action> Send for WeakDispatcher<State, Action>
 where
     State: Send + Sync + Clone + 'static,
-    Action: Send + Sync + Clone + std::fmt::Debug + 'static,
+    Action: Send + Sync + Clone + 'static,
 {
 }
 
 unsafe impl<State, Action> Sync for WeakDispatcher<State, Action>
 where
     State: Send + Sync + Clone + 'static,
-    Action: Send + Sync + Clone + std::fmt::Debug + 'static,
+    Action: Send + Sync + Clone + 'static,
 {
 }
 
 impl<State, Action> WeakDispatcher<State, Action>
 where
     State: Send + Sync + Clone + 'static,
-    Action: Send + Sync + Clone + std::fmt::Debug + 'static,
+    Action: Send + Sync + Clone + 'static,
 {
     /// WeakDispatcher 생성자
     pub fn new(dispatcher: Arc<StoreImpl<State, Action>>) -> Self {
@@ -58,7 +58,7 @@ where
 impl<State, Action> Dispatcher<Action> for WeakDispatcher<State, Action>
 where
     State: Send + Sync + Clone + 'static,
-    Action: Send + Sync + Clone + std::fmt::Debug + 'static,
+    Action: Send + Sync + Clone + 'static,
 {
     fn dispatch(&self, action: Action) -> Result<(), StoreError> {
         // weak reference를 strong reference로 업그레이드 시도
@@ -93,7 +93,7 @@ where
 impl<State, Action> Dispatcher<Action> for Arc<StoreImpl<State, Action>>
 where
     State: Send + Sync + Clone + 'static,
-    Action: Send + Sync + Clone + std::fmt::Debug + 'static,
+    Action: Send + Sync + Clone + 'static,
 {
     fn dispatch(&self, action: Action) -> Result<(), StoreError> {
         let sender = self.dispatch_tx.lock().unwrap();

@@ -21,7 +21,7 @@ pub enum DispatchOp<State, Action> {
 pub trait Reducer<State, Action>
 where
     State: Send + Sync + Clone,
-    Action: Send + Sync + Clone + std::fmt::Debug + 'static,
+    Action: Send + Sync + Clone + 'static,
 {
     fn reduce(&self, state: &State, action: &Action) -> DispatchOp<State, Action>;
 }
@@ -32,7 +32,7 @@ where
 pub struct ReducerChain<State, Action>
 where
     State: Send + Sync + Clone,
-    Action: Send + Sync + Clone + std::fmt::Debug + 'static,
+    Action: Send + Sync + 'static,
 {
     reducer: Arc<dyn Reducer<State, Action> + Send + Sync>,
     next: Option<Box<ReducerChain<State, Action>>>,
@@ -41,7 +41,7 @@ where
 impl<State, Action> ReducerChain<State, Action>
 where
     State: Send + Sync + Clone,
-    Action: Send + Sync + Clone + std::fmt::Debug + 'static,
+    Action: Send + Sync + 'static,
 {
     /// Create a new reducer chain with a single reducer
     pub fn new(reducer: Arc<dyn Reducer<State, Action> + Send + Sync>) -> Self {
@@ -79,16 +79,13 @@ where
 
         Some(tail)
     }
-
-    // Note: execute method removed as it's no longer used with the new API
-    // Reducer chain is now handled directly in the reduce method
 }
 
 // Implement Clone for ReducerChain to support recursive chaining
 impl<State, Action> Clone for ReducerChain<State, Action>
 where
     State: Send + Sync + Clone,
-    Action: Send + Sync + Clone + std::fmt::Debug + 'static,
+    Action: Send + Sync + 'static,
 {
     fn clone(&self) -> Self {
         Self {
@@ -101,7 +98,7 @@ where
 impl<State, Action> Reducer<State, Action> for ReducerChain<State, Action>
 where
     State: Send + Sync + Clone,
-    Action: Send + Sync + Clone + std::fmt::Debug + 'static,
+    Action: Send + Sync + Clone + 'static,
 {
     fn reduce(&self, state: &State, action: &Action) -> DispatchOp<State, Action> {
         // Execute current reducer
@@ -152,7 +149,7 @@ pub struct FnReducer<F, State, Action>
 where
     F: Fn(&State, &Action) -> DispatchOp<State, Action>,
     State: Send + Sync + Clone,
-    Action: Send + Sync + Clone + std::fmt::Debug + 'static,
+    Action: Send + Sync + Clone + 'static,
 {
     func: F,
     _marker: std::marker::PhantomData<(State, Action)>,
@@ -162,7 +159,7 @@ impl<F, State, Action> Reducer<State, Action> for FnReducer<F, State, Action>
 where
     F: Fn(&State, &Action) -> DispatchOp<State, Action>,
     State: Send + Sync + Clone,
-    Action: Send + Sync + Clone + std::fmt::Debug + 'static,
+    Action: Send + Sync + Clone + 'static,
 {
     fn reduce(&self, state: &State, action: &Action) -> DispatchOp<State, Action> {
         (self.func)(state, action)
@@ -173,7 +170,7 @@ impl<F, State, Action> From<F> for FnReducer<F, State, Action>
 where
     F: Fn(&State, &Action) -> DispatchOp<State, Action>,
     State: Send + Sync + Clone,
-    Action: Send + Sync + Clone + std::fmt::Debug + 'static,
+    Action: Send + Sync + Clone + 'static,
 {
     fn from(func: F) -> Self {
         Self {
@@ -196,8 +193,8 @@ mod tests {
     }
 
     impl Subscriber<i32, i32> for TestSubscriber {
-        fn on_notify(&self, state: i32, _action: i32) {
-            self.state_changes.lock().unwrap().push(state);
+        fn on_notify(&self, state: &i32, _action: &i32) {
+            self.state_changes.lock().unwrap().push(*state);
         }
     }
 

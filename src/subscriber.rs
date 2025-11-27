@@ -17,10 +17,10 @@ where
 {
     /// on_subscribe is called when the subscriber is subscribed to the store.
     #[allow(unused_variables)]
-    fn on_subscribe(&self, state: State) {}
+    fn on_subscribe(&self, state: &State) {}
 
     /// on_notify is called when the store is notified of an action.
-    fn on_notify(&self, state: State, action: Action);
+    fn on_notify(&self, state: &State, action: &Action);
 
     /// on_unsubscribe is called when a subscriber is unsubscribed from the store.
     fn on_unsubscribe(&self) {}
@@ -41,7 +41,7 @@ where
 impl<State, Action> SubscriberWithId<State, Action>
 where
     State: Send + Sync + Clone,
-    Action: Send + Sync + Clone + std::fmt::Debug + 'static,
+    Action: Send + Sync + Clone + 'static,
 {
     /// Create a new SubscriberWithId with auto-generated ID
     pub fn new(subscriber: Arc<dyn Subscriber<State, Action> + Send + Sync>) -> Self {
@@ -61,13 +61,13 @@ where
 impl<State, Action> Subscriber<State, Action> for SubscriberWithId<State, Action>
 where
     State: Send + Sync + Clone,
-    Action: Send + Sync + Clone + std::fmt::Debug + 'static,
+    Action: Send + Sync + Clone + 'static,
 {
-    fn on_subscribe(&self, state: State) {
+    fn on_subscribe(&self, state: &State) {
         self.subscriber.on_subscribe(state)
     }
 
-    fn on_notify(&self, state: State, action: Action) {
+    fn on_notify(&self, state: &State, action: &Action) {
         self.subscriber.on_notify(state, action)
     }
 
@@ -84,9 +84,9 @@ pub trait Subscription: Send {
 /// FnSubscriber is a subscriber that is created from a function.
 pub struct FnSubscriber<F, State, Action>
 where
-    F: Fn(State, Action),
+    F: Fn(&State, &Action),
     State: Send + Sync + Clone,
-    Action: Send + Sync + Clone + std::fmt::Debug + 'static,
+    Action: Send + Sync + Clone + 'static,
 {
     func: F,
     // error[E0392]: parameter `State` is never used
@@ -95,20 +95,20 @@ where
 
 impl<F, State, Action> Subscriber<State, Action> for FnSubscriber<F, State, Action>
 where
-    F: Fn(State, Action),
+    F: Fn(&State, &Action),
     State: Send + Sync + Clone,
-    Action: Send + Sync + Clone + std::fmt::Debug + 'static,
+    Action: Send + Sync + Clone + 'static,
 {
-    fn on_notify(&self, state: State, action: Action) {
+    fn on_notify(&self, state: &State, action: &Action) {
         (self.func)(state, action)
     }
 }
 
 impl<F, State, Action> From<F> for FnSubscriber<F, State, Action>
 where
-    F: Fn(State, Action),
+    F: Fn(&State, &Action),
     State: Send + Sync + Clone,
-    Action: Send + Sync + Clone + std::fmt::Debug + 'static,
+    Action: Send + Sync + Clone + 'static,
 {
     fn from(func: F) -> Self {
         Self {
@@ -170,16 +170,16 @@ mod tests {
     }
 
     impl Subscriber<TestState, TestAction> for TestSubscriberWithSubscribe {
-        fn on_subscribe(&self, state: TestState) {
+        fn on_subscribe(&self, state: &TestState) {
             // 새로운 subscriber가 추가될 때 최신 상태를 받음
-            self.received_states.lock().unwrap().push(state);
+            self.received_states.lock().unwrap().push(state.clone());
             *self.subscribe_called.lock().unwrap() = true;
         }
 
-        fn on_notify(&self, state: TestState, action: TestAction) {
+        fn on_notify(&self, state: &TestState, action: &TestAction) {
             // 액션이 발생할 때마다 상태와 액션을 받음
-            self.received_states.lock().unwrap().push(state);
-            self.received_actions.lock().unwrap().push(action);
+            self.received_states.lock().unwrap().push(state.clone());
+            self.received_actions.lock().unwrap().push(action.clone());
         }
     }
 
@@ -192,7 +192,7 @@ mod tests {
         };
 
         // on_subscribe 호출
-        subscriber.on_subscribe(state);
+        subscriber.on_subscribe(&state);
 
         // 검증
         assert!(subscriber.was_subscribe_called());
@@ -212,7 +212,7 @@ mod tests {
         let action = TestAction::IncrementCounter;
 
         // on_notify 호출
-        subscriber.on_notify(state, action);
+        subscriber.on_notify(&state, &action);
 
         // 검증
         let received_states = subscriber.get_received_states();
@@ -230,9 +230,9 @@ mod tests {
         let received_states = Arc::new(Mutex::new(Vec::new()));
         let received_actions = Arc::new(Mutex::new(Vec::new()));
 
-        let fn_subscriber = FnSubscriber::from(|state: TestState, action: TestAction| {
-            received_states.lock().unwrap().push(state);
-            received_actions.lock().unwrap().push(action);
+        let fn_subscriber = FnSubscriber::from(|state: &TestState, action: &TestAction| {
+            received_states.lock().unwrap().push(state.clone());
+            received_actions.lock().unwrap().push(action.clone());
         });
 
         let state = TestState {
@@ -242,7 +242,7 @@ mod tests {
         let action = TestAction::IncrementCounter;
 
         // on_notify 호출
-        fn_subscriber.on_notify(state, action);
+        fn_subscriber.on_notify(&state, &action);
 
         // 검증
         let states = received_states.lock().unwrap();
@@ -267,13 +267,13 @@ mod tests {
         };
 
         // 첫 번째 on_subscribe 호출
-        subscriber.on_subscribe(state1);
+        subscriber.on_subscribe(&state1);
         assert!(subscriber.was_subscribe_called());
         assert_eq!(subscriber.get_received_states().len(), 1);
         assert_eq!(subscriber.get_received_states()[0].counter, 10);
 
         // 두 번째 on_subscribe 호출 (이미 subscribe_called가 true이므로 상태만 추가됨)
-        subscriber.on_subscribe(state2);
+        subscriber.on_subscribe(&state2);
         assert!(subscriber.was_subscribe_called());
         assert_eq!(subscriber.get_received_states().len(), 2);
         assert_eq!(subscriber.get_received_states()[1].counter, 20);
@@ -308,10 +308,10 @@ mod tests {
         let complex_action = TestAction::SetName("new_name".to_string());
 
         // on_subscribe 호출
-        subscriber.on_subscribe(complex_state.clone());
+        subscriber.on_subscribe(&complex_state);
 
         // on_notify 호출
-        subscriber.on_notify(complex_state, complex_action);
+        subscriber.on_notify(&complex_state, &complex_action);
 
         // 검증
         assert!(subscriber.was_subscribe_called());

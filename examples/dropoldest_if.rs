@@ -27,7 +27,7 @@ fn main() {
 
     // subscriber 추가
     store
-        .add_subscriber(Arc::new(FnSubscriber::from(|state: i32, action: i32| {
+        .add_subscriber(Arc::new(FnSubscriber::from(|state: &i32, action: &i32| {
             println!("subscriber: state: {}, action: {}", state, action);
         })))
         .unwrap();
