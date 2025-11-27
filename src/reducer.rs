@@ -196,8 +196,8 @@ mod tests {
     }
 
     impl Subscriber<i32, i32> for TestSubscriber {
-        fn on_notify(&self, state: i32, _action: i32) {
-            self.state_changes.lock().unwrap().push(state);
+        fn on_notify(&self, state: &i32, _action: &i32) {
+            self.state_changes.lock().unwrap().push(*state);
         }
     }
 

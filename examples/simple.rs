@@ -13,9 +13,11 @@ pub fn main() {
 
     // add subscriber
     store
-        .add_subscriber(Arc::new(FnSubscriber::from(|state: i32, _action: i32| {
-            println!("subscriber: state: {}", state);
-        })))
+        .add_subscriber(Arc::new(FnSubscriber::from(
+            |state: &i32, _action: &i32| {
+                println!("subscriber: state: {}", state);
+            },
+        )))
         .unwrap();
 
     // dispatch actions

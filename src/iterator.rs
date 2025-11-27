@@ -17,9 +17,10 @@ where
     State: Send + Sync + Clone + 'static,
     Action: Send + Sync + Clone + std::fmt::Debug + 'static,
 {
-    fn on_notify(&self, state: State, action: Action) {
+    fn on_notify(&self, state: &State, action: &Action) {
         if let Some(iter_tx) = self.iter_tx.as_ref() {
-            match iter_tx.send(ActionOp::Action((state, action))) {
+            // Clone needed for sending through channel
+            match iter_tx.send(ActionOp::Action((state.clone(), action.clone()))) {
                 Ok(_) => {}
                 Err(_e) => {
                     #[cfg(feature = "store-log")]

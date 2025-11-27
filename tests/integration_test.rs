@@ -94,14 +94,14 @@ impl IntegrationTestSubscriber {
 }
 
 impl Subscriber<TestState, TestAction> for IntegrationTestSubscriber {
-    fn on_subscribe(&self, state: TestState) {
+    fn on_subscribe(&self, state: &TestState) {
         // println!("[{}] on_subscribe called with state: {:?}", self.id, state);
         *self.subscribe_called.lock().unwrap() = true;
         *self.initial_state.lock().unwrap() = Some(state.clone());
         self.received_states.lock().unwrap().push(state.clone());
     }
 
-    fn on_notify(&self, state: TestState, action: TestAction) {
+    fn on_notify(&self, state: &TestState, action: &TestAction) {
         // println!(
         //     "[{}] on_notify called with state: {:?}, action: {:?}",
         //     self.id, state, action

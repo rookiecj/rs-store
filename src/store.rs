@@ -120,7 +120,11 @@ mod tests {
     struct TestReducer;
 
     impl Reducer<TestState, TestAction> for TestReducer {
-        fn reduce(&self, state: &TestState, action: &TestAction) -> crate::DispatchOp<TestState, TestAction> {
+        fn reduce(
+            &self,
+            state: &TestState,
+            action: &TestAction,
+        ) -> crate::DispatchOp<TestState, TestAction> {
             match action {
                 TestAction::Increment => {
                     let mut new_state = state.clone();
@@ -172,9 +176,9 @@ mod tests {
     }
 
     impl Subscriber<i32, i32> for TestChannelSubscriber {
-        fn on_notify(&self, state: i32, action: i32) {
+        fn on_notify(&self, state: &i32, action: &i32) {
             //println!("TestChannelSubscriber: state={}, action={}", state, action);
-            self.received.lock().unwrap().push((state, action));
+            self.received.lock().unwrap().push((*state, *action));
         }
     }
 
@@ -190,10 +194,10 @@ mod tests {
     }
 
     impl Subscriber<i32, i32> for SlowSubscriber {
-        fn on_notify(&self, state: i32, action: i32) {
+        fn on_notify(&self, state: &i32, action: &i32) {
             //println!("SlowSubscriber: state={}, action={}", state, action);
             std::thread::sleep(self.delay);
-            self.received.lock().unwrap().push((state, action));
+            self.received.lock().unwrap().push((*state, *action));
         }
     }
 

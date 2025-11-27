@@ -140,7 +140,7 @@ mod tests {
     }
 
     impl Subscriber<TestState, TestAction> for TestSubscriber {
-        fn on_notify(&self, state: TestState, action: TestAction) {
+        fn on_notify(&self, state: &TestState, action: &TestAction) {
             self.states.lock().unwrap().push(state.clone());
             self.actions.lock().unwrap().push(action.clone());
         }
